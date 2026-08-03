@@ -1,0 +1,285 @@
+// Sample data for testing the app without a backend
+
+export const sampleDishes = [
+  // Breakfast
+  {
+    id: 1,
+    name: 'Idli Sambhar',
+    description: 'Steamed rice cakes served with sambhar and coconut chutney',
+    price: 25,
+    category: 'Breakfast',
+    image: 'https://example.com/images/idli.jpg',
+    remainingQuantity: 50,
+    isVeg: true,
+    isSpicy: false,
+    preparationTime: 5,
+  },
+  {
+    id: 2,
+    name: 'Masala Dosa',
+    description: 'Crispy rice and lentil crepe filled with spiced potato curry',
+    price: 35,
+    category: 'Breakfast',
+    image: 'https://example.com/images/dosa.jpg',
+    remainingQuantity: 30,
+    isVeg: true,
+    isSpicy: true,
+    preparationTime: 8,
+  },
+  {
+    id: 3,
+    name: 'Upma',
+    description: 'Savory semolina porridge with vegetables and spices',
+    price: 20,
+    category: 'Breakfast',
+    image: 'https://example.com/images/upma.jpg',
+    remainingQuantity: 25,
+    isVeg: true,
+    isSpicy: false,
+    preparationTime: 6,
+  },
+  {
+    id: 4,
+    name: 'Poha',
+    description: 'Flattened rice with onions, potatoes, and peanuts',
+    price: 18,
+    category: 'Breakfast',
+    image: 'https://example.com/images/poha.jpg',
+    remainingQuantity: 40,
+    isVeg: true,
+    isSpicy: false,
+    preparationTime: 7,
+  },
+
+  // Lunch
+  {
+    id: 5,
+    name: 'Chicken Biryani',
+    description: 'Fragrant basmati rice cooked with tender chicken and aromatic spices',
+    price: 80,
+    category: 'Lunch',
+    image: 'https://example.com/images/biryani.jpg',
+    remainingQuantity: 15,
+    isVeg: false,
+    isSpicy: true,
+    preparationTime: 15,
+  },
+  {
+    id: 6,
+    name: 'Veg Thali',
+    description: 'Complete vegetarian meal with rice, dal, sabzi, roti, and curd',
+    price: 60,
+    category: 'Lunch',
+    image: 'https://example.com/images/thali.jpg',
+    remainingQuantity: 35,
+    isVeg: true,
+    isSpicy: true,
+    preparationTime: 10,
+  },
+  {
+    id: 7,
+    name: 'Rajma Rice',
+    description: 'Red kidney beans curry served with steamed rice',
+    price: 45,
+    category: 'Lunch',
+    image: 'https://example.com/images/rajma.jpg',
+    remainingQuantity: 20,
+    isVeg: true,
+    isSpicy: true,
+    preparationTime: 8,
+  },
+  {
+    id: 8,
+    name: 'Fish Curry Rice',
+    description: 'Spicy fish curry served with steamed rice',
+    price: 70,
+    category: 'Lunch',
+    image: 'https://example.com/images/fish-curry.jpg',
+    remainingQuantity: 12,
+    isVeg: false,
+    isSpicy: true,
+    preparationTime: 12,
+  },
+
+  // Snacks
+  {
+    id: 9,
+    name: 'Samosa',
+    description: 'Crispy fried pastry filled with spiced potatoes and peas',
+    price: 12,
+    category: 'Snacks',
+    image: 'https://example.com/images/samosa.jpg',
+    remainingQuantity: 60,
+    isVeg: true,
+    isSpicy: true,
+    preparationTime: 3,
+  },
+  {
+    id: 10,
+    name: 'Pav Bhaji',
+    description: 'Spicy mixed vegetable curry served with buttered bread rolls',
+    price: 40,
+    category: 'Snacks',
+    image: 'https://example.com/images/pav-bhaji.jpg',
+    remainingQuantity: 25,
+    isVeg: true,
+    isSpicy: true,
+    preparationTime: 10,
+  },
+  {
+    id: 11,
+    name: 'Chaat',
+    description: 'Mixed crispy snacks with chutneys, yogurt, and spices',
+    price: 30,
+    category: 'Snacks',
+    image: 'https://example.com/images/chaat.jpg',
+    remainingQuantity: 35,
+    isVeg: true,
+    isSpicy: true,
+    preparationTime: 5,
+  },
+  {
+    id: 12,
+    name: 'Vada Pav',
+    description: 'Fried potato dumpling served in a bread bun with chutneys',
+    price: 15,
+    category: 'Snacks',
+    image: 'https://example.com/images/vada-pav.jpg',
+    remainingQuantity: 45,
+    isVeg: true,
+    isSpicy: true,
+    preparationTime: 4,
+  },
+
+  // Drinks
+  {
+    id: 13,
+    name: 'Masala Chai',
+    description: 'Traditional Indian spiced tea with milk and sugar',
+    price: 10,
+    category: 'Drinks',
+    image: 'https://example.com/images/chai.jpg',
+    remainingQuantity: 100,
+    isVeg: true,
+    isSpicy: false,
+    preparationTime: 3,
+  },
+  {
+    id: 14,
+    name: 'Fresh Lime Water',
+    description: 'Refreshing lime juice with water, salt, and sugar',
+    price: 15,
+    category: 'Drinks',
+    image: 'https://example.com/images/lime-water.jpg',
+    remainingQuantity: 50,
+    isVeg: true,
+    isSpicy: false,
+    preparationTime: 2,
+  },
+  {
+    id: 15,
+    name: 'Lassi',
+    description: 'Creamy yogurt-based drink, sweet or salted',
+    price: 25,
+    category: 'Drinks',
+    image: 'https://example.com/images/lassi.jpg',
+    remainingQuantity: 30,
+    isVeg: true,
+    isSpicy: false,
+    preparationTime: 3,
+  },
+  {
+    id: 16,
+    name: 'Cold Coffee',
+    description: 'Iced coffee with milk, sugar, and ice cream',
+    price: 35,
+    category: 'Drinks',
+    image: 'https://example.com/images/cold-coffee.jpg',
+    remainingQuantity: 20,
+    isVeg: true,
+    isSpicy: false,
+    preparationTime: 4,
+  },
+];
+
+export const sampleUser = {
+  id: 1,
+  name: 'John Doe',
+  email: 'john.doe@sece.ac.in',
+  phone: '+919876543210',
+};
+
+export const sampleOrders = [
+  {
+    id: 1001,
+    tokenNumber: '19081523001',
+    items: [
+      {
+        dish: sampleDishes[0], // Idli Sambhar
+        quantity: 2,
+        price: 25,
+      },
+      {
+        dish: sampleDishes[12], // Masala Chai
+        quantity: 1,
+        price: 10,
+      },
+    ],
+    totalAmount: 60,
+    status: 'pending',
+    createdAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(), // 10 minutes ago
+    estimatedTime: 8,
+    transactionId: 'TXN_1692105800_ABC123',
+  },
+  {
+    id: 1002,
+    tokenNumber: '19081522002',
+    items: [
+      {
+        dish: sampleDishes[5], // Veg Thali
+        quantity: 1,
+        price: 60,
+      },
+    ],
+    totalAmount: 60,
+    status: 'completed',
+    createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
+    completedAt: new Date(Date.now() - 1.5 * 60 * 60 * 1000).toISOString(), // 1.5 hours ago
+    estimatedTime: 10,
+    transactionId: 'TXN_1692098400_DEF456',
+  },
+];
+
+// Mock API responses
+export const mockAPIResponses = {
+  login: {
+    success: true,
+    message: 'OTP sent successfully',
+  },
+  verifyOTP: {
+    success: true,
+    user: sampleUser,
+    token: 'mock_jwt_token_12345',
+  },
+  getMenu: {
+    success: true,
+    dishes: sampleDishes,
+    inventoryAvailable: true,
+  },
+  getOrders: {
+    success: true,
+    orders: sampleOrders,
+  },
+  createOrder: {
+    success: true,
+    order: {
+      id: Date.now(),
+      tokenNumber: new Date().getTime().toString().slice(-10),
+      items: [],
+      totalAmount: 0,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      transactionId: `TXN_${Date.now()}_${Math.random().toString(36).substr(2, 6).toUpperCase()}`,
+    },
+  },
+};

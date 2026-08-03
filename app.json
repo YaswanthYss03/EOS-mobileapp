@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "EOS",
+    "slug": "eos-mobileapp",
+    "scheme": "eos",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icons/icon.png",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.eos.mobileapp"
+    },
+    "android": {
+      "package": "com.eos.mobileapp",
+      "edgeToEdgeEnabled": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icons/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "permissions": [
+        "CAMERA",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE",
+        "USE_FULL_SCREEN_INTENT",
+        "WAKE_LOCK"
+      ]
+    },
+    "notification": {
+      "icon": "./src/features/amenity/craveo/app/assets/icon.png",
+      "color": "#FF4444",
+      "androidMode": "default",
+      "androidCollapsedTitle": "Food Ready Alert"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-dev-client",
+      "expo-secure-store",
+      "expo-web-browser",
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "icon": "./src/features/amenity/craveo/app/assets/icon.png",
+          "color": "#FF4444",
+          "defaultChannel": "alarm-channel"
+        }
+      ]
+    ]
+  }
+}
