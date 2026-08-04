@@ -1,4 +1,7 @@
 import { DefaultTheme } from 'react-native-paper';
+// Inter is loaded once at the EOS root layout (app/_layout.tsx) via
+// @expo-google-fonts/inter, so its family names are available here too.
+import { fonts } from '../../../../../../theme';
 
 // Palette derived from assets/logo.png (Sri Eshwar College crest) - blue shield +
 // gold torch flame - replacing the old orange/red Craveo brand colors.
@@ -61,20 +64,22 @@ export const theme = {
   fonts: {
     ...DefaultTheme.fonts,
     regular: {
-      fontFamily: 'System',
+      fontFamily: fonts.regular,
       fontWeight: 'normal',
     },
     medium: {
-      fontFamily: 'System',
+      fontFamily: fonts.medium,
       fontWeight: '500',
     },
+    // No light/thin Inter weight is loaded, so both fall back to regular
+    // rather than silently reverting to the system font.
     light: {
-      fontFamily: 'System',
-      fontWeight: '300',
+      fontFamily: fonts.regular,
+      fontWeight: 'normal',
     },
     thin: {
-      fontFamily: 'System',
-      fontWeight: '100',
+      fontFamily: fonts.regular,
+      fontWeight: 'normal',
     },
   },
   spacing,

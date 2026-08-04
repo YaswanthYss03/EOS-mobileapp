@@ -30,6 +30,7 @@ import secureTimeService from '../services/secureTimeService';
 import { showToast, handleError } from '../utils/toastUtils';
 import ClearCartConfirmationModal from '../components/ClearCartConfirmationModal';
 import { isAfter7PMIST } from '../utils/timezoneUtils';
+import { fonts } from '../../../../../../theme';
 
 const CartScreen = ({ navigation }) => {
   const dispatch = useDispatch();
@@ -464,7 +465,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: fontSize.lg,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.text,
     flex: 1,
     textAlign: 'center',
@@ -505,7 +506,7 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: fontSize.xl,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     color: colors.text,
   },
   emptySubtitle: {
@@ -514,6 +515,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: spacing.sm,
     marginBottom: spacing.xl,
+    fontFamily: fonts.regular,
   },
   summaryCard: {
     margin: spacing.sm,
@@ -534,13 +536,13 @@ const styles = StyleSheet.create({
   },
   summaryTitle: {
     fontSize: fontSize.lg,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     color: colors.text,
   },
   clearAllText: {
     fontSize: fontSize.sm,
     color: colors.error,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
   },
   summaryRow: {
     flexDirection: 'row',
@@ -551,11 +553,12 @@ const styles = StyleSheet.create({
   summaryLabel: {
     fontSize: fontSize.md,
     color: colors.textSecondary,
+    fontFamily: fonts.regular,
   },
   summaryValue: {
     fontSize: fontSize.md,
     color: colors.text,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
   divider: {
     height: 1,
@@ -564,12 +567,12 @@ const styles = StyleSheet.create({
   },
   totalLabel: {
     fontSize: fontSize.lg,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.text,
   },
   totalValue: {
     fontSize: fontSize.xl,
-    fontWeight: '800',
+    fontFamily: fonts.bold,
     color: colors.primary,
   },
   minOrderText: {
@@ -577,7 +580,7 @@ const styles = StyleSheet.create({
     color: colors.warning,
     textAlign: 'center',
     marginTop: spacing.sm,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
   primaryButton: {
     flexDirection: 'row',
@@ -601,7 +604,7 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     fontSize: fontSize.md,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     color: colors.white,
   },
   errorCard: {
@@ -619,13 +622,14 @@ const styles = StyleSheet.create({
     flex: 1,
     color: colors.error,
     fontSize: fontSize.sm,
+    fontFamily: fonts.regular,
   },
   dismissButton: {
     paddingHorizontal: spacing.xs,
   },
   dismissButtonText: {
     fontSize: fontSize.sm,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     color: colors.error,
   },
 });

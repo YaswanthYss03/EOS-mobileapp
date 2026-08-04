@@ -1,7 +1,12 @@
-import { SplashScreen } from "@/features/splash/SplashScreen";
+import { Redirect } from "expo-router";
+import { useAuth } from "@/context/AuthContext";
 
-// TODO: once real auth exists, check src/context/AuthContext here and skip
-// straight to (tabs) if already logged in, instead of always going to login.
 export default function Index() {
-  return <SplashScreen />;
+  const { token, isLoading } = useAuth();
+
+  // Still checking SecureStore for a persisted session - render nothing
+  // rather than flashing the login screen first.
+  if (isLoading) return null;
+
+  return <Redirect href={token ? "/(tabs)/home" : "/(auth)/login"} />;
 }

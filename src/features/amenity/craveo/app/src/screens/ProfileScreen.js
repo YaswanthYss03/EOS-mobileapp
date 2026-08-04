@@ -1,14 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Image } from 'react-native';
-import {
-  Text,
-  Card,
-  Title,
-  Paragraph,
-  Button,
-  Divider,
-  List,
-} from 'react-native-paper';
+import { View, StyleSheet, ScrollView, Image, TouchableOpacity } from 'react-native';
+import { Text } from 'react-native-paper';
 import { useDispatch, useSelector } from 'react-redux';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -18,11 +10,11 @@ import { colors, spacing, fontSize, borderRadius } from '../constants/theme';
 import { authAPI } from '../services';
 import UserTypeSelector from '../components/UserTypeSelector';
 import CraveoBottomNav from '../components/CraveoBottomNav';
-import { ProfileLoader } from '../components/SpecializedLoaders';
 import { EnhancedProfileLoader } from '../components/EnhancedLoaders';
 import { useToast } from '../contexts/ToastContext';
 import { showToast } from '../utils/toastUtils';
 import LogoutConfirmationModal from '../components/LogoutConfirmationModal';
+import { fonts } from '../../../../../../theme';
 
 const USER_TYPE_LABELS = {
   1: 'Day Scholar',
@@ -179,124 +171,102 @@ const ProfileScreen = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Profile</Text>
+      </View>
+
       <ScrollView
         contentContainerStyle={styles.scrollContainer}
         showsVerticalScrollIndicator={false}
       >
         {/* User Info Card */}
-        <Card style={styles.userCard}>
-          <Card.Content style={styles.userContent}>
-            <View style={styles.avatarContainer}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>
-                  {String(user?.name?.charAt(0)?.toUpperCase() || user?.username?.charAt(0)?.toUpperCase() || user?.user_name?.charAt(0)?.toUpperCase() || 'S')}
-                </Text>
-              </View>
+        <View style={styles.userCard}>
+          <View style={styles.avatarContainer}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {String(user?.name?.charAt(0)?.toUpperCase() || user?.username?.charAt(0)?.toUpperCase() || user?.user_name?.charAt(0)?.toUpperCase() || 'S')}
+              </Text>
             </View>
-            <Title style={styles.userName}>
-              {capitalizeWords(String(user?.name || user?.username || user?.user_name || 'Student'))}
-            </Title>
-            
-            {/* User Type Display */}
-            {userProfile && userProfile.user_type ? (
-              <View style={styles.userTypeContainer}>
-                <MaterialCommunityIcons 
-                  name={getUserTypeIcon(userProfile.user_type)} 
-                  size={16} 
-                  color={colors.primary} 
-                />
-                <Text style={styles.userTypeText}>
-                  {String(USER_TYPE_LABELS[userProfile.user_type] || 'Unknown')}
-                </Text>
-              </View>
-            ) : null}
-          </Card.Content>
-        </Card>
+          </View>
+          <Text style={styles.userName}>
+            {capitalizeWords(String(user?.name || user?.username || user?.user_name || 'Student'))}
+          </Text>
 
-        {/* Menu Items */}
-        {/* <Card style={styles.menuCard}>
-          <List.Section>
-            <List.Item
-              title={String("My Orders")}
-              description={String("View your order history")}
-              left={props => <List.Icon {...props} icon="receipt" color={colors.primary} />}
-              right={props => <List.Icon {...props} icon="chevron-right" />}
-              onPress={() => navigation.navigate('Orders')}
-              style={styles.menuItem}
-            />
-          </List.Section>
-        </Card> */}
+          {/* User Type Display */}
+          {userProfile && userProfile.user_type ? (
+            <View style={styles.userTypeContainer}>
+              <MaterialCommunityIcons
+                name={getUserTypeIcon(userProfile.user_type)}
+                size={16}
+                color={colors.primary}
+              />
+              <Text style={styles.userTypeText}>
+                {String(USER_TYPE_LABELS[userProfile.user_type] || 'Unknown')}
+              </Text>
+            </View>
+          ) : null}
+        </View>
 
         {/* Profile Settings */}
         {userProfile && userProfile.user_type ? (
-          <Card style={styles.settingsCard}>
-            <Card.Content>
-              <View style={styles.settingRow}>
-                <View style={styles.settingInfo}>
-                  <Text style={styles.settingTitle}>Student Type</Text>
-                  <Text style={styles.settingDescription}>
-                    {String(USER_TYPE_LABELS[userProfile.user_type] || 'Not Set')}
-                  </Text>
-                </View>
-                <Button
-                  mode="outlined"
-                  onPress={() => setShowUserTypeSelector(true)}
-                  style={styles.changeButton}
-                  labelStyle={styles.changeButtonText}
-                >
-                  {String("Change")}
-                </Button>
+          <View style={styles.settingsCard}>
+            <View style={styles.settingRow}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingTitle}>Student Type</Text>
+                <Text style={styles.settingDescription}>
+                  {String(USER_TYPE_LABELS[userProfile.user_type] || 'Not Set')}
+                </Text>
               </View>
-            </Card.Content>
-          </Card>
+              <TouchableOpacity
+                style={styles.changeButton}
+                onPress={() => setShowUserTypeSelector(true)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.changeButtonText}>Change</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         ) : null}
 
         {/* App Credits Card */}
-        <Card style={styles.creditsCard}>
-          <Card.Content style={styles.creditsCardContent}>
-            <View style={styles.creditsMainContent}>
-              {/* Logo Section */}
-              <View style={styles.logoSection}>
-                <Image
-                  source={require('../../assets/Logo 3.png')}
-                  style={styles.collegeLogo}
-                  resizeMode="contain"
-                />
-              </View>
-              
-              {/* App Info Section */}
-              <View style={styles.appInfoSection}>
-                <Text style={styles.appName}>Craveo</Text>
-                <Text style={styles.appTagline}>Canteen Ordering App</Text>
-                <Text style={styles.collegeTagline}>Designed Exclusively for College Campuses</Text>
-                <Text style={styles.versionText}>v1.0.0</Text>
-              </View>
+        <View style={styles.creditsCard}>
+          <View style={styles.creditsMainContent}>
+            {/* Logo Section */}
+            <View style={styles.logoSection}>
+              <Image
+                source={require('../../assets/Logo 3.png')}
+                style={styles.collegeLogo}
+                resizeMode="contain"
+              />
             </View>
-            
-            {/* Footer */}
-            <View style={styles.creditsFooter}>
-              <View style={styles.pavakieFooter}>
-                <Image
-                  source={require('../../assets/pavakie.png')}
-                  style={styles.pavakieLogoFooter}
-                  resizeMode="contain"
-                />
-                <Text style={styles.pavakieText}>@Craveo - Powered By Pavakie</Text>
-              </View>
+
+            {/* App Info Section */}
+            <View style={styles.appInfoSection}>
+              <Text style={styles.appName}>Craveo</Text>
+              <Text style={styles.appTagline}>Canteen Ordering App</Text>
+              <Text style={styles.collegeTagline}>Designed Exclusively for College Campuses</Text>
+              <Text style={styles.versionText}>v1.0.0</Text>
             </View>
-          </Card.Content>
-        </Card>
+          </View>
+
+          {/* Footer */}
+          <View style={styles.creditsFooter}>
+            <View style={styles.pavakieFooter}>
+              <Image
+                source={require('../../assets/pavakie.png')}
+                style={styles.pavakieLogoFooter}
+                resizeMode="contain"
+              />
+              <Text style={styles.pavakieText}>@Craveo - Powered By Pavakie</Text>
+            </View>
+          </View>
+        </View>
 
         {/* Logout Button */}
-        <Button
-          mode="contained"
-          onPress={handleLogout}
-          style={styles.logoutButton}
-          buttonColor={colors.error}
-          icon="logout"
-        >
-          {String("Logout")}
-        </Button>
+        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.85}>
+          <MaterialCommunityIcons name="logout" size={18} color={colors.white} />
+          <Text style={styles.logoutButtonText}>Logout</Text>
+        </TouchableOpacity>
       </ScrollView>
 
       {/* User Type Selector Modal */}
@@ -324,28 +294,38 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  loadingContainer: {
-    flex: 1,
+  header: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.background,
+    elevation: 2,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    height: 60,
     justifyContent: 'center',
-    alignItems: 'center',
   },
-  loadingText: {
-    fontSize: fontSize.md,
-    color: colors.textSecondary,
-    marginTop: spacing.md,
+  headerTitle: {
+    fontSize: fontSize.lg,
+    fontFamily: fonts.bold,
+    color: colors.text,
   },
   scrollContainer: {
     padding: spacing.md,
     paddingBottom: 100, // Space for bottom navigation
   },
   userCard: {
-    marginBottom: spacing.md,
-    elevation: 2,
-    borderRadius: borderRadius.lg,
-  },
-  userContent: {
     alignItems: 'center',
     paddingVertical: spacing.xl,
+    marginBottom: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.xl,
+    elevation: 4,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
   },
   avatarContainer: {
     marginBottom: spacing.md,
@@ -361,18 +341,13 @@ const styles = StyleSheet.create({
   },
   avatarText: {
     fontSize: fontSize.xxl,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.white,
   },
   userName: {
     fontSize: fontSize.lg,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.text,
-    marginBottom: spacing.xs,
-  },
-  userDetails: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
     marginBottom: spacing.xs,
   },
   userTypeContainer: {
@@ -387,21 +362,19 @@ const styles = StyleSheet.create({
   userTypeText: {
     fontSize: fontSize.sm,
     color: colors.primary,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     marginLeft: spacing.xs,
-  },
-  menuCard: {
-    marginBottom: spacing.md,
-    elevation: 2,
-    borderRadius: borderRadius.lg,
-  },
-  menuItem: {
-    paddingVertical: spacing.sm,
   },
   settingsCard: {
     marginBottom: spacing.md,
-    elevation: 2,
-    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.xl,
+    elevation: 4,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
   },
   settingRow: {
     flexDirection: 'row',
@@ -413,32 +386,37 @@ const styles = StyleSheet.create({
   },
   settingTitle: {
     fontSize: fontSize.md,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: colors.text,
     marginBottom: spacing.xs,
   },
   settingDescription: {
     fontSize: fontSize.sm,
     color: colors.textSecondary,
+    fontFamily: fonts.regular,
   },
   changeButton: {
+    borderWidth: 1,
     borderColor: colors.primary,
+    borderRadius: borderRadius.round,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
   },
   changeButtonText: {
     color: colors.primary,
     fontSize: fontSize.sm,
+    fontFamily: fonts.semibold,
   },
   creditsCard: {
     marginBottom: spacing.md,
-    elevation: 2,
-    borderRadius: borderRadius.lg,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.border + '40',
-  },
-  creditsCardContent: {
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
+    padding: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.xl,
+    elevation: 4,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
   },
   creditsMainContent: {
     flexDirection: 'row',
@@ -455,44 +433,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.background,
   },
-  pavakieLogoContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.sm,
-    alignItems: 'center',
-    elevation: 1,
-    shadowColor: colors.primary,
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-  },
-  pavakieLogo: {
-    width: 50,
-    height: 50,
-    borderRadius: 35,
-  },
   collegeLogo: {
     width: 80,
     height: 80,
     borderRadius: 10,
-  },
-  pavakieLogoText: {
-    color: colors.white,
-    fontWeight: '700',
-    fontSize: fontSize.sm,
-    letterSpacing: 0.5,
   },
   appInfoSection: {
     flex: 1,
   },
   appName: {
     fontSize: fontSize.xl,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     color: colors.text,
     letterSpacing: -0.5,
     marginBottom: 2,
@@ -500,13 +451,13 @@ const styles = StyleSheet.create({
   appTagline: {
     fontSize: fontSize.sm,
     color: colors.textSecondary,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
     marginBottom: 2,
   },
   collegeTagline: {
     fontSize: fontSize.xs,
     color: colors.primary,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     textAlign: 'left',
     marginTop: 4,
     marginBottom: 4,
@@ -515,7 +466,7 @@ const styles = StyleSheet.create({
   versionText: {
     fontSize: fontSize.xs,
     color: colors.textSecondary,
-    fontWeight: '400',
+    fontFamily: fonts.regular,
     opacity: 0.7,
   },
   creditsFooter: {
@@ -538,20 +489,28 @@ const styles = StyleSheet.create({
   pavakieText: {
     fontSize: fontSize.xs,
     color: colors.textSecondary,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
     opacity: 0.8,
   },
-  copyrightText: {
-    fontSize: fontSize.xs,
-    color: colors.textSecondary,
-    fontWeight: '400',
-    opacity: 0.6,
-  },
   logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
     marginTop: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.lg,
-    elevation: 2,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: borderRadius.round,
+    backgroundColor: colors.error,
+    elevation: 3,
+    shadowColor: colors.error,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+  },
+  logoutButtonText: {
+    color: colors.white,
+    fontSize: fontSize.md,
+    fontFamily: fonts.bold,
   },
 });
 

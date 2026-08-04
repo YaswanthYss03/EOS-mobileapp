@@ -1,4 +1,7 @@
 import { DefaultTheme } from 'react-native-paper';
+// Inter is loaded once at the EOS root layout (app/_layout.tsx) via
+// @expo-google-fonts/inter, so its family names are available here too.
+import { fonts } from '../../../../../../theme';
 
 // Simple colors object for easy access
 // Palette derived from assets/logo.png (Sri Eshwar College crest) - see constants/theme.js
@@ -41,6 +44,13 @@ export const theme = {
     error: colors.error,
     disabled: colors.disabled,
     backdrop: colors.backdrop,
+  },
+  fonts: {
+    ...DefaultTheme.fonts,
+    regular: { fontFamily: fonts.regular, fontWeight: 'normal' },
+    medium: { fontFamily: fonts.medium, fontWeight: '500' },
+    light: { fontFamily: fonts.regular, fontWeight: 'normal' },
+    thin: { fontFamily: fonts.regular, fontWeight: 'normal' },
   },
   spacing,
   // Custom theme extensions

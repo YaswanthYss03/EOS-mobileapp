@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { staffAPI } from '../../services';
+import { fonts } from '../../../../../../../theme';
 
 const StaffDashboardScreen = () => {
   const [statistics, setStatistics] = useState(null);
@@ -182,6 +183,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 16,
     color: '#666',
+    fontFamily: fonts.regular,
   },
   header: {
     backgroundColor: '#235EAA',
@@ -189,13 +191,14 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#FFF',
   },
   headerSubtitle: {
     fontSize: 14,
     color: '#D7E6F7',
     marginTop: 4,
+    fontFamily: fonts.regular,
   },
   statsContainer: {
     padding: 16,
@@ -218,10 +221,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     marginBottom: 4,
+    fontFamily: fonts.regular,
   },
   statValue: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#333',
   },
   paymentStatsRow: {
@@ -239,17 +243,18 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 8,
     marginBottom: 4,
+    fontFamily: fonts.regular,
   },
   paymentStatCount: {
     fontSize: 20,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#333',
     marginBottom: 4,
   },
   paymentStatAmount: {
     fontSize: 16,
     color: '#4CAF50',
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
   },
   dishStatsSection: {
     padding: 16,
@@ -262,7 +267,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#333',
     marginLeft: 8,
   },
@@ -284,27 +289,28 @@ const styles = StyleSheet.create({
   },
   dishStatName: {
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: '#333',
     marginBottom: 4,
   },
   dishStatPrice: {
     fontSize: 14,
     color: '#666',
+    fontFamily: fonts.regular,
   },
   dishStatNumbers: {
     alignItems: 'flex-end',
   },
   dishStatQuantity: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#235EAA',
     marginBottom: 4,
   },
   dishStatRevenue: {
     fontSize: 14,
     color: '#4CAF50',
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
   },
   emptyContainer: {
     alignItems: 'center',
@@ -314,6 +320,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 16,
     color: '#999',
+    fontFamily: fonts.regular,
   },
   refreshButton: {
     flexDirection: 'row',
@@ -328,7 +335,7 @@ const styles = StyleSheet.create({
   refreshButtonText: {
     color: '#FFF',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
   },
 });
 

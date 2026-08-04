@@ -2,6 +2,7 @@ import { useState } from "react";
 import { View, Text, ScrollView, Pressable, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ScreenHeader } from "@/components/layout/ScreenHeader";
+import { fonts } from "@/theme";
 import { mockTimetable, weekOrder, type Period } from "./data/mockTimetable";
 
 // TODO: replace mockTimetable with a real call once the timetable backend endpoint exists
@@ -89,11 +90,12 @@ const styles = StyleSheet.create({
   },
   toggleText: {
     fontSize: 13,
+    fontFamily: fonts.regular,
     color: "#333",
   },
   toggleTextActive: {
     color: "#fff",
-    fontWeight: "600",
+    fontFamily: fonts.semibold,
   },
   content: {
     paddingHorizontal: 16,
@@ -104,7 +106,7 @@ const styles = StyleSheet.create({
   },
   dayTitle: {
     fontSize: 16,
-    fontWeight: "700",
+    fontFamily: fonts.bold,
     marginBottom: 8,
   },
   periodRow: {
@@ -117,6 +119,7 @@ const styles = StyleSheet.create({
   periodTime: {
     width: 90,
     fontSize: 12,
+    fontFamily: fonts.regular,
     color: "#666",
   },
   periodInfo: {
@@ -124,14 +127,16 @@ const styles = StyleSheet.create({
   },
   periodSubject: {
     fontSize: 14,
-    fontWeight: "600",
+    fontFamily: fonts.semibold,
   },
   periodMeta: {
     fontSize: 12,
+    fontFamily: fonts.regular,
     color: "#888",
     marginTop: 2,
   },
   noClasses: {
+    fontFamily: fonts.regular,
     color: "#999",
     textAlign: "center",
     marginTop: 40,

@@ -21,6 +21,8 @@ import OrderSuccess from '../screens/OrderSuccess';
 // Staff Navigator
 import StaffNavigator from './StaffNavigator';
 
+import { fonts } from '../../../../../../theme';
+
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
@@ -53,7 +55,7 @@ function MainTabNavigator() {
         },
         headerTintColor: '#fff',
         headerTitleStyle: {
-          fontWeight: 'bold',
+          fontFamily: fonts.bold,
         },
       })}
     >
@@ -125,7 +127,7 @@ function AppNavigator() {
               },
               headerTintColor: '#fff',
               headerTitleStyle: {
-                fontWeight: 'bold',
+                fontFamily: fonts.bold,
               },
             }}
           />

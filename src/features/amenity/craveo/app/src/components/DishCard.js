@@ -13,6 +13,7 @@ import * as Animatable from 'react-native-animatable';
 import { formatCurrency } from '../utils/helpers';
 import { theme, colors, spacing } from '../constants/theme';
 import { PremiumCard } from './PremiumComponents';
+import { fonts } from '../../../../../../theme';
 
 const DishCard = ({ dish, onAddToCart, disabled = false, showQuantityInfo = false }) => {
   const [quantity, setQuantity] = useState(1);
@@ -252,7 +253,7 @@ const styles = StyleSheet.create({
   soldOutText: {
     color: 'white',
     fontSize: 18,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     letterSpacing: 2,
   },
   contentContainer: {
@@ -268,7 +269,7 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: 18,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     color: theme.colors.text,
     flex: 1,
     marginRight: theme.spacing.sm,
@@ -279,7 +280,7 @@ const styles = StyleSheet.create({
   },
   price: {
     fontSize: 20,
-    fontWeight: '800',
+    fontFamily: fonts.bold,
     color: theme.colors.primary,
   },
   quantityInfo: {
@@ -301,12 +302,14 @@ const styles = StyleSheet.create({
   stockLabel: {
     fontSize: 12,
     color: theme.colors.placeholder,
+    fontFamily: fonts.regular,
   },
   description: {
     fontSize: 14,
     color: theme.colors.placeholder,
     marginBottom: theme.spacing.md,
     lineHeight: 20,
+    fontFamily: fonts.regular,
   },
   badgeContainer: {
     flexDirection: 'row',
@@ -342,16 +345,19 @@ const styles = StyleSheet.create({
   },
   stockText: {
     fontSize: 14,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
   soldOutText: {
     color: theme.colors.error,
+    fontFamily: fonts.regular,
   },
   lowStockText: {
     color: theme.colors.warning,
+    fontFamily: fonts.regular,
   },
   availableText: {
     color: theme.colors.success,
+    fontFamily: fonts.regular,
   },
   actionContainer: {
     flexDirection: 'row',
@@ -373,7 +379,7 @@ const styles = StyleSheet.create({
   },
   quantityText: {
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: theme.colors.text,
     marginHorizontal: theme.spacing.sm,
     minWidth: 24,
@@ -396,7 +402,7 @@ const styles = StyleSheet.create({
   addButtonText: {
     color: 'white',
     fontSize: 16,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     textAlign: 'center',
   },
 });

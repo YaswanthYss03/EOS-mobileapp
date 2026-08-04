@@ -1,6 +1,7 @@
 import { View, Text, FlatList, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ScreenHeader } from "@/components/layout/ScreenHeader";
+import { fonts } from "@/theme";
 import { mockLessonPlans, type LessonPlanSubject } from "./data/mockLessonPlans";
 
 // TODO: replace mockLessonPlans with a real call once the lesson-plan backend endpoint exists
@@ -65,14 +66,16 @@ const styles = StyleSheet.create({
   },
   subject: {
     fontSize: 15,
-    fontWeight: "700",
+    fontFamily: fonts.bold,
   },
   units: {
     fontSize: 12,
+    fontFamily: fonts.regular,
     color: "#666",
   },
   faculty: {
     fontSize: 12,
+    fontFamily: fonts.regular,
     color: "#888",
   },
   progressTrack: {
@@ -89,6 +92,7 @@ const styles = StyleSheet.create({
   },
   lastTopic: {
     fontSize: 12,
+    fontFamily: fonts.regular,
     color: "#444",
     marginTop: 4,
   },

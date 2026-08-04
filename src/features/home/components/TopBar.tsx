@@ -1,24 +1,27 @@
-import { View, Text, Image, Pressable, StyleSheet } from "react-native";
+import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import { fonts } from "@/theme";
+import { useAuth } from "@/context/AuthContext";
 
-// TODO: swap the hardcoded name/avatar for the logged-in user from src/context/AuthContext
-export function TopBar({ name = "Yaswanth" }: { name?: string }) {
+function greetingNameFromEmail(email: string) {
+  const localPart = email.split("@")[0] ?? email;
+  return localPart.charAt(0).toUpperCase() + localPart.slice(1);
+}
+
+// Notification/wallet icons live in HomeHeader now - this row is just the
+// menu button (opens /profile) and the greeting.
+export function TopBar() {
+  const router = useRouter();
+  const { user } = useAuth();
+  const name = user ? greetingNameFromEmail(user.email) : "there";
+
   return (
     <View style={styles.container}>
-      <View style={styles.left}>
-        <Image source={{ uri: "https://i.pravatar.cc/150?img=8" }} style={styles.avatar} />
-        <Text style={styles.greeting}>Hi {name}!</Text>
-      </View>
-
-      <View style={styles.right}>
-        <Pressable style={styles.iconButton} hitSlop={8}>
-          <Ionicons name="notifications-outline" size={24} color="#111" />
-          <View style={styles.badge} />
-        </Pressable>
-        <Pressable style={styles.iconButton} hitSlop={8}>
-          <Ionicons name="wallet-outline" size={24} color="#111" />
-        </Pressable>
-      </View>
+      <Pressable style={styles.menuButton} hitSlop={8} onPress={() => router.push("/profile")}>
+        <Ionicons name="menu-outline" size={22} color="#2F6FE0" />
+      </Pressable>
+      <Text style={styles.greeting}>Hi, {name}</Text>
     </View>
   );
 }
@@ -27,42 +30,20 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    gap: 10,
     paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#eee",
+    paddingVertical: 12,
     backgroundColor: "#fff",
   },
-  left: {
-    flexDirection: "row",
+  menuButton: {
+    width: 28,
+    height: 28,
     alignItems: "center",
-    gap: 10,
-  },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    justifyContent: "center",
   },
   greeting: {
     fontSize: 16,
-    fontWeight: "600",
-  },
-  right: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 16,
-  },
-  iconButton: {
-    position: "relative",
-  },
-  badge: {
-    position: "absolute",
-    top: -1,
-    right: -1,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#d33",
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
   },
 });

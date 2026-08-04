@@ -1,6 +1,7 @@
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { fonts } from "@/theme";
 
 export function ScreenHeader({ title }: { title: string }) {
   const router = useRouter();
@@ -27,6 +28,6 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 18,
-    fontWeight: "700",
+    fontFamily: fonts.bold,
   },
 });

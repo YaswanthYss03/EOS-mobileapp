@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { staffAPI } from '../../services';
+import { fonts } from '../../../../../../../theme';
 
 const StaffHistoryScreen = () => {
   const user = useSelector(state => state.auth.user);
@@ -483,13 +484,14 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#333',
   },
   headerSubtitle: {
     fontSize: 14,
     color: '#666',
     marginTop: 4,
+    fontFamily: fonts.regular,
   },
   loadingContainer: {
     flex: 1,
@@ -500,6 +502,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 16,
     color: '#666',
+    fontFamily: fonts.regular,
   },
   listContent: {
     paddingBottom: 20,
@@ -512,7 +515,7 @@ const styles = StyleSheet.create({
   },
   filterLabel: {
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: '#333',
     marginBottom: 8,
   },
@@ -535,7 +538,7 @@ const styles = StyleSheet.create({
   dateFilterText: {
     fontSize: 13,
     color: '#666',
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
   },
   dateFilterTextActive: {
     color: '#fff',
@@ -560,7 +563,7 @@ const styles = StyleSheet.create({
   },
   statNumber: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#333',
     marginTop: 8,
   },
@@ -568,6 +571,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     marginTop: 4,
+    fontFamily: fonts.regular,
   },
   paymentBreakdown: {
     flexDirection: 'row',
@@ -594,17 +598,18 @@ const styles = StyleSheet.create({
   },
   paymentTitle: {
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: '#333',
   },
   paymentCount: {
     fontSize: 12,
     color: '#666',
     marginBottom: 4,
+    fontFamily: fonts.regular,
   },
   paymentAmount: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#4CAF50',
   },
   ordersHeader: {
@@ -615,7 +620,7 @@ const styles = StyleSheet.create({
   },
   ordersHeaderText: {
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: '#333',
   },
   orderCard: {
@@ -643,12 +648,12 @@ const styles = StyleSheet.create({
   },
   orderIdLabel: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#333',
   },
   orderAmount: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#235EAA',
   },
   paymentBadge: {
@@ -667,7 +672,7 @@ const styles = StyleSheet.create({
   },
   paymentBadgeText: {
     fontSize: 10,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#fff',
   },
   orderMeta: {
@@ -683,6 +688,7 @@ const styles = StyleSheet.create({
   metaText: {
     fontSize: 13,
     color: '#666',
+    fontFamily: fonts.regular,
   },
   notesSection: {
     flexDirection: 'row',
@@ -698,6 +704,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#999',
     fontStyle: 'italic',
+    fontFamily: fonts.regular,
   },
   itemsPreview: {
     flexDirection: 'row',
@@ -711,7 +718,7 @@ const styles = StyleSheet.create({
   itemsPreviewText: {
     fontSize: 13,
     color: '#666',
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
   emptyContainer: {
     alignItems: 'center',
@@ -721,7 +728,7 @@ const styles = StyleSheet.create({
   emptyText: {
     marginTop: 16,
     fontSize: 18,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: '#999',
   },
   emptySubtext: {
@@ -729,6 +736,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#CCC',
     textAlign: 'center',
+    fontFamily: fonts.regular,
   },
   modalOverlay: {
     flex: 1,
@@ -752,7 +760,7 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#333',
   },
   modalBody: {
@@ -766,11 +774,12 @@ const styles = StyleSheet.create({
     color: '#999',
     marginBottom: 6,
     textTransform: 'uppercase',
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
   },
   detailValue: {
     fontSize: 16,
     color: '#333',
+    fontFamily: fonts.regular,
   },
   orderItemRow: {
     flexDirection: 'row',
@@ -784,15 +793,17 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     color: '#333',
+    fontFamily: fonts.regular,
   },
   orderItemQuantity: {
     fontSize: 14,
     color: '#666',
     marginHorizontal: 12,
+    fontFamily: fonts.regular,
   },
   orderItemPrice: {
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: '#4CAF50',
     minWidth: 60,
     textAlign: 'right',
@@ -808,12 +819,12 @@ const styles = StyleSheet.create({
   },
   totalLabel: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#333',
   },
   totalValue: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#235EAA',
   },
 });

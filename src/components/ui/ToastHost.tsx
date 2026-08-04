@@ -3,6 +3,7 @@ import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { hideToast, subscribeToast, type ToastState, type ToastType } from "@/utils/toast";
+import { fonts } from "@/theme";
 
 const ICONS: Record<ToastType, keyof typeof Ionicons.glyphMap> = {
   success: "checkmark-circle",
@@ -88,7 +89,7 @@ const styles = StyleSheet.create({
   message: {
     flex: 1,
     fontSize: 14,
-    fontWeight: "600",
+    fontFamily: fonts.semibold,
     color: "#111",
   },
 });

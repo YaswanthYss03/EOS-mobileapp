@@ -2,6 +2,7 @@ import { View, Text, FlatList, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { ScreenHeader } from "@/components/layout/ScreenHeader";
+import { fonts } from "@/theme";
 import { mockDrives, type Drive } from "../data/mockDrives";
 
 // TODO: view-only - replace mockDrives with a real call once the placement backend endpoint exists
@@ -65,15 +66,16 @@ const styles = StyleSheet.create({
   },
   company: {
     fontSize: 16,
-    fontWeight: "700",
+    fontFamily: fonts.bold,
   },
   package: {
     fontSize: 14,
-    fontWeight: "700",
+    fontFamily: fonts.bold,
     color: "#DC2626",
   },
   role: {
     fontSize: 13,
+    fontFamily: fonts.regular,
     color: "#444",
     marginBottom: 2,
   },
@@ -84,6 +86,7 @@ const styles = StyleSheet.create({
   },
   rowText: {
     fontSize: 12,
+    fontFamily: fonts.regular,
     color: "#666",
   },
 });

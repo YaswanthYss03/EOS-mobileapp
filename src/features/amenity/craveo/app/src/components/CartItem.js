@@ -5,6 +5,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { formatCurrency } from '../utils/helpers';
 import { colors, spacing, fontSize, borderRadius } from '../constants/theme';
+import { fonts } from '../../../../../../theme';
 
 const CartItem = ({ item, onQuantityUpdate, onRemove, onOrderTypeChange, showOrderTypeChip = true }) => {
   if (!item) return null;
@@ -185,7 +186,7 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: fontSize.md,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.text,
     marginBottom: spacing.xs,
   },
@@ -209,7 +210,7 @@ const styles = StyleSheet.create({
   categoryBadgeText: {
     fontSize: fontSize.xs,
     color: colors.primary,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
   },
   vegBadge: {
     backgroundColor: `${colors.success}1A`,
@@ -217,7 +218,7 @@ const styles = StyleSheet.create({
   vegBadgeText: {
     fontSize: fontSize.xs,
     color: colors.success,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
   },
   dineInBadge: {
     backgroundColor: colors.success,
@@ -228,7 +229,7 @@ const styles = StyleSheet.create({
   orderTypeBadgeText: {
     fontSize: fontSize.xs,
     color: colors.white,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
   },
   deleteButton: {
     width: 32,
@@ -248,10 +249,11 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.textSecondary,
     marginBottom: spacing.xs,
+    fontFamily: fonts.regular,
   },
   totalPrice: {
     fontSize: fontSize.md,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.primary,
   },
   quantityContainer: {
@@ -271,7 +273,7 @@ const styles = StyleSheet.create({
   },
   quantityText: {
     fontSize: fontSize.md,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.text,
     marginHorizontal: spacing.sm,
     minWidth: 24,

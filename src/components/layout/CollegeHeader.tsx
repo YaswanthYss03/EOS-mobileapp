@@ -1,6 +1,7 @@
 import { View, Text, Image, StyleSheet } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { fonts } from "@/theme";
 
 // Shared branding bar shown above all 5 bottom tabs (see app/(tabs)/_layout.tsx).
 const logoSource = require("../../../assets/logo.png");
@@ -53,13 +54,13 @@ const styles = StyleSheet.create({
   title: {
     color: "#fff",
     fontSize: 15,
-    fontWeight: "700",
+    fontFamily: fonts.bold,
     maxWidth: 260,
   },
   subtitle: {
     color: "#D7E2FA",
     fontSize: 11,
-    fontWeight: "600",
+    fontFamily: fonts.semibold,
     letterSpacing: 0.5,
     marginTop: 2,
   },

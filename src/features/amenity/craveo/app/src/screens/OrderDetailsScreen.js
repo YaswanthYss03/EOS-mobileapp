@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { orderAPI } from '../services/api';
 import { formatCurrency, formatDate, formatTime } from '../utils/helpers';
 import { colors, spacing, fontSize, borderRadius } from '../constants/theme';
+import { fonts } from '../../../../../../theme';
 
 const OrderDetailsScreen = ({ navigation, route }) => {
   const { orderId } = route.params;
@@ -382,6 +383,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     fontSize: fontSize.md,
     color: colors.textSecondary,
+    fontFamily: fonts.regular,
   },
   errorContainer: {
     flex: 1,
@@ -394,6 +396,7 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     color: colors.text,
     textAlign: 'center',
+    fontFamily: fonts.regular,
   },
   scrollContainer: {
     padding: spacing.md,
@@ -417,7 +420,7 @@ const styles = StyleSheet.create({
   },
   orderId: {
     fontSize: fontSize.md,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     color: colors.primary,
   },
   statusBadge: {
@@ -430,7 +433,7 @@ const styles = StyleSheet.create({
   },
   statusBadgeText: {
     fontSize: fontSize.xs,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
   },
   tokenBox: {
     alignItems: 'center',
@@ -442,14 +445,14 @@ const styles = StyleSheet.create({
   tokenLabel: {
     fontSize: fontSize.xs,
     color: colors.textSecondary,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 2,
   },
   tokenNumber: {
     fontSize: fontSize.xxl,
-    fontWeight: '800',
+    fontFamily: fonts.bold,
     color: colors.primary,
   },
   dateRow: {
@@ -461,6 +464,7 @@ const styles = StyleSheet.create({
   orderDate: {
     fontSize: fontSize.sm,
     color: colors.textSecondary,
+    fontFamily: fonts.regular,
   },
   cardTitleRow: {
     flexDirection: 'row',
@@ -470,7 +474,7 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     fontSize: fontSize.md,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     color: colors.text,
   },
   itemRow: {
@@ -486,26 +490,27 @@ const styles = StyleSheet.create({
   },
   itemName: {
     fontSize: fontSize.md,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
     color: colors.text,
     marginBottom: spacing.xs,
   },
   itemPrice: {
     fontSize: fontSize.sm,
     color: colors.textSecondary,
+    fontFamily: fonts.regular,
   },
   itemQuantity: {
     alignItems: 'flex-end',
   },
   quantityText: {
     fontSize: fontSize.md,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.primary,
     marginBottom: spacing.xs,
   },
   itemTotal: {
     fontSize: fontSize.md,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.text,
   },
   divider: {
@@ -520,12 +525,12 @@ const styles = StyleSheet.create({
   },
   totalLabel: {
     fontSize: fontSize.lg,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.text,
   },
   totalAmount: {
     fontSize: fontSize.xl,
-    fontWeight: '800',
+    fontFamily: fonts.bold,
     color: colors.primary,
   },
   paymentRow: {
@@ -537,19 +542,20 @@ const styles = StyleSheet.create({
   paymentLabel: {
     fontSize: fontSize.md,
     color: colors.textSecondary,
+    fontFamily: fonts.regular,
   },
   paymentValue: {
     fontSize: fontSize.md,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
     color: colors.text,
   },
   paidAmount: {
     color: colors.success,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
   },
   pendingAmount: {
     color: colors.warning,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
   },
   footer: {
     padding: spacing.md,
@@ -573,7 +579,7 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     fontSize: fontSize.md,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     color: colors.white,
   },
 });

@@ -5,6 +5,7 @@ import StaffOrderScreen from '../screens/staff/StaffOrderScreen';
 import StaffDashboardScreen from '../screens/staff/StaffDashboardScreen';
 import DishSelectionScreen from '../screens/staff/DishSelectionScreen';
 import StaffHistoryScreen from '../screens/staff/StaffHistoryScreen';
+import { fonts } from '../../../../../../theme';
 
 const Tab = createBottomTabNavigator();
 
@@ -26,7 +27,7 @@ const StaffNavigator = () => {
         },
         tabBarLabelStyle: {
           fontSize: 12,
-          fontWeight: '600',
+          fontFamily: fonts.semibold,
         },
       }}
     >

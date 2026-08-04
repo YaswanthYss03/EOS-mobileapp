@@ -1,5 +1,6 @@
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { fonts } from "@/theme";
 
 type Props = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -46,11 +47,12 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 15,
-    fontWeight: "600",
+    fontFamily: fonts.semibold,
     color: "#111",
   },
   subtitle: {
     fontSize: 12,
+    fontFamily: fonts.regular,
     color: "#777",
     marginTop: 2,
   },

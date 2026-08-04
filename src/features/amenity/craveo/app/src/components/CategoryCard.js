@@ -3,6 +3,7 @@ import { View, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
 import { Card, Text, Badge } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, spacing, fontSize, borderRadius } from '../constants/theme';
+import { fonts } from '../../../../../../theme';
 
 const { width } = Dimensions.get('window');
 const cardWidth = (width - spacing.lg * 3) / 2; // 2 cards per row with margins
@@ -135,7 +136,7 @@ const styles = StyleSheet.create({
   },
   categoryName: {
     fontSize: fontSize.md,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.text,
     marginBottom: spacing.xs,
   },
@@ -143,11 +144,12 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.textSecondary,
     marginBottom: 2,
+    fontFamily: fonts.regular,
   },
   totalQuantity: {
     fontSize: fontSize.xs,
     color: colors.success,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
   arrowContainer: {
     justifyContent: 'center',

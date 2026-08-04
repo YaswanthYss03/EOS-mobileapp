@@ -8,6 +8,7 @@ import {
   Animated,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { fonts } from '../../../../../../theme';
 
 const CustomAlert = ({ 
   visible, 
@@ -139,7 +140,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 20,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#333',
     marginBottom: 8,
     textAlign: 'center',
@@ -150,6 +151,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 22,
     marginBottom: 24,
+    fontFamily: fonts.regular,
   },
   buttonContainer: {
     flexDirection: 'row',
@@ -170,12 +172,12 @@ const styles = StyleSheet.create({
   },
   cancelButtonText: {
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: '#666',
   },
   confirmButtonText: {
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: '#fff',
   },
 });

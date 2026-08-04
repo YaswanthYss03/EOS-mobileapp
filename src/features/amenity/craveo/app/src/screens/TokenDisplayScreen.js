@@ -12,6 +12,7 @@ import { useSelector } from 'react-redux';
 
 import { formatCurrency, formatTime } from '../utils/helpers';
 import { colors, spacing, fontSize } from '../constants/theme';
+import { fonts } from '../../../../../../theme';
 
 const { width, height } = Dimensions.get('window');
 
@@ -197,7 +198,7 @@ const styles = StyleSheet.create({
   currentTime: {
     color: colors.white,
     fontSize: fontSize.md,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
   content: {
     flex: 1,
@@ -217,10 +218,11 @@ const styles = StyleSheet.create({
     fontSize: fontSize.lg,
     color: colors.textSecondary,
     marginBottom: spacing.sm,
+    fontFamily: fonts.regular,
   },
   tokenNumber: {
     fontSize: Math.min(width * 0.15, 80),
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.primary,
     marginBottom: spacing.md,
     textAlign: 'center',
@@ -237,7 +239,7 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: fontSize.md,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
   detailsCard: {
     marginBottom: spacing.md,
@@ -247,7 +249,7 @@ const styles = StyleSheet.create({
   },
   detailsTitle: {
     fontSize: fontSize.lg,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     marginBottom: spacing.md,
     textAlign: 'center',
   },
@@ -263,15 +265,16 @@ const styles = StyleSheet.create({
   infoLabel: {
     fontSize: fontSize.md,
     color: colors.textSecondary,
+    fontFamily: fonts.regular,
   },
   infoValue: {
     fontSize: fontSize.md,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
     color: colors.text,
   },
   totalAmount: {
     color: colors.primary,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
   },
   itemsContainer: {
     borderTopWidth: 1,
@@ -280,13 +283,14 @@ const styles = StyleSheet.create({
   },
   itemsTitle: {
     fontSize: fontSize.md,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     marginBottom: spacing.sm,
   },
   itemText: {
     fontSize: fontSize.sm,
     color: colors.textSecondary,
     paddingVertical: 2,
+    fontFamily: fonts.regular,
   },
   instructionsCard: {
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
@@ -296,7 +300,7 @@ const styles = StyleSheet.create({
   },
   instructionsTitle: {
     fontSize: fontSize.md,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     marginBottom: spacing.sm,
     color: colors.primary,
   },
@@ -305,6 +309,7 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: spacing.xs,
     lineHeight: 18,
+    fontFamily: fonts.regular,
   },
   footer: {
     flexDirection: 'row',

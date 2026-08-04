@@ -2,6 +2,7 @@ import { View, Text, Image, Pressable, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { fonts } from "@/theme";
 
 type AmenityOption = {
   id: string;
@@ -64,7 +65,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 22,
-    fontWeight: "700",
+    fontFamily: fonts.bold,
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 16,
@@ -110,10 +111,11 @@ const styles = StyleSheet.create({
   cardTitle: {
     color: "#fff",
     fontSize: 18,
-    fontWeight: "700",
+    fontFamily: fonts.bold,
   },
   cardDescription: {
     color: "#f0f0f0",
     fontSize: 13,
+    fontFamily: fonts.regular,
   },
 });

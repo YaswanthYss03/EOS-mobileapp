@@ -5,6 +5,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { formatCurrency, formatDate, formatTime, formatOrderDateTime } from '../utils/helpers';
 import { colors, spacing, fontSize, borderRadius } from '../constants/theme';
+import { fonts } from '../../../../../../theme';
 
 const OrderCard = ({ order, onPress }) => {
   // Debug: Log the order data to see what we're getting
@@ -276,7 +277,7 @@ const styles = StyleSheet.create({
   },
   tokenNumber: {
     fontSize: fontSize.md,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.primary,
   },
   statusBadge: {
@@ -289,7 +290,7 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: fontSize.xs,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
   },
   itemsContainer: {
     marginBottom: spacing.sm,
@@ -305,7 +306,7 @@ const styles = StyleSheet.create({
   },
   itemsLabel: {
     fontSize: fontSize.sm,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: colors.text,
   },
   itemsList: {
@@ -315,11 +316,12 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.textSecondary,
     marginBottom: 2,
+    fontFamily: fonts.regular,
   },
   moreItemsText: {
     fontSize: fontSize.sm,
     color: colors.primary,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
     marginTop: spacing.xs,
   },
   footer: {
@@ -333,22 +335,23 @@ const styles = StyleSheet.create({
   timeLabel: {
     fontSize: fontSize.xs,
     color: colors.textSecondary,
+    fontFamily: fonts.regular,
   },
   timeText: {
     fontSize: fontSize.sm,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
     color: colors.text,
     marginTop: 2,
   },
   estimatedTime: {
     fontSize: fontSize.xs,
     color: colors.warning,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
     marginTop: 2,
   },
   totalAmount: {
     fontSize: fontSize.xl,
-    fontWeight: '800',
+    fontFamily: fonts.bold,
     color: colors.primary,
   },
 });

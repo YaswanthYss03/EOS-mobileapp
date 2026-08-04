@@ -2,6 +2,7 @@ import { View, Text, FlatList, Pressable, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { ScreenHeader } from "@/components/layout/ScreenHeader";
+import { fonts } from "@/theme";
 import { mockLmsSubjects, mockLmsNotes, type LmsNote } from "./data/mockLms";
 
 const fileIcon: Record<LmsNote["fileType"], keyof typeof Ionicons.glyphMap> = {
@@ -70,15 +71,17 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 14,
-    fontWeight: "600",
+    fontFamily: fonts.semibold,
     color: "#111",
   },
   uploadedOn: {
     fontSize: 12,
+    fontFamily: fonts.regular,
     color: "#888",
     marginTop: 2,
   },
   empty: {
+    fontFamily: fonts.regular,
     textAlign: "center",
     color: "#999",
     marginTop: 40,

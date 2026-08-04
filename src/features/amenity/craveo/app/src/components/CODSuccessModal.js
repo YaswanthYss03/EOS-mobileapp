@@ -4,6 +4,7 @@ import { Text, Card, Title, Paragraph, Button } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, spacing, fontSize } from '../constants/theme';
 import { formatCurrency } from '../utils/helpers';
+import { fonts } from '../../../../../../theme';
 
 const { width, height } = Dimensions.get('window');
 
@@ -138,7 +139,7 @@ const styles = StyleSheet.create({
   detailText: {
     fontSize: fontSize.md,
     marginLeft: spacing.sm,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
     color: colors.text,
   },
   instructionsContainer: {
@@ -158,6 +159,7 @@ const styles = StyleSheet.create({
     marginLeft: spacing.sm,
     color: colors.textSecondary,
     flex: 1,
+    fontFamily: fonts.regular,
   },
   message: {
     textAlign: 'center',

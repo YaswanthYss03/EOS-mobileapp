@@ -17,6 +17,7 @@ import {
   IconButton,
 } from 'react-native-paper';
 import { colors, spacing, fontSize } from '../constants/theme';
+import { fonts } from '../../../../../../theme';
 
 const PasswordSetupModal = ({ 
   visible, 
@@ -211,12 +212,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: colors.textSecondary,
     lineHeight: 22,
+    fontFamily: fonts.regular,
   },
   inputContainer: {
     marginBottom: spacing.sm,
   },
   input: {
     backgroundColor: colors.surface,
+    fontFamily: fonts.regular,
   },
   requirementsContainer: {
     backgroundColor: colors.surfaceVariant,
@@ -227,7 +230,7 @@ const styles = StyleSheet.create({
   },
   requirementsTitle: {
     fontSize: fontSize.sm,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.text,
     marginBottom: spacing.xs,
   },
@@ -235,10 +238,11 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.textSecondary,
     marginBottom: spacing.xs,
+    fontFamily: fonts.regular,
   },
   requirementMet: {
     color: colors.success,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
   setPasswordButton: {
     marginTop: spacing.md,

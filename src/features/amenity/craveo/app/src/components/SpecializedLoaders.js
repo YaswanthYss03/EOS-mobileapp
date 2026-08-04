@@ -4,6 +4,7 @@ import { Text } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Animatable from 'react-native-animatable';
 import { colors, spacing, fontSize } from '../constants/theme';
+import { fonts } from '../../../../../../theme';
 
 const ProfileLoader = ({ 
   size = 'large', 
@@ -495,7 +496,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: spacing.sm,
     fontStyle: 'italic',
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
 });
 

@@ -2,6 +2,7 @@ import React from 'react';
 import { View, StyleSheet, Text } from 'react-native';
 import LottieView from 'lottie-react-native';
 import { colors, fontSize, spacing } from '../constants/theme';
+import { fonts } from '../../../../../../theme';
 
 const PaymentVerificationAnimation = ({ 
   size = 120, 
@@ -42,7 +43,7 @@ const styles = StyleSheet.create({
     bottom: -25,
     fontSize: fontSize.sm,
     color: colors.textSecondary,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
 });
 

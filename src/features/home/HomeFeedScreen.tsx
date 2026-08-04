@@ -1,15 +1,31 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { FlatList, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { TopBar } from "./components/TopBar";
+import { HomeHeader } from "./components/HomeHeader";
+import { AnnouncementsSection } from "./components/AnnouncementsSection";
 import { PostCard } from "./components/PostCard";
 import { mockPosts, type Post } from "./data/mockPosts";
 
 // TODO: replace mockPosts with src/services/api/home.api.ts once the media-team backend is ready
 export function HomeFeedScreen() {
-  const router = useRouter();
+  const navigation = useNavigation();
   const [posts, setPosts] = useState<Post[]>(mockPosts);
+
+  // Swaps the shared CollegeHeader (mounted at the Tabs level, see
+  // app/(tabs)/_layout.tsx) for HomeHeader (adds notification/wallet icons)
+  // only while Home is focused - same pattern as the ERP employee
+  // dashboard's header override.
+  useFocusEffect(
+    useCallback(() => {
+      navigation.getParent()?.setOptions({ header: () => <HomeHeader /> });
+      return () => {
+        navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
+      };
+    }, [navigation]),
+  );
 
   function handleAddComment(postId: string, text: string) {
     setPosts((prev) =>
@@ -21,19 +37,18 @@ export function HomeFeedScreen() {
     );
   }
 
-  function handleOpenComments(postId: string) {
-    router.push(`/(tabs)/home/${postId}`);
-  }
-
   return (
     <SafeAreaView style={styles.container} edges={[]}>
-      <TopBar />
       <FlatList
         data={posts}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <PostCard post={item} onOpenComments={handleOpenComments} onAddComment={handleAddComment} />
-        )}
+        renderItem={({ item }) => <PostCard post={item} onAddComment={handleAddComment} />}
+        ListHeaderComponent={
+          <>
+            <TopBar />
+            <AnnouncementsSection />
+          </>
+        }
         contentContainerStyle={styles.list}
       />
     </SafeAreaView>
@@ -46,6 +61,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   list: {
-    paddingVertical: 8,
+    paddingBottom: 8,
   },
 });

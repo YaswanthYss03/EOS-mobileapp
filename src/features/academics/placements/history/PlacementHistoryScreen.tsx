@@ -2,6 +2,7 @@ import { View, Text, FlatList, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { ScreenHeader } from "@/components/layout/ScreenHeader";
+import { fonts } from "@/theme";
 import { mockHistory, type PlacementRecord, type Round, type RoundStatus } from "../data/mockHistory";
 
 const statusStyle: Record<RoundStatus, { icon: keyof typeof Ionicons.glyphMap; color: string }> = {
@@ -84,14 +85,16 @@ const styles = StyleSheet.create({
   },
   company: {
     fontSize: 16,
-    fontWeight: "700",
+    fontFamily: fonts.bold,
   },
   appliedOn: {
     fontSize: 11,
+    fontFamily: fonts.regular,
     color: "#999",
   },
   role: {
     fontSize: 13,
+    fontFamily: fonts.regular,
     color: "#444",
     marginBottom: 10,
   },
@@ -111,6 +114,7 @@ const styles = StyleSheet.create({
   },
   roundLabel: {
     fontSize: 10,
+    fontFamily: fonts.medium,
     textAlign: "center",
   },
   connector: {
@@ -120,6 +124,7 @@ const styles = StyleSheet.create({
     marginTop: 9,
   },
   empty: {
+    fontFamily: fonts.regular,
     textAlign: "center",
     color: "#999",
     marginTop: 40,

@@ -38,6 +38,7 @@ import { colors, spacing, fontSize, borderRadius } from '../constants/theme';
 import { ERROR_MESSAGES } from '../constants/config';
 import { showToast, handleError } from '../utils/toastUtils';
 import { isAfter7PMIST } from '../utils/timezoneUtils';
+import { fonts } from '../../../../../../theme';
 
 const { width } = Dimensions.get('window');
 
@@ -792,13 +793,14 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: fontSize.xl,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.text,
   },
   headerSubtitle: {
     fontSize: fontSize.sm,
     color: colors.textSecondary,
     marginTop: 2,
+    fontFamily: fonts.regular,
   },
 
   // Greeting Styles
@@ -856,12 +858,12 @@ const styles = StyleSheet.create({
   categoryText: {
     fontSize: fontSize.xs,
     color: colors.textSecondary,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     textAlign: 'center',
   },
   selectedCategoryText: {
     color: colors.white,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
   },
   
   // Dish List Styles
@@ -906,7 +908,7 @@ const styles = StyleSheet.create({
   },
   dishName: {
     fontSize: fontSize.sm,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     color: colors.text,
     marginBottom: 4,
     lineHeight: fontSize.sm * 1.25,
@@ -920,7 +922,7 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     color: colors.success,
     marginLeft: 4,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
   },
   cardFooter: {
     flexDirection: 'row',
@@ -934,7 +936,7 @@ const styles = StyleSheet.create({
   },
   price: {
     fontSize: fontSize.md,
-    fontWeight: '800',
+    fontFamily: fonts.bold,
     color: colors.primary,
   },
   actionContainer: {
@@ -1031,7 +1033,7 @@ const styles = StyleSheet.create({
   },
   quantityText: {
     fontSize: fontSize.sm,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.text,
     textAlign: 'center',
     minWidth: 20,
@@ -1049,6 +1051,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: spacing.md,
     textAlign: 'center',
+    fontFamily: fonts.regular,
   },
   
   // End of styles

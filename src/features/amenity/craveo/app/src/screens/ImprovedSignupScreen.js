@@ -26,6 +26,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { signup, clearError } from '../redux/slices/authSlice';
 import { colors, spacing, fontSize } from '../constants/theme';
 import { showToast, handleError } from '../utils/toastUtils';
+import { fonts } from '../../../../../../theme';
 
 const { width, height } = Dimensions.get('window');
 
@@ -393,7 +394,7 @@ const styles = StyleSheet.create({
   },
   appTitle: {
     fontSize: fontSize.xxl,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: 'white',
     marginBottom: spacing.xs,
     textAlign: 'center',
@@ -405,7 +406,7 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     color: 'rgba(255, 255, 255, 0.9)',
     textAlign: 'center',
-    fontWeight: '300',
+    fontFamily: fonts.regular,
   },
   signupCard: {
     borderRadius: 20,
@@ -423,7 +424,7 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     fontSize: fontSize.xl,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.primary,
     marginLeft: spacing.sm,
   },
@@ -433,10 +434,12 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: 'white',
     fontSize: fontSize.md,
+    fontFamily: fonts.regular,
   },
   errorText: {
     fontSize: fontSize.sm,
     marginTop: spacing.xs,
+    fontFamily: fonts.regular,
   },
   passwordStrengthContainer: {
     flexDirection: 'row',
@@ -451,7 +454,7 @@ const styles = StyleSheet.create({
   },
   passwordStrengthText: {
     fontSize: fontSize.sm,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
   },
   termsContainer: {
     marginTop: spacing.sm,
@@ -462,6 +465,7 @@ const styles = StyleSheet.create({
     color: colors.darkGray,
     textAlign: 'center',
     lineHeight: 18,
+    fontFamily: fonts.regular,
   },
   signupButton: {
     marginTop: spacing.md,
@@ -477,7 +481,7 @@ const styles = StyleSheet.create({
   },
   signupButtonText: {
     fontSize: fontSize.lg,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
   },
   loginContainer: {
     flexDirection: 'row',
@@ -488,11 +492,12 @@ const styles = StyleSheet.create({
   loginText: {
     color: colors.darkGray,
     fontSize: fontSize.md,
+    fontFamily: fonts.regular,
   },
   loginLink: {
     color: colors.primary,
     fontSize: fontSize.md,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     marginLeft: spacing.xs,
   },
   footer: {
@@ -503,6 +508,7 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.8)',
     fontSize: fontSize.sm,
     textAlign: 'center',
+    fontFamily: fonts.regular,
   },
 });
 

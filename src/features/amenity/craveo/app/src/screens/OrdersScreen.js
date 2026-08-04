@@ -28,6 +28,7 @@ import { EnhancedOrdersLoader } from '../components/EnhancedLoaders';
 import { colors, spacing, fontSize, borderRadius } from '../constants/theme';
 import { formatDate } from '../utils/helpers';
 import { formatTimestamptzToIST, getISTWallClockDate } from '../utils/timezoneUtils';
+import { fonts } from '../../../../../../theme';
 
 const OrdersScreen = ({ navigation }) => {
   const [selectedTab, setSelectedTab] = useState('pending');
@@ -378,7 +379,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: fontSize.xl,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.text,
   },
   tabContainer: {
@@ -410,12 +411,12 @@ const styles = StyleSheet.create({
   },
   tabLabel: {
     fontSize: fontSize.xs,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: colors.textSecondary,
   },
   tabLabelActive: {
     color: colors.white,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
   },
   listContainer: {
     padding: spacing.md,
@@ -440,6 +441,7 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     color: colors.textSecondary,
     textAlign: 'center',
+    fontFamily: fonts.regular,
   },
   emptyStateSubText: {
     fontSize: fontSize.sm,
@@ -447,6 +449,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: spacing.xs,
     opacity: 0.7,
+    fontFamily: fonts.regular,
   },
   dateSeparator: {
     alignItems: 'center',
@@ -459,7 +462,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     borderRadius: borderRadius.sm,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
 });
 

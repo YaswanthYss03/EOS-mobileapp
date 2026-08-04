@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { fonts } from '../../../../../../theme';
 
 // Simple hardcoded colors to avoid theme issues
 const COLORS = {
@@ -97,7 +98,7 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: COLORS.text,
     marginBottom: 4,
   },
@@ -105,6 +106,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     marginBottom: 12,
+    fontFamily: fonts.regular,
   },
   footer: {
     flexDirection: 'row',
@@ -117,19 +119,20 @@ const styles = StyleSheet.create({
   },
   price: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: COLORS.primary,
   },
   quantityText: {
     fontSize: 12,
     color: COLORS.success,
     marginTop: 2,
+    fontFamily: fonts.regular,
   },
   outOfStockText: {
     fontSize: 12,
     color: COLORS.error,
     marginTop: 2,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
   addButton: {
     backgroundColor: COLORS.primary,
@@ -144,13 +147,15 @@ const styles = StyleSheet.create({
   },
   addButtonText: {
     color: COLORS.white,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
   disabledButtonText: {
     color: COLORS.disabledText,
+    fontFamily: fonts.regular,
   },
   disabledText: {
     color: COLORS.disabledText,
+    fontFamily: fonts.regular,
   },
 });
 

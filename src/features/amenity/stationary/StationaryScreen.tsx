@@ -2,6 +2,7 @@ import { View, Text, Pressable, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { fonts } from "@/theme";
 
 // TODO: stationary is already built as a standalone module - drop its screens/components
 // into this folder and wire this file up as its entry point.
@@ -34,6 +35,6 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 18,
-    fontWeight: "700",
+    fontFamily: fonts.bold,
   },
 });

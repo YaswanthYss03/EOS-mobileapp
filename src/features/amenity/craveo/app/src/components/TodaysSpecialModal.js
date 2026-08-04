@@ -12,6 +12,7 @@ import {
 import { Text, IconButton } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, spacing, fontSize } from '../constants/theme';
+import { fonts } from '../../../../../../theme';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const IMAGE_WIDTH = SCREEN_WIDTH * 0.9;
@@ -230,7 +231,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: fontSize.lg,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.text,
     marginLeft: spacing.sm,
   },
@@ -266,7 +267,7 @@ const styles = StyleSheet.create({
   counterText: {
     color: colors.white,
     fontSize: fontSize.sm,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
   },
   dotsContainer: {
     flexDirection: 'row',
@@ -295,7 +296,7 @@ const styles = StyleSheet.create({
   footerText: {
     fontSize: fontSize.sm,
     color: colors.text,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
 });
 

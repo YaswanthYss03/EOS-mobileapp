@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { fonts } from '../../../../../../theme';
 
 const SimpleToast = ({ visible, message, type = 'success', onHide }) => {
   useEffect(() => {
@@ -48,7 +49,7 @@ const styles = StyleSheet.create({
   text: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
     textAlign: 'center',
   },
 });

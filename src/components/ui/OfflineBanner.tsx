@@ -3,6 +3,7 @@ import { Animated, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import NetInfo from "@react-native-community/netinfo";
+import { fonts } from "@/theme";
 
 type Status = "offline" | "backOnline" | null;
 
@@ -110,11 +111,12 @@ const styles = StyleSheet.create({
   title: {
     color: "#fff",
     fontSize: 14,
-    fontWeight: "700",
+    fontFamily: fonts.bold,
   },
   subtitle: {
     color: "rgba(255,255,255,0.85)",
     fontSize: 12,
+    fontFamily: fonts.regular,
     marginTop: 1,
   },
 });

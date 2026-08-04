@@ -15,6 +15,7 @@ import * as Animatable from 'react-native-animatable';
 
 import { colors, spacing, fontSize, borderRadius } from '../constants/theme';
 import { formatCurrency } from '../utils/helpers';
+import { fonts } from '../../../../../../theme';
 
 const OrderSuccess = ({ navigation, route }) => {
   const {
@@ -209,7 +210,7 @@ const styles = StyleSheet.create({
   },
   successTitle: {
     fontSize: fontSize.xxl,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.success,
     textAlign: 'center',
     marginBottom: spacing.md,
@@ -220,6 +221,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: spacing.xl,
     paddingHorizontal: spacing.md,
+    fontFamily: fonts.regular,
   },
   orderCard: {
     width: '100%',
@@ -234,7 +236,7 @@ const styles = StyleSheet.create({
   },
   orderTitle: {
     fontSize: fontSize.lg,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.text,
   },
   paymentBadge: {
@@ -248,7 +250,7 @@ const styles = StyleSheet.create({
   paymentBadgeText: {
     color: colors.white,
     fontSize: fontSize.xs,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
     marginLeft: spacing.xs,
   },
   divider: {
@@ -270,13 +272,14 @@ const styles = StyleSheet.create({
   },
   itemName: {
     fontSize: fontSize.md,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: colors.text,
     marginBottom: 2,
   },
   itemDetails: {
     fontSize: fontSize.sm,
     color: colors.textSecondary,
+    fontFamily: fonts.regular,
   },
   itemActions: {
     alignItems: 'flex-end',
@@ -292,11 +295,11 @@ const styles = StyleSheet.create({
   },
   chipText: {
     fontSize: fontSize.xs,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
   itemTotal: {
     fontSize: fontSize.md,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.primary,
   },
   chargesContainer: {
@@ -311,11 +314,12 @@ const styles = StyleSheet.create({
   chargeLabel: {
     fontSize: fontSize.sm,
     color: colors.textSecondary,
+    fontFamily: fonts.regular,
   },
   chargeValue: {
     fontSize: fontSize.sm,
     color: colors.text,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
   totalRow: {
     borderTopWidth: 1,
@@ -325,12 +329,12 @@ const styles = StyleSheet.create({
   },
   totalLabel: {
     fontSize: fontSize.md,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.text,
   },
   totalValue: {
     fontSize: fontSize.lg,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.primary,
   },
   codMessageCard: {
@@ -348,7 +352,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: fontSize.sm,
     color: colors.info,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
     marginLeft: spacing.sm,
   },
   buttonContainer: {

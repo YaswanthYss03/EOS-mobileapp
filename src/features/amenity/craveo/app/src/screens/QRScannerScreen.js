@@ -12,6 +12,7 @@ import FoodActivityIndicator from '../components/FoodActivityIndicator';
 import { EnhancedQRLoader } from '../components/EnhancedLoaders';
 import { showToast } from '../utils/toastUtils';
 import { colors, spacing, fontSize, borderRadius } from '../constants/theme';
+import { fonts } from '../../../../../../theme';
 
 const QRScannerScreen = ({ navigation }) => {
   const [hasPermission, setHasPermission] = useState(null);
@@ -401,7 +402,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: fontSize.lg,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.text,
     flex: 1,
     textAlign: 'center',
@@ -424,7 +425,7 @@ const styles = StyleSheet.create({
   },
   permissionTitle: {
     fontSize: fontSize.xl,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     color: colors.text,
     textAlign: 'center',
     marginBottom: spacing.sm,
@@ -435,6 +436,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 22,
     marginBottom: spacing.xl,
+    fontFamily: fonts.regular,
   },
   primaryButton: {
     flexDirection: 'row',
@@ -452,7 +454,7 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     fontSize: fontSize.md,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     color: colors.white,
   },
   cameraContainer: {
@@ -529,6 +531,7 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     textAlign: 'center',
     marginBottom: spacing.sm,
+    fontFamily: fonts.regular,
   },
   inlineLoadingRow: {
     flexDirection: 'row',
@@ -544,7 +547,7 @@ const styles = StyleSheet.create({
   },
   resetButtonText: {
     fontSize: fontSize.md,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     color: colors.primary,
   },
   instructionsCard: {
@@ -566,7 +569,7 @@ const styles = StyleSheet.create({
   },
   instructionsTitle: {
     fontSize: fontSize.lg,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     color: colors.text,
   },
   kioskBadge: {
@@ -582,10 +585,11 @@ const styles = StyleSheet.create({
   },
   kioskBadgeIcon: {
     fontSize: fontSize.sm,
+    fontFamily: fonts.regular,
   },
   categoryTitle: {
     fontSize: fontSize.sm,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     color: colors.primary,
   },
   instructionCategory: {
@@ -606,7 +610,7 @@ const styles = StyleSheet.create({
   },
   stepNumberText: {
     fontSize: fontSize.xs,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     color: colors.primary,
   },
   stepText: {
@@ -614,6 +618,7 @@ const styles = StyleSheet.create({
     color: colors.text,
     flex: 1,
     lineHeight: 20,
+    fontFamily: fonts.regular,
   },
 });
 

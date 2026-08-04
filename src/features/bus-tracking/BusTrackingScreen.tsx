@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import MapView, { Marker, Polyline } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
+import { fonts } from "@/theme";
 import { mockRoute, buildWaypoints } from "./data/mockRoute";
 
 const TICK_MS = 1500;
@@ -98,7 +99,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 20,
-    fontWeight: "700",
+    fontFamily: fonts.bold,
   },
   liveBadge: {
     flexDirection: "row",
@@ -117,7 +118,7 @@ const styles = StyleSheet.create({
   },
   liveText: {
     fontSize: 11,
-    fontWeight: "700",
+    fontFamily: fonts.bold,
     color: "#DC2626",
   },
   map: {
@@ -154,10 +155,11 @@ const styles = StyleSheet.create({
   },
   routeName: {
     fontSize: 15,
-    fontWeight: "700",
+    fontFamily: fonts.bold,
   },
   busNumber: {
     fontSize: 12,
+    fontFamily: fonts.regular,
     color: "#666",
   },
   infoItem: {
@@ -167,10 +169,12 @@ const styles = StyleSheet.create({
   },
   infoText: {
     fontSize: 12,
+    fontFamily: fonts.regular,
     color: "#444",
   },
   driver: {
     fontSize: 12,
+    fontFamily: fonts.regular,
     color: "#888",
   },
 });

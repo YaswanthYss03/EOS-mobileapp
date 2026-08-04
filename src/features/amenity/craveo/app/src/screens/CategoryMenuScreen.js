@@ -20,6 +20,7 @@ import { ERROR_MESSAGES } from '../constants/config';
 import SimpleToast from '../components/SimpleToast';
 import { AnimatedView } from '../components/PremiumComponents';
 import { isAfter7PMIST } from '../utils/timezoneUtils';
+import { fonts } from '../../../../../../theme';
 
 const CategoryMenuScreen = ({ route, navigation }) => {
   const { category } = route.params;
@@ -261,6 +262,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: theme.colors.placeholder,
     textAlign: 'center',
+    fontFamily: fonts.regular,
   },
   header: {
     padding: theme.spacing.lg,
@@ -279,7 +281,7 @@ const styles = StyleSheet.create({
   },
   categoryTitle: {
     fontSize: 26,
-    fontWeight: '800',
+    fontFamily: fonts.bold,
     color: theme.colors.text,
     marginBottom: theme.spacing.sm,
   },
@@ -287,6 +289,7 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     color: colors.textSecondary,
     marginBottom: spacing.sm,
+    fontFamily: fonts.regular,
   },
   warningContainer: {
     backgroundColor: colors.warning + '20',
@@ -298,7 +301,7 @@ const styles = StyleSheet.create({
   warningText: {
     fontSize: fontSize.sm,
     color: colors.warning,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
   listContainer: {
     paddingBottom: 120, // Space for FAB
@@ -312,7 +315,7 @@ const styles = StyleSheet.create({
   },
   emptyStateText: {
     fontSize: 20,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     color: theme.colors.text,
     textAlign: 'center',
     marginBottom: theme.spacing.md,
@@ -323,6 +326,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: theme.spacing.xl,
     lineHeight: 24,
+    fontFamily: fonts.regular,
   },
   retryButton: {
     marginTop: theme.spacing.lg,

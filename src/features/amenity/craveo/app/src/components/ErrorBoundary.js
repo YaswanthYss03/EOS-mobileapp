@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { fonts } from '../../../../../../theme';
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -45,7 +46,7 @@ const styles = StyleSheet.create({
   },
   errorTitle: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#d32f2f',
     marginBottom: 10,
   },
@@ -54,11 +55,13 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     marginBottom: 20,
+    fontFamily: fonts.regular,
   },
   errorHelp: {
     fontSize: 14,
     color: '#999',
     textAlign: 'center',
+    fontFamily: fonts.regular,
   },
 });
 

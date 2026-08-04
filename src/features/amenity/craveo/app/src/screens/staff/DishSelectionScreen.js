@@ -13,6 +13,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { menuAPI } from '../../services';
 import CustomAlert from '../../components/CustomAlert';
+import { fonts } from '../../../../../../../theme';
 
 const { width } = Dimensions.get('window');
 
@@ -250,7 +251,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#333',
   },
   loadingContainer: {
@@ -262,6 +263,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 16,
     color: '#666',
+    fontFamily: fonts.regular,
   },
   listContent: {
     paddingBottom: 100,
@@ -285,7 +287,7 @@ const styles = StyleSheet.create({
   },
   statNumber: {
     fontSize: 28,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#333',
     marginBottom: 4,
   },
@@ -295,6 +297,7 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: 14,
     color: '#666',
+    fontFamily: fonts.regular,
   },
   actionButtons: {
     flexDirection: 'row',
@@ -322,12 +325,12 @@ const styles = StyleSheet.create({
   },
   selectAllText: {
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: '#4CAF50',
   },
   deselectText: {
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: '#f44336',
   },
   instructionText: {
@@ -335,6 +338,7 @@ const styles = StyleSheet.create({
     color: '#666',
     lineHeight: 20,
     textAlign: 'center',
+    fontFamily: fonts.regular,
   },
   dishItem: {
     flexDirection: 'row',
@@ -356,7 +360,7 @@ const styles = StyleSheet.create({
   },
   dishName: {
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: '#333',
     marginBottom: 6,
   },
@@ -375,10 +379,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 4,
+    fontFamily: fonts.regular,
   },
   dishPrice: {
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: '#4CAF50',
   },
   checkbox: {
@@ -425,7 +430,7 @@ const styles = StyleSheet.create({
   saveButtonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
   },
 });
 

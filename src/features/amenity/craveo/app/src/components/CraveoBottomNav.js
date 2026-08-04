@@ -4,6 +4,7 @@ import { Badge, Text } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
 import { colors } from '../constants/theme';
+import { fonts } from '../../../../../../theme';
 
 // Craveo's own bottom bar, shown only while inside the Craveo module (EOS's own
 // tab bar is hidden for these screens - see app/(tabs)/_layout.tsx). Deliberately
@@ -103,11 +104,11 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#9A9A9A',
     marginTop: 2,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
   labelActive: {
     color: colors.primary,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
   },
   cartBadge: {
     position: 'absolute',

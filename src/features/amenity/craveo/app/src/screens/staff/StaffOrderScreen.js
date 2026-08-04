@@ -17,6 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { menuAPI, staffAPI } from '../../services';
 import { logout } from '../../redux/slices/authSlice';
 import CustomAlert from '../../components/CustomAlert';
+import { fonts } from '../../../../../../../theme';
 
 const STORAGE_KEY = '@staff_selected_dishes';
 
@@ -437,6 +438,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 16,
     color: '#666',
+    fontFamily: fonts.regular,
   },
   header: {
     backgroundColor: '#235EAA',
@@ -450,13 +452,14 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#FFF',
   },
   headerSubtitle: {
     fontSize: 14,
     color: '#D7E6F7',
     marginTop: 4,
+    fontFamily: fonts.regular,
   },
   logoutButton: {
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
@@ -482,6 +485,7 @@ const styles = StyleSheet.create({
     height: 48,
     fontSize: 16,
     color: '#333',
+    fontFamily: fonts.regular,
   },
   categoryList: {
     paddingHorizontal: 16,
@@ -508,7 +512,7 @@ const styles = StyleSheet.create({
   categoryText: {
     fontSize: 13,
     color: '#666',
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
   },
   categoryTextActive: {
     color: '#FFF',
@@ -538,7 +542,7 @@ const styles = StyleSheet.create({
   paymentText: {
     fontSize: 14,
     color: '#666',
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
   },
   paymentTextActive: {
     color: '#FFF',
@@ -562,19 +566,20 @@ const styles = StyleSheet.create({
   },
   dishName: {
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: '#333',
     marginBottom: 4,
   },
   dishPrice: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#235EAA',
     marginBottom: 2,
   },
   dishCategory: {
     fontSize: 12,
     color: '#999',
+    fontFamily: fonts.regular,
   },
   quantityControl: {
     flexDirection: 'row',
@@ -592,7 +597,7 @@ const styles = StyleSheet.create({
   },
   quantityText: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#333',
     minWidth: 24,
     textAlign: 'center',
@@ -605,7 +610,7 @@ const styles = StyleSheet.create({
   },
   addButtonText: {
     color: '#FFF',
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     fontSize: 14,
   },
   emptyContainer: {
@@ -616,6 +621,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 16,
     color: '#999',
+    fontFamily: fonts.regular,
   },
   cartFooter: {
     position: 'absolute',
@@ -637,10 +643,11 @@ const styles = StyleSheet.create({
   cartItemsCount: {
     fontSize: 14,
     color: '#666',
+    fontFamily: fonts.regular,
   },
   cartTotal: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: '#333',
   },
   createOrderButton: {
@@ -655,7 +662,7 @@ const styles = StyleSheet.create({
   createOrderText: {
     color: '#FFF',
     fontSize: 18,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
   },
 });
 

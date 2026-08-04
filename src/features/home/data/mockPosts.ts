@@ -6,65 +6,49 @@ export type Comment = {
 
 export type Post = {
   id: string;
-  studentName: string;
-  company: string;
-  role: string;
-  package: string;
-  imageUrl: string;
   description: string;
+  images: string[];
   comments: Comment[];
   postedAt: string;
 };
 
+// TODO: replace mockPosts with a real call to src/services/api/home.api.ts once the media-team backend is ready
 export const mockPosts: Post[] = [
   {
     id: "1",
-    studentName: "Ananya Rao",
-    company: "Google",
-    role: "SWE Intern",
-    package: "₹28 LPA",
-    imageUrl: "https://picsum.photos/seed/eos-post-1/800/800",
-    description: "Congratulations to Ananya Rao on landing an SWE internship at Google! 🎉",
-    postedAt: "2h ago",
-    comments: [
-      { id: "c1", author: "Rahul", text: "Congratulations! Well deserved 🔥" },
-      { id: "c2", author: "Sneha", text: "So proud of you!!" },
+    description:
+      "Our campus Hackathon 3.0 was a tremendous success! Amazing ideas, innovative solutions and unstoppable energy from all participants.\n\nHere's a glimpse of the event.\n#Hackathon3 #Innovation #SECE",
+    images: [
+      "https://picsum.photos/seed/eos-hackathon-1/800/800",
+      "https://picsum.photos/seed/eos-hackathon-2/800/800",
+      "https://picsum.photos/seed/eos-hackathon-3/800/800",
+      "https://picsum.photos/seed/eos-hackathon-4/800/800",
     ],
+    postedAt: "2h ago",
+    comments: [{ id: "c1", author: "Dr. S. Vasanthi", text: "Proud of our students. Great work, team!" }],
   },
   {
     id: "2",
-    studentName: "Karthik Iyer",
-    company: "Microsoft",
-    role: "SDE-1",
-    package: "₹24 LPA",
-    imageUrl: "https://picsum.photos/seed/eos-post-2/800/800",
-    description: "Karthik Iyer placed at Microsoft as SDE-1. Great going! 💪",
+    description: "Congratulations to Ananya Rao on landing an SWE internship at Google!",
+    images: ["https://picsum.photos/seed/eos-post-2/800/800"],
     postedAt: "5h ago",
-    comments: [{ id: "c3", author: "Divya", text: "Amazing achievement!" }],
+    comments: [
+      { id: "c2", author: "Rahul", text: "Congratulations! Well deserved" },
+      { id: "c3", author: "Sneha", text: "So proud of you!!" },
+    ],
   },
   {
     id: "3",
-    studentName: "Fathima Noor",
-    company: "Amazon",
-    role: "SDE Intern",
-    package: "₹20 LPA",
-    imageUrl: "https://picsum.photos/seed/eos-post-3/800/800",
-    description: "Fathima Noor bags an internship offer from Amazon 🚀",
+    description: "Karthik Iyer placed at Microsoft as SDE-1. Great going!",
+    images: ["https://picsum.photos/seed/eos-post-3/800/800"],
     postedAt: "1d ago",
-    comments: [],
+    comments: [{ id: "c4", author: "Divya", text: "Amazing achievement!" }],
   },
   {
     id: "4",
-    studentName: "Vignesh Kumar",
-    company: "Deloitte",
-    role: "Analyst",
-    package: "₹9 LPA",
-    imageUrl: "https://picsum.photos/seed/eos-post-4/800/800",
-    description: "Vignesh Kumar placed at Deloitte as an Analyst. Congratulations!",
+    description: "Fathima Noor bags an internship offer from Amazon.",
+    images: ["https://picsum.photos/seed/eos-post-4/800/800"],
     postedAt: "2d ago",
-    comments: [
-      { id: "c4", author: "Meena", text: "Congrats Vignesh!" },
-      { id: "c5", author: "Arjun", text: "Well done 👏" },
-    ],
+    comments: [],
   },
 ];

@@ -6,6 +6,7 @@ import * as Animatable from 'react-native-animatable';
 import { LinearGradient } from 'expo-linear-gradient';
 import LottieView from 'lottie-react-native';
 import { colors, spacing, fontSize } from '../constants/theme';
+import { fonts } from '../../../../../../theme';
 
 const { width, height } = Dimensions.get('window');
 
@@ -157,7 +158,7 @@ const styles = StyleSheet.create({
   },
   mainText: {
     fontSize: fontSize.xxl,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.black,
     textAlign: 'center',
     marginBottom: spacing.sm,
@@ -170,6 +171,7 @@ const styles = StyleSheet.create({
     color: colors.black,
     textAlign: 'center',
     opacity: 0.8,
+    fontFamily: fonts.regular,
   },
   progressContainer: {
     width: width * 0.6,
@@ -193,6 +195,7 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     marginTop: spacing.sm,
     textAlign: 'center',
+    fontFamily: fonts.regular,
   },
   floatingIcon: {
     position: 'absolute',
@@ -265,7 +268,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
     marginTop: spacing.lg,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
   profileSubText: {
     fontSize: fontSize.sm,
@@ -274,6 +277,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     opacity: 0.8,
     fontStyle: 'italic',
+    fontFamily: fonts.regular,
   },
   ordersContainer: {
     flex: 1,
@@ -342,7 +346,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
     marginTop: spacing.xl,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
   dotsContainer: {
     flexDirection: 'row',
@@ -458,7 +462,7 @@ const styles = StyleSheet.create({
     fontSize: fontSize.lg,
     color: colors.text,
     textAlign: 'center',
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     marginBottom: spacing.xs,
   },
   menuSubText: {
@@ -466,6 +470,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
     fontStyle: 'italic',
+    fontFamily: fonts.regular,
   },
   progressDots: {
     flexDirection: 'row',
@@ -525,7 +530,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
     marginTop: spacing.xl,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
   
   // QR Scanner Loader Styles
@@ -551,7 +556,7 @@ const styles = StyleSheet.create({
   qrLoadingText: {
     fontSize: fontSize.lg,
     color: colors.textPrimary,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     textAlign: 'center',
     marginBottom: spacing.xs,
   },
@@ -561,6 +566,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontStyle: 'italic',
     opacity: 0.8,
+    fontFamily: fonts.regular,
   },
 });
 

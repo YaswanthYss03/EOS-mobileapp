@@ -36,6 +36,7 @@ import PaymentVerificationAnimation from '../components/PaymentVerificationAnima
 
 import { menuAPI } from '../services/api';
 import quantitySyncService from '../services/quantitySyncService';
+import { fonts } from '../../../../../../theme';
 
 // Stock validation utility
 const validateCartStock = async (orderItems) => {
@@ -1072,6 +1073,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     fontSize: fontSize.md,
     color: colors.textSecondary,
+    fontFamily: fonts.regular,
   },
   header: {
     flexDirection: 'row',
@@ -1092,7 +1094,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: fontSize.lg,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.text,
     flex: 1,
     textAlign: 'center',
@@ -1128,7 +1130,7 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     fontSize: fontSize.lg,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     color: colors.text,
     marginBottom: spacing.md,
   },
@@ -1143,16 +1145,17 @@ const styles = StyleSheet.create({
   },
   itemName: {
     fontSize: fontSize.md,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
     marginBottom: spacing.xs,
   },
   itemPrice: {
     fontSize: fontSize.sm,
     color: colors.textSecondary,
+    fontFamily: fonts.regular,
   },
   itemTotal: {
     fontSize: fontSize.md,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.primary,
   },
   divider: {
@@ -1168,12 +1171,12 @@ const styles = StyleSheet.create({
   },
   subtotalLabel: {
     fontSize: fontSize.md,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
     color: colors.textSecondary,
   },
   subtotalAmount: {
     fontSize: fontSize.md,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
     color: colors.textSecondary,
   },
   parcelChargesRow: {
@@ -1185,13 +1188,13 @@ const styles = StyleSheet.create({
   parcelChargesLabel: {
     fontSize: fontSize.sm,
     color: colors.accent,
-    fontWeight: '500',
+    fontFamily: fonts.medium,
     flex: 1,
     flexWrap: 'wrap',
   },
   parcelChargesAmount: {
     fontSize: fontSize.md,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: colors.accent,
     marginLeft: spacing.sm,
   },
@@ -1202,11 +1205,11 @@ const styles = StyleSheet.create({
   },
   totalLabel: {
     fontSize: fontSize.lg,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
   },
   totalAmount: {
     fontSize: fontSize.xl,
-    fontWeight: 'bold',
+    fontFamily: fonts.bold,
     color: colors.primary,
   },
   estimatedTimePill: {
@@ -1224,7 +1227,7 @@ const styles = StyleSheet.create({
   estimatedTimeText: {
     fontSize: fontSize.sm,
     color: colors.primary,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
   },
   methodRow: {
     flexDirection: 'row',
@@ -1252,13 +1255,14 @@ const styles = StyleSheet.create({
   },
   methodTitle: {
     fontSize: fontSize.md,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     color: colors.text,
   },
   methodDescription: {
     fontSize: fontSize.xs,
     color: colors.textSecondary,
     marginTop: 2,
+    fontFamily: fonts.regular,
   },
   radioOuter: {
     width: 22,
@@ -1308,7 +1312,7 @@ const styles = StyleSheet.create({
   },
   payButtonText: {
     fontSize: fontSize.md,
-    fontWeight: '700',
+    fontFamily: fonts.bold,
     color: colors.white,
   },
   processingOverlay: {
@@ -1327,7 +1331,7 @@ const styles = StyleSheet.create({
     fontSize: fontSize.lg,
     color: colors.white,
     textAlign: 'center',
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
   },
   processingNoteContainer: {
     flexDirection: 'row',
@@ -1348,6 +1352,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
     flex: 1,
+    fontFamily: fonts.regular,
   },
 });
 
