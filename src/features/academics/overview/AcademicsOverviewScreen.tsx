@@ -1,45 +1,122 @@
-import { View, StyleSheet } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useCallback } from "react";
+import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { LinearGradient } from "expo-linear-gradient";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
-import { ScreenHeader } from "@/components/layout/ScreenHeader";
-import { MenuRow } from "@/components/ui/MenuRow";
+import { Ionicons } from "@expo/vector-icons";
+import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { QuickAccessGrid } from "@/features/erp/components/QuickAccessGrid";
+import { fonts } from "@/theme";
+
+const academicsItems = [
+  {
+    id: "current-semester",
+    label: "Current Semester",
+    icon: "ribbon-outline",
+    route: "/(tabs)/academics/current-semester",
+  },
+  { id: "timetable", label: "Timetable", icon: "time-outline", route: "/(tabs)/academics/timetable" },
+  { id: "calendar", label: "Calendar", icon: "calendar-outline", route: "/(tabs)/academics/calendar" },
+];
+
+function AcademicsHeader({ onBack }: { onBack: () => void }) {
+  const insets = useSafeAreaInsets();
+
+  return (
+    <LinearGradient
+      colors={["#2F6FE0", "#1A3D8F"]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={[headerStyles.container, { paddingTop: insets.top + 10 }]}
+    >
+      <TouchableOpacity
+        onPress={onBack}
+        style={headerStyles.backButton}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <Ionicons name="arrow-back" size={20} color="#fff" />
+      </TouchableOpacity>
+      <View>
+        <Text style={headerStyles.title}>Academics</Text>
+        <Text style={headerStyles.subtitle}>Semester VI · 2025-26</Text>
+      </View>
+    </LinearGradient>
+  );
+}
 
 export function AcademicsOverviewScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
+
+  // Same header-swap pattern as AcademicsChooserScreen and the ERP role
+  // dashboards - see src/features/academics/AcademicsChooserScreen.tsx.
+  useFocusEffect(
+    useCallback(() => {
+      navigation.getParent()?.setOptions({
+        header: () => <AcademicsHeader onBack={() => router.back()} />,
+      });
+      return () => {
+        navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
+      };
+    }, [navigation, router]),
+  );
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      <ScreenHeader title="Academics" />
-      <View style={styles.list}>
-        <MenuRow
-          icon="calendar-outline"
-          title="Timetable"
-          subtitle="Today's schedule and the full week"
-          onPress={() => router.push("/(tabs)/academics/timetable")}
-        />
-        <MenuRow
-          icon="clipboard-outline"
-          title="Lesson Plan"
-          subtitle="Syllabus progress by subject"
-          onPress={() => router.push("/(tabs)/academics/lesson-plan")}
-        />
-        <MenuRow
-          icon="library-outline"
-          title="LMS"
-          subtitle="Notes for each subject"
-          onPress={() => router.push("/(tabs)/academics/lms")}
-        />
+    <SafeAreaView style={styles.container} edges={[]}>
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Academics</Text>
+        <QuickAccessGrid items={academicsItems} size="large" />
       </View>
     </SafeAreaView>
   );
 }
+
+const headerStyles = StyleSheet.create({
+  container: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+  },
+  backButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  title: {
+    color: "#fff",
+    fontSize: 18,
+    fontFamily: fonts.bold,
+  },
+  subtitle: {
+    color: "#D7E2FA",
+    fontSize: 12,
+    fontFamily: fonts.medium,
+    marginTop: 2,
+  },
+});
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#fff",
   },
-  list: {
-    paddingTop: 8,
+  section: {
+    padding: 16,
+  },
+  sectionTitle: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#8A93A3",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    marginBottom: 12,
   },
 });

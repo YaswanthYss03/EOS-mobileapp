@@ -35,7 +35,9 @@ function DriveCard({ drive }: { drive: Drive }) {
       </View>
       <View style={styles.row}>
         <Ionicons name="checkmark-circle-outline" size={14} color="#666" />
-        <Text style={styles.rowText}>{drive.eligibility}</Text>
+        <Text style={styles.rowText}>
+          {drive.minCgpa}, {drive.arrearsRule}
+        </Text>
       </View>
     </View>
   );
