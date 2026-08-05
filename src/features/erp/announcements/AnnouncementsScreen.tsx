@@ -3,7 +3,7 @@ import { View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet } from 
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
@@ -28,11 +28,16 @@ function toggleItem(list: string[], item: string): string[] {
 
 // TODO: this is a compose+draft UI over local state - wire to a real
 // announcements backend endpoint once one exists. Reachable from the HoD
-// dashboard's "Announcements" item.
+// dashboard's "Announcements" item (full view, can also target faculty
+// groups) and the Employee/Faculty dashboard's "Announcements" item (opens
+// with ?audience=faculty - a class advisor posting to their own classes only,
+// so the faculty-targeting section is hidden).
 export function AnnouncementsScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { audience } = useLocalSearchParams<{ audience?: string }>();
+  const isFacultyAudience = audience === "faculty";
 
   const [tab, setTab] = useState<Tab>("create");
   const [title, setTitle] = useState("");
@@ -203,24 +208,28 @@ export function AnnouncementsScreen() {
               ))}
             </View>
 
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.fieldLabel}>Target faculty</Text>
-              <TouchableOpacity style={styles.smallPillButton} onPress={handleToggleSendToAllFaculty}>
-                <Text style={styles.smallPillButtonText}>
-                  {allFacultySelected ? "Clear all" : "Send to all faculty"}
-                </Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.checkboxGrid}>
-              {targetFacultyGroups.map((item) => (
-                <CheckboxOption
-                  key={item}
-                  label={item}
-                  checked={selectedFaculty.includes(item)}
-                  onPress={() => setSelectedFaculty((prev) => toggleItem(prev, item))}
-                />
-              ))}
-            </View>
+            {!isFacultyAudience && (
+              <>
+                <View style={styles.sectionHeaderRow}>
+                  <Text style={styles.fieldLabel}>Target faculty</Text>
+                  <TouchableOpacity style={styles.smallPillButton} onPress={handleToggleSendToAllFaculty}>
+                    <Text style={styles.smallPillButtonText}>
+                      {allFacultySelected ? "Clear all" : "Send to all faculty"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.checkboxGrid}>
+                  {targetFacultyGroups.map((item) => (
+                    <CheckboxOption
+                      key={item}
+                      label={item}
+                      checked={selectedFaculty.includes(item)}
+                      onPress={() => setSelectedFaculty((prev) => toggleItem(prev, item))}
+                    />
+                  ))}
+                </View>
+              </>
+            )}
 
             <TouchableOpacity style={styles.attachButton} onPress={handleAttachFile} activeOpacity={0.8}>
               <Ionicons name="cloud-upload-outline" size={18} color="#2F6FE0" />
@@ -258,8 +267,10 @@ export function AnnouncementsScreen() {
                 </Text>
               ) : null}
               <Text style={styles.draftMeta}>
-                {draft.classes.length} class{draft.classes.length === 1 ? "" : "es"} · {draft.faculty.length} faculty
-                group{draft.faculty.length === 1 ? "" : "s"}
+                {draft.classes.length} class{draft.classes.length === 1 ? "" : "es"}
+                {!isFacultyAudience
+                  ? ` · ${draft.faculty.length} faculty group${draft.faculty.length === 1 ? "" : "s"}`
+                  : ""}
               </Text>
               <TouchableOpacity style={styles.editDraftButton} onPress={() => handleEditDraft(draft)} activeOpacity={0.85}>
                 <Ionicons name="create-outline" size={14} color="#2F6FE0" />

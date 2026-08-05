@@ -45,7 +45,7 @@ export const employeeSectionItems: QuickAccessItem[] = [
   { id: "leave", label: "Leave", icon: "airplane-outline", route: "/(tabs)/erp/leave-request" },
   { id: "od", label: "OD", icon: "person-outline", route: "/(tabs)/erp/od-request" },
   { id: "venue", label: "Venue", icon: "location-outline", route: "/(tabs)/erp/venue-request" },
-  { id: "hr-payroll", label: "HR Payroll", icon: "cash-outline" },
+  { id: "hr-payroll", label: "HR Payroll", icon: "cash-outline", route: "/(tabs)/erp/hr-payroll-request" },
   { id: "payslip", label: "Payslip", icon: "receipt-outline", route: "/(tabs)/erp/payslip-request" },
   { id: "appraisal", label: "Appraisal", icon: "ribbon-outline", route: "/(tabs)/erp/appraisal-request" },
   { id: "library", label: "Library", icon: "library-outline", route: "/(tabs)/erp/library" },

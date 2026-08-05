@@ -5,10 +5,17 @@ export type PayslipRequest = {
   monthLabel: string;
   requestedOn: string;
   status: PayslipStatus;
+  purpose?: string;
+  remarks?: string;
 };
 
 // TODO: replace with a real call once a payroll backend endpoint exists.
-export const availableMonths = ["July 2026", "August 2026"];
+export const months = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+export const years = ["2024", "2025", "2026"];
 
 export const mockPayslipHistory: PayslipRequest[] = [
   { id: "1", monthLabel: "June 2026", requestedOn: "02 Jul 2026", status: "approved" },

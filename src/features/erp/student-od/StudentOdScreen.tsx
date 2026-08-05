@@ -8,7 +8,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
-import { classInfo, mockNoDueStudents, type NoDueStatus, type NoDueStudent } from "./data/mockNoDue";
+import { classInfo, mockStudentOdRequests, type StudentOdRequest, type StudentOdStatus } from "./data/mockStudentOd";
+
+type StatusFilter = "pending" | "approved" | "rejected" | "all";
+
+const STATUS_FILTERS: StatusFilter[] = ["pending", "approved", "rejected", "all"];
 
 function initialsFromName(name: string) {
   return name
@@ -19,25 +23,17 @@ function initialsFromName(name: string) {
     .join("");
 }
 
-function formatRupees(amount: number) {
-  return `₹${amount.toLocaleString("en-IN")}`;
-}
-
-const STATUS_BADGE_STYLE: Record<NoDueStatus, { bg: string; text: string; label: string }> = {
-  pending: { bg: "#FEF3C7", text: "#D97706", label: "Pending" },
-  cleared: { bg: "#EAF0FD", text: "#2F6FE0", label: "Cleared" },
-  onhold: { bg: "#FEF2F2", text: "#DC2626", label: "On hold" },
-};
-
-// TODO: this is a view-only clearance tracker over mockNoDue - wire to a real
-// no-due backend endpoint once one exists. Reachable from the Employee
-// dashboard's Student "No-Due" item (Class Advisor view of their own
-// section) - see the sibling erp/student-leave and erp/student-od screens.
-export function NoDueScreen() {
+// TODO: this is a view-only approve/reject UI over mockStudentOd - wire to a
+// real on-duty backend endpoint once one exists. Reachable from the Employee
+// dashboard's Student "Student OD" item (Class Advisor view of their own
+// section) - see erp/employee/data/mockDashboard.ts and the sibling
+// erp/student-leave/StudentLeaveScreen.tsx.
+export function StudentOdScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [students, setStudents] = useState(mockNoDueStudents);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
+  const [requests, setRequests] = useState(mockStudentOdRequests);
 
   useFocusEffect(
     useCallback(() => {
@@ -50,27 +46,31 @@ export function NoDueScreen() {
 
   const counts = useMemo(
     () => ({
-      pending: students.filter((s) => s.status === "pending").length,
-      cleared: students.filter((s) => s.status === "cleared").length,
-      onhold: students.filter((s) => s.status === "onhold").length,
+      pending: requests.filter((r) => r.status === "pending").length,
+      approved: requests.filter((r) => r.status === "approved").length,
+      rejected: requests.filter((r) => r.status === "rejected").length,
+      all: requests.length,
     }),
-    [students],
+    [requests],
   );
 
-  function handleClearDue(id: string) {
-    setStudents((prev) =>
-      prev.map((s) =>
-        s.id === id
-          ? { ...s, status: "cleared", fees: s.fees.map((fee) => ({ label: fee.label, status: "cleared" })) }
-          : s,
-      ),
-    );
-    toast.success("Due cleared");
+  const filteredRequests = useMemo(
+    () => (statusFilter === "all" ? requests : requests.filter((r) => r.status === statusFilter)),
+    [requests, statusFilter],
+  );
+
+  function updateStatus(id: string, status: StudentOdStatus) {
+    setRequests((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
   }
 
-  function handleHold(id: string) {
-    setStudents((prev) => prev.map((s) => (s.id === id ? { ...s, status: "onhold" } : s)));
-    toast.info("Clearance put on hold");
+  function handleApprove(id: string) {
+    updateStatus(id, "approved");
+    toast.success("On-duty request approved");
+  }
+
+  function handleReject(id: string) {
+    updateStatus(id, "rejected");
+    toast.info("On-duty request rejected");
   }
 
   return (
@@ -89,8 +89,8 @@ export function NoDueScreen() {
           <Ionicons name="arrow-back" size={20} color="#fff" />
         </TouchableOpacity>
         <View>
-          <Text style={styles.headerTitle}>No-Due Approval</Text>
-          <Text style={styles.headerSubtitle}>Clearance requests</Text>
+          <Text style={styles.headerTitle}>Student OD</Text>
+          <Text style={styles.headerSubtitle}>On-duty applications</Text>
         </View>
       </LinearGradient>
 
@@ -108,104 +108,101 @@ export function NoDueScreen() {
           </View>
         </View>
 
-        <View style={styles.statsRow}>
-          <StatCard value={counts.pending} label="Awaiting" color="#D97706" />
-          <StatCard value={counts.cleared} label="Cleared" color="#2F6FE0" />
-          <StatCard value={counts.onhold} label="On hold" color="#DC2626" />
+        <View style={styles.statusRow}>
+          {STATUS_FILTERS.map((status) => (
+            <TouchableOpacity
+              key={status}
+              style={[styles.statusPill, statusFilter === status && styles.statusPillActive]}
+              onPress={() => setStatusFilter(status)}
+            >
+              <Text style={[styles.statusPillText, statusFilter === status && styles.statusPillTextActive]}>
+                {status.charAt(0).toUpperCase() + status.slice(1)} ({counts[status]})
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
-        {students.map((student) => (
-          <NoDueCard
-            key={student.id}
-            student={student}
-            onClearDue={() => handleClearDue(student.id)}
-            onHold={() => handleHold(student.id)}
+        {filteredRequests.map((request) => (
+          <StudentOdCard
+            key={request.id}
+            request={request}
+            onApprove={() => handleApprove(request.id)}
+            onReject={() => handleReject(request.id)}
           />
         ))}
+
+        {filteredRequests.length === 0 && (
+          <View style={styles.emptyState}>
+            <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
+            <Text style={styles.emptyStateText}>No requests here</Text>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function StatCard({ value, label, color }: { value: number; label: string; color: string }) {
-  return (
-    <View style={styles.statCard}>
-      <Text style={[styles.statValue, { color }]}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-}
-
-function NoDueCard({
-  student,
-  onClearDue,
-  onHold,
+function StudentOdCard({
+  request,
+  onApprove,
+  onReject,
 }: {
-  student: NoDueStudent;
-  onClearDue: () => void;
-  onHold: () => void;
+  request: StudentOdRequest;
+  onApprove: () => void;
+  onReject: () => void;
 }) {
-  const totalPending = student.fees.reduce((sum, fee) => sum + (fee.pendingAmount ?? 0), 0);
-  const badge = STATUS_BADGE_STYLE[student.status];
+  const { name, rollNo, section, category, dates, session, docs, reason, status } = request;
 
   return (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{initialsFromName(student.name)}</Text>
+          <Text style={styles.avatarText}>{initialsFromName(name)}</Text>
         </View>
         <View style={styles.cardHeaderTextWrap}>
-          <Text style={styles.cardName}>{student.name}</Text>
+          <Text style={styles.cardName}>{name}</Text>
           <Text style={styles.cardSubtitle}>
-            {student.rollNo} · {student.section}
+            {rollNo} · {section}
           </Text>
         </View>
-        <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
-          <Text style={[styles.statusBadgeText, { color: badge.text }]}>{badge.label}</Text>
+        <View style={styles.categoryBadge}>
+          <Text style={styles.categoryBadgeText}>{category}</Text>
         </View>
       </View>
 
       <View style={styles.divider} />
 
-      <View style={styles.appliedForRow}>
-        <Text style={styles.appliedForLabel}>APPLIED FOR</Text>
-        <Text style={styles.appliedForValue}>{student.appliedFor}</Text>
-      </View>
-
-      <View style={styles.feeList}>
-        {student.fees.map((fee) => (
-          <View style={styles.feeRow} key={fee.label}>
-            <View style={[styles.feeDot, fee.status === "pending" && styles.feeDotPending]} />
-            <Text style={styles.feeLabel}>{fee.label}</Text>
-            {fee.status === "cleared" ? (
-              <Text style={styles.feeCleared}>Cleared</Text>
-            ) : (
-              <Text style={styles.feePending}>{formatRupees(fee.pendingAmount ?? 0)}</Text>
-            )}
-          </View>
-        ))}
-      </View>
-
-      {totalPending > 0 && (
-        <View style={styles.totalPendingRow}>
-          <Text style={styles.totalPendingLabel}>Total pending</Text>
-          <Text style={styles.totalPendingValue}>{formatRupees(totalPending)}</Text>
+      <View style={styles.metaRow}>
+        <View style={styles.metaCol}>
+          <Text style={styles.metaLabel}>DATES</Text>
+          <Text style={styles.metaValue}>{dates}</Text>
         </View>
-      )}
+        <View style={styles.metaCol}>
+          <Text style={styles.metaLabel}>SESSION</Text>
+          <Text style={styles.metaValue}>{session}</Text>
+        </View>
+        <View style={styles.metaCol}>
+          <Text style={styles.metaLabel}>DOCS</Text>
+          <Text style={styles.metaValue}>{docs}</Text>
+        </View>
+      </View>
 
-      {student.status === "pending" ? (
+      <Text style={styles.reasonLabel}>REASON</Text>
+      <Text style={styles.reasonText}>{reason}</Text>
+
+      {status === "pending" ? (
         <View style={styles.actionsRow}>
-          <TouchableOpacity style={styles.holdButton} onPress={onHold} activeOpacity={0.85}>
-            <Text style={styles.holdButtonText}>Hold</Text>
+          <TouchableOpacity style={styles.rejectButton} onPress={onReject} activeOpacity={0.85}>
+            <Text style={styles.rejectButtonText}>Reject</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.clearDueButton} onPress={onClearDue} activeOpacity={0.85}>
-            <Text style={styles.clearDueButtonText}>Clear Due</Text>
+          <TouchableOpacity style={styles.approveButton} onPress={onApprove} activeOpacity={0.85}>
+            <Text style={styles.approveButtonText}>Approve</Text>
           </TouchableOpacity>
         </View>
       ) : (
-        <View style={[styles.statusBar, student.status === "onhold" && styles.statusBarOnHold]}>
-          <Text style={[styles.statusBarText, student.status === "onhold" && styles.statusBarTextOnHold]}>
-            {student.status === "cleared" ? "Cleared" : "On Hold"}
+        <View style={[styles.statusBar, status === "rejected" && styles.statusBarRejected]}>
+          <Text style={[styles.statusBarText, status === "rejected" && styles.statusBarTextRejected]}>
+            {status === "approved" ? "Approved" : "Rejected"}
           </Text>
         </View>
       )}
@@ -298,29 +295,33 @@ const styles = StyleSheet.create({
     color: "#2F6FE0",
     letterSpacing: 0.5,
   },
-  statsRow: {
+  statusRow: {
     flexDirection: "row",
-    gap: 10,
-    marginBottom: 16,
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 14,
   },
-  statCard: {
-    flex: 1,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#EEF0F4",
-    backgroundColor: "#fff",
-    paddingVertical: 14,
+  statusPill: {
+    flexGrow: 1,
     alignItems: "center",
-    gap: 4,
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
-  statValue: {
-    fontSize: 20,
-    fontFamily: fonts.bold,
+  statusPillActive: {
+    borderColor: "#2F6FE0",
+    borderWidth: 1.5,
   },
-  statLabel: {
+  statusPillText: {
     fontSize: 11,
-    fontFamily: fonts.medium,
-    color: "#9AA6B2",
+    fontFamily: fonts.semibold,
+    color: "#4B5563",
+  },
+  statusPillTextActive: {
+    color: "#2F6FE0",
   },
   card: {
     backgroundColor: "#fff",
@@ -366,96 +367,60 @@ const styles = StyleSheet.create({
     color: "#9AA6B2",
     marginTop: 1,
   },
-  statusBadge: {
+  categoryBadge: {
+    backgroundColor: "#E4EBFB",
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  statusBadgeText: {
+  categoryBadgeText: {
     fontSize: 11,
     fontFamily: fonts.bold,
+    color: "#2F6FE0",
   },
   divider: {
     height: 1,
     backgroundColor: "#F1F3F6",
     marginBottom: 12,
   },
-  appliedForRow: {
+  metaRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
     marginBottom: 10,
   },
-  appliedForLabel: {
-    fontSize: 10,
+  metaCol: {
+    flex: 1,
+  },
+  metaLabel: {
+    fontSize: 9,
     fontFamily: fonts.bold,
     color: "#9AA6B2",
     letterSpacing: 0.5,
   },
-  appliedForValue: {
+  metaValue: {
     fontSize: 13,
     fontFamily: fonts.bold,
     color: "#111827",
+    marginTop: 3,
   },
-  feeList: {
-    marginBottom: 4,
+  reasonLabel: {
+    fontSize: 9,
+    fontFamily: fonts.bold,
+    color: "#9AA6B2",
+    letterSpacing: 0.5,
+    marginBottom: 3,
   },
-  feeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingVertical: 5,
-  },
-  feeDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#D1D5DB",
-  },
-  feeDotPending: {
-    backgroundColor: "#DC2626",
-  },
-  feeLabel: {
-    flex: 1,
+  reasonText: {
     fontSize: 13,
     fontFamily: fonts.regular,
     color: "#374151",
-  },
-  feeCleared: {
-    fontSize: 13,
-    fontFamily: fonts.bold,
-    color: "#2F6FE0",
-  },
-  feePending: {
-    fontSize: 13,
-    fontFamily: fonts.bold,
-    color: "#DC2626",
-  },
-  totalPendingRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    borderTopWidth: 1,
-    borderTopColor: "#F1F3F6",
-    paddingTop: 10,
-    marginTop: 6,
+    lineHeight: 18,
     marginBottom: 12,
-  },
-  totalPendingLabel: {
-    fontSize: 14,
-    fontFamily: fonts.bold,
-    color: "#111827",
-  },
-  totalPendingValue: {
-    fontSize: 15,
-    fontFamily: fonts.bold,
-    color: "#DC2626",
   },
   actionsRow: {
     flexDirection: "row",
     gap: 10,
   },
-  holdButton: {
+  rejectButton: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
@@ -464,12 +429,12 @@ const styles = StyleSheet.create({
     borderColor: "#FCA5A5",
     paddingVertical: 10,
   },
-  holdButtonText: {
+  rejectButtonText: {
     fontSize: 13,
     fontFamily: fonts.bold,
     color: "#DC2626",
   },
-  clearDueButton: {
+  approveButton: {
     flex: 1.4,
     alignItems: "center",
     justifyContent: "center",
@@ -477,7 +442,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#2F6FE0",
     paddingVertical: 10,
   },
-  clearDueButtonText: {
+  approveButtonText: {
     fontSize: 13,
     fontFamily: fonts.bold,
     color: "#fff",
@@ -489,7 +454,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#EAF0FD",
     paddingVertical: 12,
   },
-  statusBarOnHold: {
+  statusBarRejected: {
     backgroundColor: "#FEF2F2",
   },
   statusBarText: {
@@ -497,7 +462,17 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     color: "#2F6FE0",
   },
-  statusBarTextOnHold: {
+  statusBarTextRejected: {
     color: "#DC2626",
+  },
+  emptyState: {
+    alignItems: "center",
+    paddingVertical: 40,
+    gap: 8,
+  },
+  emptyStateText: {
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    color: "#9AA6B2",
   },
 });

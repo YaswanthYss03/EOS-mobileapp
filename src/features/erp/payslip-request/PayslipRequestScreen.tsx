@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Modal, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -9,9 +9,10 @@ import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { formatDate } from "@/utils/calendar";
-import { availableMonths, mockPayslipHistory, type PayslipRequest } from "./data/mockPayslipRequest";
+import { months, years, mockPayslipHistory, type PayslipRequest } from "./data/mockPayslipRequest";
 
 type Tab = "apply" | "history";
+type PickerField = "month" | "year" | null;
 
 // TODO: this is an apply+history UI over mockPayslipRequest - wire to a real
 // payroll backend endpoint once one exists. Reachable from the
@@ -22,9 +23,12 @@ export function PayslipRequestScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [tab, setTab] = useState<Tab>("history");
+  const [tab, setTab] = useState<Tab>("apply");
   const [month, setMonth] = useState<string | null>(null);
-  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+  const [year, setYear] = useState("2026");
+  const [pickerFor, setPickerFor] = useState<PickerField>(null);
+  const [purpose, setPurpose] = useState("");
+  const [remarks, setRemarks] = useState("");
   const [history, setHistory] = useState(mockPayslipHistory);
 
   // This screen renders its own full header below, so hide the shared
@@ -43,20 +47,32 @@ export function PayslipRequestScreen() {
     toast.info(`Downloading ${item.monthLabel} payslip is coming soon`);
   }
 
+  function resetForm() {
+    setMonth(null);
+    setPurpose("");
+    setRemarks("");
+  }
+
   function handleSubmit() {
     if (!month) {
       toast.warning("Select a month");
       return;
     }
+    if (!purpose.trim()) {
+      toast.warning("Add a purpose for this request");
+      return;
+    }
     const newRequest: PayslipRequest = {
       id: `local-${history.length}-${Date.now()}`,
-      monthLabel: month,
+      monthLabel: `${month} ${year}`,
       requestedOn: formatDate(new Date()),
       status: "pending",
+      purpose: purpose.trim(),
+      remarks: remarks.trim() || undefined,
     };
     setHistory((prev) => [newRequest, ...prev]);
     toast.success("Payslip request submitted");
-    setMonth(null);
+    resetForm();
     setTab("history");
   }
 
@@ -99,19 +115,56 @@ export function PayslipRequestScreen() {
 
         {tab === "apply" ? (
           <>
-            <Text style={styles.sectionTitle}>New Payslip Request</Text>
+            <Text style={styles.sectionTitle}>Request Payslip</Text>
             <View style={styles.card}>
-              <Text style={styles.fieldLabel}>Select Month</Text>
-              <TouchableOpacity
-                style={styles.selectRow}
-                onPress={() => setMonthPickerOpen(true)}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.selectValue, !month && styles.selectValuePlaceholder]}>
-                  {month ?? "Select month"}
-                </Text>
-                <Ionicons name="chevron-down" size={18} color="#B0B7C3" />
-              </TouchableOpacity>
+              <View style={styles.rowFields}>
+                <View style={styles.rowField}>
+                  <Text style={styles.fieldLabel}>Month</Text>
+                  <TouchableOpacity
+                    style={styles.selectRow}
+                    onPress={() => setPickerFor("month")}
+                    activeOpacity={0.8}
+                  >
+                    <Text
+                      style={[styles.selectValue, !month && styles.selectValuePlaceholder]}
+                      numberOfLines={1}
+                    >
+                      {month ?? "Select month"}
+                    </Text>
+                    <Ionicons name="chevron-down" size={16} color="#B0B7C3" />
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.rowField}>
+                  <Text style={styles.fieldLabel}>Year</Text>
+                  <TouchableOpacity
+                    style={styles.selectRow}
+                    onPress={() => setPickerFor("year")}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.selectValue}>{year}</Text>
+                    <Ionicons name="chevron-down" size={16} color="#B0B7C3" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <Text style={styles.fieldLabel}>Purpose</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. Home loan documentation"
+                placeholderTextColor="#9AA6B2"
+                value={purpose}
+                onChangeText={setPurpose}
+              />
+
+              <Text style={styles.fieldLabel}>Remarks</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Anything the accounts team should know"
+                placeholderTextColor="#9AA6B2"
+                value={remarks}
+                onChangeText={setRemarks}
+                multiline
+              />
 
               <TouchableOpacity style={styles.submitButton} onPress={handleSubmit} activeOpacity={0.85}>
                 <Text style={styles.submitButtonText}>Submit Request</Text>
@@ -136,32 +189,34 @@ export function PayslipRequestScreen() {
       </ScrollView>
 
       <Modal
-        visible={monthPickerOpen}
+        visible={pickerFor !== null}
         transparent
         animationType="fade"
-        onRequestClose={() => setMonthPickerOpen(false)}
+        onRequestClose={() => setPickerFor(null)}
       >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setMonthPickerOpen(false)}
-        >
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setPickerFor(null)}>
           <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>Select Month</Text>
-            {availableMonths.map((option) => (
-              <TouchableOpacity
-                key={option}
-                style={styles.modalOptionRow}
-                onPress={() => {
-                  setMonth(option);
-                  setMonthPickerOpen(false);
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.modalOptionName}>{option}</Text>
-                {month === option && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
-              </TouchableOpacity>
-            ))}
+            <Text style={styles.modalTitle}>{pickerFor === "month" ? "Select Month" : "Select Year"}</Text>
+            <ScrollView style={styles.modalList}>
+              {(pickerFor === "month" ? months : years).map((option) => {
+                const selected = pickerFor === "month" ? month === option : year === option;
+                return (
+                  <TouchableOpacity
+                    key={option}
+                    style={styles.modalOptionRow}
+                    onPress={() => {
+                      if (pickerFor === "month") setMonth(option);
+                      else setYear(option);
+                      setPickerFor(null);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.modalOptionName}>{option}</Text>
+                    {selected && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -293,8 +348,15 @@ const styles = StyleSheet.create({
   fieldLabel: {
     fontSize: 12,
     fontFamily: fonts.semibold,
-    color: "#2F6FE0",
+    color: "#374151",
     marginBottom: 6,
+  },
+  rowFields: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  rowField: {
+    flex: 1,
   },
   selectRow: {
     flexDirection: "row",
@@ -309,6 +371,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   selectValue: {
+    flex: 1,
     fontSize: 14,
     fontFamily: fonts.bold,
     color: "#111827",
@@ -316,6 +379,22 @@ const styles = StyleSheet.create({
   selectValuePlaceholder: {
     color: "#9AA6B2",
     fontFamily: fonts.regular,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#F9FAFB",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    fontFamily: fonts.regular,
+    color: "#111827",
+    marginBottom: 16,
+  },
+  textArea: {
+    height: 90,
+    textAlignVertical: "top",
   },
   submitButton: {
     alignItems: "center",
@@ -414,12 +493,16 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 18,
     padding: 18,
+    maxHeight: "70%",
   },
   modalTitle: {
     fontSize: 15,
     fontFamily: fonts.bold,
     color: "#111827",
     marginBottom: 10,
+  },
+  modalList: {
+    marginBottom: 4,
   },
   modalOptionRow: {
     flexDirection: "row",

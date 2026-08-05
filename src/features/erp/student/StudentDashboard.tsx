@@ -10,7 +10,7 @@ export function StudentDashboard() {
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Quick Access</Text>
-          <QuickAccessGrid items={quickAccessItems} size="large" />
+          <QuickAccessGrid items={quickAccessItems} />
         </View>
 
         <View style={styles.section}>
