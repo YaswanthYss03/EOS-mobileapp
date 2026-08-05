@@ -15,4 +15,5 @@ export const roleAccess: Record<Role, { tabs: string[] }> = {
   billing: { tabs: ["home", "erp"] },
   "hr-payroll": { tabs: ["home", "erp"] },
   "media-room": { tabs: ["home", "erp"] },
+  secretary: { tabs: ["home", "erp", "amenity"] },
 };

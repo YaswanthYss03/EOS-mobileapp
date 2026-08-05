@@ -12,7 +12,8 @@ export type Role =
   | "placement"
   | "billing"
   | "hr-payroll"
-  | "media-room";
+  | "media-room"
+  | "secretary";
 
 // EOS-backend has 17 roles (see EOS-backend/prisma/seed.ts) but this app only
 // has dedicated ERP dashboards/tabs for a subset of them - any backend role
@@ -31,7 +32,7 @@ const BACKEND_ROLE_MAP: Record<string, Role> = {
   hr_payroll: "hr-payroll",
   finance: "employee",
   iqac: "iqac",
-  secretary: "employee",
+  secretary: "secretary",
   gate_warden: "warden",
   media_room: "media-room",
   academic_coordinator: "employee",

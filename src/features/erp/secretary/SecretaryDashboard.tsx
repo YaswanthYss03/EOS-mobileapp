@@ -8,9 +8,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { QuickAccessGrid } from "../components/QuickAccessGrid";
-import { wardenSectionItems, employeeSectionItems } from "./data/mockDashboard";
+import { secretarySectionItems, employeeSectionItems } from "./data/mockDashboard";
 
-function WardenHeader({ onBack }: { onBack: () => void }) {
+function SecretaryHeader({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -29,26 +29,26 @@ function WardenHeader({ onBack }: { onBack: () => void }) {
       </TouchableOpacity>
       <View>
         <Text style={headerStyles.title}>EOS</Text>
-        <Text style={headerStyles.subtitle}>Warden services</Text>
+        <Text style={headerStyles.subtitle}>Secretary services</Text>
       </View>
     </LinearGradient>
   );
 }
 
-// TODO: warden RBAC - view-only pages for this role go here as siblings/subfolders.
+// TODO: secretary RBAC - view-only pages for this role go here as siblings/subfolders.
 // Anything with complex operations (bulk edits, approvals, config) stays on the web app.
-export function WardenDashboard() {
+export function SecretaryDashboard() {
   const navigation = useNavigation();
   const router = useRouter();
 
   // Swaps the shared CollegeHeader (mounted at the Tabs level, see
   // app/(tabs)/_layout.tsx) for this screen's own header while it's focused,
   // restoring the shared one on blur/unmount - same pattern as the ERP
-  // employee/hod/secretary dashboards.
+  // employee/hod dashboards.
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({
-        header: () => <WardenHeader onBack={() => router.replace("/(tabs)/home")} />,
+        header: () => <SecretaryHeader onBack={() => router.replace("/(tabs)/home")} />,
       });
       return () => {
         navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
@@ -60,8 +60,8 @@ export function WardenDashboard() {
     <SafeAreaView style={styles.container} edges={[]}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Warden</Text>
-          <QuickAccessGrid items={wardenSectionItems} size="large" />
+          <Text style={styles.sectionTitle}>Secretary</Text>
+          <QuickAccessGrid items={secretarySectionItems} />
         </View>
 
         <View style={styles.section}>
