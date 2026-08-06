@@ -5,19 +5,14 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { formatDate } from "@/utils/calendar";
-import {
-  getStudentPlacementHistory,
-  type DriveHistoryItem,
-} from "@/services/api/faculty-placements.api";
+import { getStudentPlacementHistory, type DriveHistoryItem } from "@/services/api/faculty-placements.api";
 import type { ApplicationStatus } from "@/services/api/placements.api";
 
-// Same status labels/colors as the student's own Placements screen (see
-// @/features/academics/placements/PlacementsOverviewScreen.tsx) - "Round N
-// cleared" comes straight from drive_application_status_enum, the schema's
-// own ceiling on how much detail a status can show.
+// Same status labels/colors as PlacementsOverviewScreen's own history view -
+// "Round N cleared" comes straight from drive_application_status_enum, the
+// schema's own ceiling on how much detail a status can show.
 const APPLICATION_STATUS_META: Record<ApplicationStatus, { label: string; bg: string; text: string }> = {
   applied: { label: "Applied", bg: "#EAF0FD", text: "#2F6FE0" },
   r1_cleared: { label: "Round 1 cleared", bg: "#FEF3C7", text: "#D97706" },
@@ -60,9 +55,11 @@ function StudentHeader({ onBack, name, studentIdNo }: { onBack: () => void; name
   );
 }
 
-// Drill-down from FacultyPlacementsScreen's History tab - a single mentee's
-// own placement history, authorized server-side via class_mentors (see
-// @/services/api/faculty-placements.api.ts's getStudentPlacementHistory).
+// Drill-down from PlacementsOverviewScreen's faculty History tab - a single
+// mentee's own placement history, authorized server-side via class_mentors
+// (see @/services/api/faculty-placements.api.ts's getStudentPlacementHistory).
+// Lives under Academics (not the ERP tab) to match where the faculty
+// reaches the Placements tile itself from.
 export function StudentPlacementHistoryScreen() {
   const router = useRouter();
   const navigation = useNavigation();

@@ -34,5 +34,4 @@ export const studentSectionItems: QuickAccessItem[] = [
     route: "/(tabs)/erp/announcements?audience=faculty",
   },
   { id: "class-result", label: "Class Result", icon: "bar-chart-outline", route: "/(tabs)/erp/class-result" },
-  { id: "faculty-placements", label: "Placements", icon: "briefcase-outline", route: "/(tabs)/erp/faculty-placements" },
 ];

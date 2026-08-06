@@ -7,6 +7,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "@/theme";
 import { formatDate } from "@/utils/calendar";
+import { useRole } from "@/hooks/useRole";
 import {
   getUpcomingDrives,
   getDriveHistory,
@@ -14,6 +15,12 @@ import {
   type DriveHistoryItem,
   type ApplicationStatus,
 } from "@/services/api/placements.api";
+import {
+  getUpcomingDrivesForFaculty,
+  getMentoredStudents,
+  type UpcomingDrive as FacultyUpcomingDrive,
+  type MentoredStudent,
+} from "@/services/api/faculty-placements.api";
 
 type PlacementTab = "upcoming" | "history";
 
@@ -53,15 +60,33 @@ function PlacementsHeader({ onBack }: { onBack: () => void }) {
   );
 }
 
-// Wired to EOS-backend's placement/drives module (see
-// @/services/api/placements.api.ts) - "Upcoming" is split from "History" by
-// the student's OWN application outcome, not the drive's institution-wide
-// status, since a drive stays "scheduled" campus-wide even once individual
-// students have a final placed/rejected result on it. Reachable from the
-// Academics tab's chooser.
+// Wired to EOS-backend's placement/drives module - see
+// @/services/api/placements.api.ts (student's own self-service view) and
+// @/services/api/faculty-placements.api.ts (faculty/HoD mentor view).
+// Reachable from the Academics tab's chooser for every role; branches on
+// useRole() since a student and a faculty/HoD mentor need genuinely
+// different data here - a student has their own application outcome to
+// track, a mentor has none (they're not an applicant) but instead needs to
+// see their mentees' histories.
 export function PlacementsOverviewScreen() {
+  const role = useRole();
   const router = useRouter();
   const navigation = useNavigation();
+
+  useFocusEffect(
+    useCallback(() => {
+      navigation.getParent()?.setOptions({
+        header: () => <PlacementsHeader onBack={() => router.back()} />,
+      });
+    }, [navigation, router]),
+  );
+
+  return role === "student" ? <StudentPlacementsBody /> : <FacultyPlacementsBody />;
+}
+
+// ───────────────────────────── Student body ─────────────────────────────
+
+function StudentPlacementsBody() {
   const [tab, setTab] = useState<PlacementTab>("upcoming");
 
   const [upcoming, setUpcoming] = useState<UpcomingDrive[] | null>(null);
@@ -73,19 +98,6 @@ export function PlacementsOverviewScreen() {
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyErrored, setHistoryErrored] = useState(false);
   const [historyReloadToken, setHistoryReloadToken] = useState(0);
-
-  // No blur-cleanup here on purpose - see AcademicsChooserScreen's
-  // useFocusEffect comment. Going back always lands on the Chooser, which
-  // re-applies its own header on refocus; a cleanup that restores
-  // CollegeHeader here would race that and can win, which is exactly the
-  // "College header shows instead of Placements" bug this fixes.
-  useFocusEffect(
-    useCallback(() => {
-      navigation.getParent()?.setOptions({
-        header: () => <PlacementsHeader onBack={() => router.back()} />,
-      });
-    }, [navigation, router]),
-  );
 
   useEffect(() => {
     setUpcomingLoading(true);
@@ -108,22 +120,7 @@ export function PlacementsOverviewScreen() {
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       <View style={styles.content}>
-        <View style={styles.tabSwitch}>
-          <TouchableOpacity
-            style={[styles.tabSwitchButton, tab === "upcoming" && styles.tabSwitchButtonActive]}
-            onPress={() => setTab("upcoming")}
-          >
-            <Text style={[styles.tabSwitchText, tab === "upcoming" && styles.tabSwitchTextActive]}>
-              Upcoming drives
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabSwitchButton, tab === "history" && styles.tabSwitchButtonActive]}
-            onPress={() => setTab("history")}
-          >
-            <Text style={[styles.tabSwitchText, tab === "history" && styles.tabSwitchTextActive]}>History</Text>
-          </TouchableOpacity>
-        </View>
+        <TabSwitch tab={tab} setTab={setTab} />
 
         <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
           {tab === "upcoming" ? (
@@ -132,7 +129,7 @@ export function PlacementsOverviewScreen() {
             ) : upcomingErrored ? (
               <ErrorState onRetry={() => setUpcomingReloadToken((n) => n + 1)} />
             ) : upcoming && upcoming.length > 0 ? (
-              upcoming.map((drive) => <UpcomingCard key={drive.drive_id} drive={drive} />)
+              upcoming.map((drive) => <StudentUpcomingCard key={drive.drive_id} drive={drive} />)
             ) : (
               <EmptyState icon="briefcase-outline" text="No drives coming up right now." />
             )
@@ -151,7 +148,7 @@ export function PlacementsOverviewScreen() {
   );
 }
 
-function UpcomingCard({ drive }: { drive: UpcomingDrive }) {
+function StudentUpcomingCard({ drive }: { drive: UpcomingDrive }) {
   const meta = APPLICATION_STATUS_META[drive.application_status];
 
   return (
@@ -213,6 +210,166 @@ function HistoryCard({ item }: { item: DriveHistoryItem }) {
         <Ionicons name="calendar-outline" size={13} color="#8A93A3" />
         <Text style={styles.metaText}>Drive on {formatDate(new Date(item.scheduled_date))}</Text>
       </View>
+    </View>
+  );
+}
+
+// ───────────────────────────── Faculty/HoD (mentor) body ─────────────────────────────
+
+function initialsFromName(name: string) {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("");
+}
+
+function FacultyPlacementsBody() {
+  const router = useRouter();
+  const [tab, setTab] = useState<PlacementTab>("upcoming");
+
+  const [upcoming, setUpcoming] = useState<FacultyUpcomingDrive[] | null>(null);
+  const [upcomingLoading, setUpcomingLoading] = useState(true);
+  const [upcomingErrored, setUpcomingErrored] = useState(false);
+  const [upcomingReloadToken, setUpcomingReloadToken] = useState(0);
+
+  const [students, setStudents] = useState<MentoredStudent[] | null>(null);
+  const [studentsLoading, setStudentsLoading] = useState(true);
+  const [studentsErrored, setStudentsErrored] = useState(false);
+  const [studentsReloadToken, setStudentsReloadToken] = useState(0);
+
+  useEffect(() => {
+    setUpcomingLoading(true);
+    setUpcomingErrored(false);
+    getUpcomingDrivesForFaculty()
+      .then(setUpcoming)
+      .catch(() => setUpcomingErrored(true))
+      .finally(() => setUpcomingLoading(false));
+  }, [upcomingReloadToken]);
+
+  useEffect(() => {
+    setStudentsLoading(true);
+    setStudentsErrored(false);
+    getMentoredStudents()
+      .then(setStudents)
+      .catch(() => setStudentsErrored(true))
+      .finally(() => setStudentsLoading(false));
+  }, [studentsReloadToken]);
+
+  function openStudentHistory(student: MentoredStudent) {
+    router.push({
+      pathname: "/(tabs)/academics/placements/student/[studentId]",
+      params: {
+        studentId: String(student.student_id),
+        name: student.name,
+        studentIdNo: student.student_id_no,
+      },
+    } as never);
+  }
+
+  return (
+    <SafeAreaView style={styles.container} edges={[]}>
+      <View style={styles.content}>
+        <TabSwitch tab={tab} setTab={setTab} />
+
+        <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+          {tab === "upcoming" ? (
+            upcomingLoading ? (
+              <LoadingState />
+            ) : upcomingErrored ? (
+              <ErrorState onRetry={() => setUpcomingReloadToken((n) => n + 1)} />
+            ) : upcoming && upcoming.length > 0 ? (
+              upcoming.map((drive) => <FacultyUpcomingCard key={drive.drive_id} drive={drive} />)
+            ) : (
+              <EmptyState icon="briefcase-outline" text="No drives coming up right now." />
+            )
+          ) : studentsLoading ? (
+            <LoadingState />
+          ) : studentsErrored ? (
+            <ErrorState onRetry={() => setStudentsReloadToken((n) => n + 1)} />
+          ) : students && students.length > 0 ? (
+            <>
+              <Text style={styles.sectionHint}>Tap a student to see their placement history.</Text>
+              {students.map((student) => (
+                <StudentRow key={student.student_id} student={student} onPress={() => openStudentHistory(student)} />
+              ))}
+            </>
+          ) : (
+            <EmptyState icon="people-outline" text="You aren't mentoring any class yet." />
+          )}
+        </ScrollView>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+function FacultyUpcomingCard({ drive }: { drive: FacultyUpcomingDrive }) {
+  return (
+    <View style={[styles.card, !drive.is_disclosed && styles.cardUndisclosed]}>
+      <View style={styles.cardHeader}>
+        {!drive.is_disclosed && <Ionicons name="lock-closed" size={14} color="#8A93A3" />}
+        <Text style={[styles.company, !drive.is_disclosed && styles.companyUndisclosed]}>{drive.company_name}</Text>
+      </View>
+
+      <View style={styles.metaRow}>
+        <Ionicons name="calendar-outline" size={13} color="#8A93A3" />
+        <Text style={styles.metaText}>Drive on {formatDate(new Date(drive.scheduled_date))}</Text>
+      </View>
+
+      {drive.is_disclosed && drive.company_profile_info && (
+        <Text style={styles.profileInfo}>{drive.company_profile_info}</Text>
+      )}
+
+      {!drive.is_disclosed && (
+        <Text style={styles.revealHint}>
+          {drive.disclosed_reveal_date
+            ? `Company name reveals on ${formatDate(new Date(drive.disclosed_reveal_date))}`
+            : "Company name will be revealed closer to the drive date."}
+        </Text>
+      )}
+    </View>
+  );
+}
+
+function StudentRow({ student, onPress }: { student: MentoredStudent; onPress: () => void }) {
+  const classLabel = student.section
+    ? `${student.department_name ?? "—"} - ${student.section}`
+    : "No class assigned";
+
+  return (
+    <TouchableOpacity style={styles.studentRow} onPress={onPress} activeOpacity={0.8}>
+      <View style={styles.avatar}>
+        <Text style={styles.avatarText}>{initialsFromName(student.name)}</Text>
+      </View>
+      <View style={styles.studentTextWrap}>
+        <Text style={styles.studentName}>{student.name}</Text>
+        <Text style={styles.studentSubtext}>
+          {student.student_id_no} · {classLabel}
+        </Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color="#B0B7C3" />
+    </TouchableOpacity>
+  );
+}
+
+// ───────────────────────────── Shared ─────────────────────────────
+
+function TabSwitch({ tab, setTab }: { tab: PlacementTab; setTab: (tab: PlacementTab) => void }) {
+  return (
+    <View style={styles.tabSwitch}>
+      <TouchableOpacity
+        style={[styles.tabSwitchButton, tab === "upcoming" && styles.tabSwitchButtonActive]}
+        onPress={() => setTab("upcoming")}
+      >
+        <Text style={[styles.tabSwitchText, tab === "upcoming" && styles.tabSwitchTextActive]}>Upcoming drives</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.tabSwitchButton, tab === "history" && styles.tabSwitchButtonActive]}
+        onPress={() => setTab("history")}
+      >
+        <Text style={[styles.tabSwitchText, tab === "history" && styles.tabSwitchTextActive]}>History</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -313,6 +470,12 @@ const styles = StyleSheet.create({
   list: {
     paddingBottom: 32,
   },
+  sectionHint: {
+    fontSize: 12,
+    fontFamily: fonts.medium,
+    color: "#9AA6B2",
+    marginBottom: 10,
+  },
   card: {
     backgroundColor: "#fff",
     borderRadius: 16,
@@ -331,6 +494,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     flex: 1,
+    marginBottom: 8,
   },
   cardHeaderRow: {
     flexDirection: "row",
@@ -379,6 +543,47 @@ const styles = StyleSheet.create({
   statusBadgeText: {
     fontSize: 11,
     fontFamily: fonts.bold,
+  },
+  studentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 8,
+    elevation: 1,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+  },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#E4EBFB",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarText: {
+    fontSize: 13,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+  },
+  studentTextWrap: {
+    flex: 1,
+  },
+  studentName: {
+    fontSize: 14,
+    fontFamily: fonts.bold,
+    color: "#111827",
+  },
+  studentSubtext: {
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    color: "#9AA6B2",
+    marginTop: 2,
   },
   centerState: {
     alignItems: "center",
