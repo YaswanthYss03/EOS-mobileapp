@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Modal, StyleSheet } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { View, Text, ScrollView, TouchableOpacity, Modal, ActivityIndicator, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -7,19 +7,16 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
-import {
-  semesters,
-  defaultSemester,
-  mockInternalsBySemester,
-  mockSubjectMarksByInternal,
-  type InternalResult,
-} from "./data/mockStudentPerformance";
+import { toast } from "@/utils/toast";
+import { getApiErrorMessage } from "@/services/api/client";
+import { getMyExamResults, type ExamResultGroup, type ExamResultsResponse } from "@/services/api/academics.api";
+import { semesters, defaultSemester, semesterNumber } from "./data/mockStudentPerformance";
 
 type Tab = "internals" | "semester-exam";
 
-// TODO: this is a view-only results screen over mockStudentPerformance - wire
-// to a real academics/results backend endpoint once one exists. Reachable
-// from the Student dashboard's "Performance" quick-access item.
+// Wired to EOS-backend's GET /me/exam-results?semester= - see
+// @/services/api/academics.api.ts. Reachable from the Student dashboard's
+// "Performance" quick-access item.
 export function StudentPerformanceScreen() {
   const navigation = useNavigation();
   const router = useRouter();
@@ -28,7 +25,11 @@ export function StudentPerformanceScreen() {
   const [semester, setSemester] = useState(defaultSemester);
   const [semesterPickerOpen, setSemesterPickerOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("internals");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [results, setResults] = useState<ExamResultsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [errored, setErrored] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
@@ -39,7 +40,32 @@ export function StudentPerformanceScreen() {
     }, [navigation]),
   );
 
-  const internals = mockInternalsBySemester[semester] ?? [];
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setErrored(false);
+
+    getMyExamResults(semesterNumber(semester))
+      .then((data) => {
+        if (cancelled) return;
+        setResults(data);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setErrored(true);
+        toast.error(getApiErrorMessage(error, "Couldn't load your results. Please try again."));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [semester, reloadToken]);
+
+  const internals = results?.internals ?? [];
+  const semesterExam = results?.semester_exam ?? null;
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
@@ -91,19 +117,39 @@ export function StudentPerformanceScreen() {
           </View>
         </View>
 
-        {tab === "internals" ? (
+        {loading ? (
+          <View style={styles.loadingState}>
+            <ActivityIndicator size="small" color="#2F6FE0" />
+            <Text style={styles.loadingStateText}>Loading results...</Text>
+          </View>
+        ) : errored ? (
+          <View style={styles.emptyState}>
+            <Ionicons name="cloud-offline-outline" size={32} color="#B0B7C3" />
+            <Text style={styles.emptyStateText}>Couldn't load results</Text>
+            <TouchableOpacity onPress={() => setReloadToken((n) => n + 1)} activeOpacity={0.8}>
+              <Text style={styles.retryText}>Tap to retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : tab === "internals" ? (
           internals.length > 0 ? (
             internals.map((internal) => (
-              <InternalCard
-                key={internal.id}
-                internal={internal}
-                expanded={expandedId === internal.id}
-                onToggle={() => setExpandedId((prev) => (prev === internal.id ? null : internal.id))}
+              <ResultCard
+                key={internal.exam_id}
+                result={internal}
+                expanded={expandedId === internal.exam_id}
+                onToggle={() => setExpandedId((prev) => (prev === internal.exam_id ? null : internal.exam_id))}
               />
             ))
           ) : (
             <EmptyState text="Results awaited" subtext="Internal marks for this semester haven't been published yet." />
           )
+        ) : semesterExam ? (
+          <ResultCard
+            result={semesterExam}
+            expanded={expandedId === semesterExam.exam_id}
+            onToggle={() => setExpandedId((prev) => (prev === semesterExam.exam_id ? null : semesterExam.exam_id))}
+            showGrade
+          />
         ) : (
           <EmptyState text="Results awaited" subtext="Semester exam results haven't been published yet." />
         )}
@@ -129,6 +175,7 @@ export function StudentPerformanceScreen() {
                   style={styles.modalOptionRow}
                   onPress={() => {
                     setSemester(option);
+                    setExpandedId(null);
                     setSemesterPickerOpen(false);
                   }}
                   activeOpacity={0.8}
@@ -145,53 +192,93 @@ export function StudentPerformanceScreen() {
   );
 }
 
-function InternalCard({
-  internal,
+// University grading scale - only shown for the semester exam tab (internals
+// keep the raw max/scored table). Computed off each subject's own percentage
+// rather than the raw score, since not every subject is out of 100.
+function gradeForPercent(percent: number): { grade: string; result: "Pass" | "Fail" } {
+  if (percent >= 90) return { grade: "O", result: "Pass" };
+  if (percent >= 85) return { grade: "A+", result: "Pass" };
+  if (percent >= 80) return { grade: "A", result: "Pass" };
+  if (percent >= 75) return { grade: "B+", result: "Pass" };
+  if (percent >= 70) return { grade: "B", result: "Pass" };
+  if (percent >= 60) return { grade: "C", result: "Pass" };
+  return { grade: "U", result: "Fail" };
+}
+
+function ResultCard({
+  result,
   expanded,
   onToggle,
+  showGrade,
 }: {
-  internal: InternalResult;
+  result: ExamResultGroup;
   expanded: boolean;
   onToggle: () => void;
+  showGrade?: boolean;
 }) {
-  const percent = Math.round((internal.marksObtained / internal.marksTotal) * 100);
-  const subjects = mockSubjectMarksByInternal[internal.id] ?? [];
-
   return (
     <View style={styles.internalCard}>
       <TouchableOpacity style={styles.internalHeaderRow} onPress={onToggle} activeOpacity={0.8}>
         <View style={styles.internalBadge}>
-          <Text style={styles.internalBadgeText}>{internal.number}</Text>
+          <Text style={styles.internalBadgeText}>{result.number}</Text>
         </View>
         <View style={styles.internalTextWrap}>
-          <Text style={styles.internalTitle}>{internal.title}</Text>
-          <Text style={styles.internalSubtitle}>
-            {internal.marksObtained} / {internal.marksTotal} · {percent}%
-          </Text>
+          <Text style={styles.internalTitle}>{result.title}</Text>
         </View>
         <Ionicons name={expanded ? "chevron-down" : "chevron-forward"} size={20} color="#B0B7C3" />
       </TouchableOpacity>
 
-      {expanded && subjects.length > 0 && (
+      {expanded && result.subjects.length > 0 && (
         <View style={styles.subjectTable}>
           <View style={styles.subjectTableHeaderRow}>
             <Text style={[styles.subjectTableHeaderText, styles.subjectCourseCol]}>COURSE</Text>
-            <Text style={[styles.subjectTableHeaderText, styles.subjectMaxCol]}>MAX</Text>
-            <Text style={[styles.subjectTableHeaderText, styles.subjectScoredCol]}>SCORED</Text>
+            {showGrade ? (
+              <>
+                <Text style={[styles.subjectTableHeaderText, styles.subjectMaxCol]}>GRADE</Text>
+                <Text style={[styles.subjectTableHeaderText, styles.subjectScoredCol]}>RESULT</Text>
+              </>
+            ) : (
+              <>
+                <Text style={[styles.subjectTableHeaderText, styles.subjectMaxCol]}>MAX</Text>
+                <Text style={[styles.subjectTableHeaderText, styles.subjectScoredCol]}>SCORED</Text>
+              </>
+            )}
           </View>
-          {subjects.map((subject, index) => (
-            <View
-              key={subject.code}
-              style={[styles.subjectRow, index === subjects.length - 1 && styles.subjectRowLast]}
-            >
-              <View style={styles.subjectCourseCol}>
-                <Text style={styles.subjectName}>{subject.name}</Text>
-                <Text style={styles.subjectCode}>{subject.code}</Text>
+          {result.subjects.map((subject, index) => {
+            const subjectPercent = subject.max > 0 ? (subject.scored / subject.max) * 100 : 0;
+            const { grade, result: passFail } = gradeForPercent(subjectPercent);
+
+            return (
+              <View
+                key={subject.subject_id}
+                style={[styles.subjectRow, index === result.subjects.length - 1 && styles.subjectRowLast]}
+              >
+                <View style={styles.subjectCourseCol}>
+                  <Text style={styles.subjectName}>{subject.name}</Text>
+                  <Text style={styles.subjectCode}>{subject.code}</Text>
+                </View>
+                {showGrade ? (
+                  <>
+                    <Text style={[styles.subjectMaxText, styles.subjectMaxCol]}>{grade}</Text>
+                    <Text
+                      style={[
+                        styles.subjectResultText,
+                        styles.subjectScoredCol,
+                        passFail === "Fail" ? styles.subjectResultTextFail : styles.subjectResultTextPass,
+                      ]}
+                    >
+                      {passFail}
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={[styles.subjectMaxText, styles.subjectMaxCol]}>{subject.max}</Text>
+                    <Text style={[styles.subjectScoredText, styles.subjectScoredCol]}>{subject.scored}</Text>
+                  </>
+                )}
               </View>
-              <Text style={[styles.subjectMaxText, styles.subjectMaxCol]}>{subject.max}</Text>
-              <Text style={[styles.subjectScoredText, styles.subjectScoredCol]}>{subject.scored}</Text>
-            </View>
-          ))}
+            );
+          })}
         </View>
       )}
     </View>
@@ -300,6 +387,16 @@ const styles = StyleSheet.create({
     color: "#2F6FE0",
     fontFamily: fonts.bold,
   },
+  loadingState: {
+    alignItems: "center",
+    paddingVertical: 48,
+    gap: 10,
+  },
+  loadingStateText: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#9AA6B2",
+  },
   internalCard: {
     backgroundColor: "#fff",
     borderRadius: 16,
@@ -337,12 +434,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: fonts.bold,
     color: "#111827",
-  },
-  internalSubtitle: {
-    fontSize: 13,
-    fontFamily: fonts.regular,
-    color: "#9AA6B2",
-    marginTop: 2,
   },
   subjectTable: {
     borderTopWidth: 1,
@@ -404,6 +495,16 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     color: "#111827",
   },
+  subjectResultText: {
+    fontSize: 13,
+    fontFamily: fonts.bold,
+  },
+  subjectResultTextPass: {
+    color: "#16A34A",
+  },
+  subjectResultTextFail: {
+    color: "#DC2626",
+  },
   emptyState: {
     alignItems: "center",
     paddingVertical: 48,
@@ -420,6 +521,12 @@ const styles = StyleSheet.create({
     color: "#9AA6B2",
     textAlign: "center",
     paddingHorizontal: 24,
+  },
+  retryText: {
+    fontSize: 13,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+    marginTop: 4,
   },
   modalOverlay: {
     flex: 1,

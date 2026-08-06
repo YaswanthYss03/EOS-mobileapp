@@ -30,3 +30,17 @@ export const MONTH_NAMES = [
 export function formatDate(date: Date): string {
   return `${String(date.getDate()).padStart(2, "0")} ${MONTH_NAMES[date.getMonth()].slice(0, 3)} ${date.getFullYear()}`;
 }
+
+// YYYY-MM-DD from the date's own local year/month/day - NOT date.toISOString()
+// (which converts to UTC first and can shift the calendar day backwards for
+// any timezone ahead of UTC, e.g. IST). Picker dates are always constructed
+// as `new Date(year, month, day)` at local midnight, so reading the same
+// local components back out is what actually reproduces the day the user
+// tapped. Use this whenever a picked date needs to go to a backend endpoint
+// expecting an ISO date string (from_date/to_date, etc).
+export function toIsoDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}

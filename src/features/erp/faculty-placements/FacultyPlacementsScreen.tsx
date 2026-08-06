@@ -5,31 +5,26 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { formatDate } from "@/utils/calendar";
 import {
-  getUpcomingDrives,
-  getDriveHistory,
+  getUpcomingDrivesForFaculty,
+  getMentoredStudents,
   type UpcomingDrive,
-  type DriveHistoryItem,
-  type ApplicationStatus,
-} from "@/services/api/placements.api";
+  type MentoredStudent,
+} from "@/services/api/faculty-placements.api";
 
 type PlacementTab = "upcoming" | "history";
 
-// "Round N cleared" comes straight from drive_application_status_enum
-// (applied/r1_cleared/r2_cleared/r3_cleared/rejected/placed) - the schema
-// has no named-round checklist (no "Online assessment"/"Technical
-// interview"/etc.), just this one coarse per-drive status, so that's the
-// most detail a status can ever show.
-const APPLICATION_STATUS_META: Record<ApplicationStatus, { label: string; bg: string; text: string }> = {
-  applied: { label: "Applied", bg: "#EAF0FD", text: "#2F6FE0" },
-  r1_cleared: { label: "Round 1 cleared", bg: "#FEF3C7", text: "#D97706" },
-  r2_cleared: { label: "Round 2 cleared", bg: "#FEF3C7", text: "#D97706" },
-  r3_cleared: { label: "Round 3 cleared", bg: "#FEF3C7", text: "#D97706" },
-  placed: { label: "Offer", bg: "#F0FDF4", text: "#16A34A" },
-  rejected: { label: "Rejected", bg: "#FEF2F2", text: "#DC2626" },
-};
+function initialsFromName(name: string) {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("");
+}
 
 function PlacementsHeader({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
@@ -53,13 +48,14 @@ function PlacementsHeader({ onBack }: { onBack: () => void }) {
   );
 }
 
-// Wired to EOS-backend's placement/drives module (see
-// @/services/api/placements.api.ts) - "Upcoming" is split from "History" by
-// the student's OWN application outcome, not the drive's institution-wide
-// status, since a drive stays "scheduled" campus-wide even once individual
-// students have a final placed/rejected result on it. Reachable from the
-// Academics tab's chooser.
-export function PlacementsOverviewScreen() {
+// Wired to EOS-backend's placement/drives module, faculty (mentor) view -
+// see @/services/api/faculty-placements.api.ts. A faculty isn't an
+// applicant on any drive, so Upcoming Drives shows no status at all - just
+// the drive itself. History lists this faculty's own mentees (via
+// class_mentors); tapping one drills into that student's own placement
+// history (see erp/faculty-placements/student/[studentId].tsx). Reachable
+// from the Employee dashboard's Student "Placements" item.
+export function FacultyPlacementsScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const [tab, setTab] = useState<PlacementTab>("upcoming");
@@ -69,16 +65,11 @@ export function PlacementsOverviewScreen() {
   const [upcomingErrored, setUpcomingErrored] = useState(false);
   const [upcomingReloadToken, setUpcomingReloadToken] = useState(0);
 
-  const [history, setHistory] = useState<DriveHistoryItem[] | null>(null);
-  const [historyLoading, setHistoryLoading] = useState(true);
-  const [historyErrored, setHistoryErrored] = useState(false);
-  const [historyReloadToken, setHistoryReloadToken] = useState(0);
+  const [students, setStudents] = useState<MentoredStudent[] | null>(null);
+  const [studentsLoading, setStudentsLoading] = useState(true);
+  const [studentsErrored, setStudentsErrored] = useState(false);
+  const [studentsReloadToken, setStudentsReloadToken] = useState(0);
 
-  // No blur-cleanup here on purpose - see AcademicsChooserScreen's
-  // useFocusEffect comment. Going back always lands on the Chooser, which
-  // re-applies its own header on refocus; a cleanup that restores
-  // CollegeHeader here would race that and can win, which is exactly the
-  // "College header shows instead of Placements" bug this fixes.
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({
@@ -90,20 +81,31 @@ export function PlacementsOverviewScreen() {
   useEffect(() => {
     setUpcomingLoading(true);
     setUpcomingErrored(false);
-    getUpcomingDrives()
+    getUpcomingDrivesForFaculty()
       .then(setUpcoming)
       .catch(() => setUpcomingErrored(true))
       .finally(() => setUpcomingLoading(false));
   }, [upcomingReloadToken]);
 
   useEffect(() => {
-    setHistoryLoading(true);
-    setHistoryErrored(false);
-    getDriveHistory()
-      .then(setHistory)
-      .catch(() => setHistoryErrored(true))
-      .finally(() => setHistoryLoading(false));
-  }, [historyReloadToken]);
+    setStudentsLoading(true);
+    setStudentsErrored(false);
+    getMentoredStudents()
+      .then(setStudents)
+      .catch(() => setStudentsErrored(true))
+      .finally(() => setStudentsLoading(false));
+  }, [studentsReloadToken]);
+
+  function openStudentHistory(student: MentoredStudent) {
+    router.push({
+      pathname: "/(tabs)/erp/faculty-placements/student/[studentId]",
+      params: {
+        studentId: String(student.student_id),
+        name: student.name,
+        studentIdNo: student.student_id_no,
+      },
+    } as never);
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
@@ -136,14 +138,19 @@ export function PlacementsOverviewScreen() {
             ) : (
               <EmptyState icon="briefcase-outline" text="No drives coming up right now." />
             )
-          ) : historyLoading ? (
+          ) : studentsLoading ? (
             <LoadingState />
-          ) : historyErrored ? (
-            <ErrorState onRetry={() => setHistoryReloadToken((n) => n + 1)} />
-          ) : history && history.length > 0 ? (
-            history.map((item) => <HistoryCard key={item.drive_id} item={item} />)
+          ) : studentsErrored ? (
+            <ErrorState onRetry={() => setStudentsReloadToken((n) => n + 1)} />
+          ) : students && students.length > 0 ? (
+            <>
+              <Text style={styles.sectionHint}>Tap a student to see their placement history.</Text>
+              {students.map((student) => (
+                <StudentRow key={student.student_id} student={student} onPress={() => openStudentHistory(student)} />
+              ))}
+            </>
           ) : (
-            <EmptyState icon="document-text-outline" text="No placement history yet." />
+            <EmptyState icon="people-outline" text="You aren't mentoring any class yet." />
           )}
         </ScrollView>
       </View>
@@ -152,18 +159,11 @@ export function PlacementsOverviewScreen() {
 }
 
 function UpcomingCard({ drive }: { drive: UpcomingDrive }) {
-  const meta = APPLICATION_STATUS_META[drive.application_status];
-
   return (
     <View style={[styles.card, !drive.is_disclosed && styles.cardUndisclosed]}>
-      <View style={styles.cardHeaderRow}>
-        <View style={styles.cardHeader}>
-          {!drive.is_disclosed && <Ionicons name="lock-closed" size={14} color="#8A93A3" />}
-          <Text style={[styles.company, !drive.is_disclosed && styles.companyUndisclosed]}>{drive.company_name}</Text>
-        </View>
-        <View style={[styles.statusBadge, { backgroundColor: meta.bg }]}>
-          <Text style={[styles.statusBadgeText, { color: meta.text }]}>{meta.label}</Text>
-        </View>
+      <View style={styles.cardHeader}>
+        {!drive.is_disclosed && <Ionicons name="lock-closed" size={14} color="#8A93A3" />}
+        <Text style={[styles.company, !drive.is_disclosed && styles.companyUndisclosed]}>{drive.company_name}</Text>
       </View>
 
       <View style={styles.metaRow}>
@@ -186,34 +186,24 @@ function UpcomingCard({ drive }: { drive: UpcomingDrive }) {
   );
 }
 
-// A rejection overwrites application_status, but last_cleared_round is
-// tracked separately and survives it - so a student rejected after
-// clearing a round gets to see that progress, not just a flat "Rejected".
-function historyStatusLabel(item: DriveHistoryItem): string {
-  const base = APPLICATION_STATUS_META[item.application_status].label;
-  if (item.application_status === "rejected" && item.last_cleared_round) {
-    return `Round ${item.last_cleared_round} cleared · ${base}`;
-  }
-  return base;
-}
-
-function HistoryCard({ item }: { item: DriveHistoryItem }) {
-  const meta = APPLICATION_STATUS_META[item.application_status];
+function StudentRow({ student, onPress }: { student: MentoredStudent; onPress: () => void }) {
+  const classLabel = student.section
+    ? `${student.department_name ?? "—"} - ${student.section}`
+    : "No class assigned";
 
   return (
-    <View style={styles.card}>
-      <View style={styles.cardHeaderRow}>
-        <Text style={styles.company}>{item.company_name}</Text>
-        <View style={[styles.statusBadge, { backgroundColor: meta.bg }]}>
-          <Text style={[styles.statusBadgeText, { color: meta.text }]}>{historyStatusLabel(item)}</Text>
-        </View>
+    <TouchableOpacity style={styles.studentRow} onPress={onPress} activeOpacity={0.8}>
+      <View style={styles.avatar}>
+        <Text style={styles.avatarText}>{initialsFromName(student.name)}</Text>
       </View>
-
-      <View style={styles.metaRow}>
-        <Ionicons name="calendar-outline" size={13} color="#8A93A3" />
-        <Text style={styles.metaText}>Drive on {formatDate(new Date(item.scheduled_date))}</Text>
+      <View style={styles.studentTextWrap}>
+        <Text style={styles.studentName}>{student.name}</Text>
+        <Text style={styles.studentSubtext}>
+          {student.student_id_no} · {classLabel}
+        </Text>
       </View>
-    </View>
+      <Ionicons name="chevron-forward" size={18} color="#B0B7C3" />
+    </TouchableOpacity>
   );
 }
 
@@ -313,6 +303,12 @@ const styles = StyleSheet.create({
   list: {
     paddingBottom: 32,
   },
+  sectionHint: {
+    fontSize: 12,
+    fontFamily: fonts.medium,
+    color: "#9AA6B2",
+    marginBottom: 10,
+  },
   card: {
     backgroundColor: "#fff",
     borderRadius: 16,
@@ -330,13 +326,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    flex: 1,
-  },
-  cardHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
     marginBottom: 8,
   },
   company: {
@@ -371,14 +360,46 @@ const styles = StyleSheet.create({
     color: "#9AA6B2",
     marginTop: 8,
   },
-  statusBadge: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+  studentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 8,
+    elevation: 1,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
   },
-  statusBadgeText: {
-    fontSize: 11,
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#E4EBFB",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarText: {
+    fontSize: 13,
     fontFamily: fonts.bold,
+    color: "#2F6FE0",
+  },
+  studentTextWrap: {
+    flex: 1,
+  },
+  studentName: {
+    fontSize: 14,
+    fontFamily: fonts.bold,
+    color: "#111827",
+  },
+  studentSubtext: {
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    color: "#9AA6B2",
+    marginTop: 2,
   },
   centerState: {
     alignItems: "center",

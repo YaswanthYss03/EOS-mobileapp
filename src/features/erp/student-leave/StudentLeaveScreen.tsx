@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -8,11 +8,27 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
-import { classInfo, mockStudentLeaveRequests, type StudentLeaveRequest, type StudentLeaveStatus } from "./data/mockStudentLeave";
+import { getApiErrorMessage } from "@/services/api/client";
+import { formatDate } from "@/utils/calendar";
+import {
+  getStudentLeaveRequests,
+  facultyApproveLeave,
+  type StudentLeaveRequest,
+} from "@/services/api/student-leaves.api";
 
+// A Class Mentor's own approve is "faculty_approved", not a terminal
+// "approved" - the HoD still has the final say (see hod-approve, out of
+// scope on this screen). Grouped here as one "Approved" pill since once the
+// mentor has acted, it's off their own queue either way.
 type StatusFilter = "pending" | "approved" | "rejected" | "all";
 
 const STATUS_FILTERS: StatusFilter[] = ["pending", "approved", "rejected", "all"];
+
+function matchesFilter(status: StudentLeaveRequest["status"], filter: StatusFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "approved") return status === "faculty_approved" || status === "hod_approved";
+  return status === filter;
+}
 
 function initialsFromName(name: string) {
   return name
@@ -23,17 +39,24 @@ function initialsFromName(name: string) {
     .join("");
 }
 
-// TODO: this is a view-only approve/reject UI over mockStudentLeave - wire to a
-// real leave backend endpoint once one exists. Reachable from the Employee
-// dashboard's Student "Student Leave" item (Class Advisor view of their own
-// section) - see erp/employee/data/mockDashboard.ts. This is distinct from the
-// HoD's department-wide student/faculty leave view (see erp/leave).
+// Wired to EOS-backend's student-leaves module (see
+// @/services/api/student-leaves.api.ts) - the caller's own Class Mentor
+// review queue (every leave request from a student in a class they mentor,
+// via class_mentors). Reachable from the Employee dashboard's Student
+// "Student Leave" item. Distinct from the HoD's department-wide
+// student/faculty leave view (see erp/leave), which is a separate,
+// still-mock screen.
 export function StudentLeaveScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
-  const [requests, setRequests] = useState(mockStudentLeaveRequests);
+  const [requests, setRequests] = useState<StudentLeaveRequest[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [errored, setErrored] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [decidingId, setDecidingId] = useState<number | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -44,33 +67,67 @@ export function StudentLeaveScreen() {
     }, [navigation]),
   );
 
-  const counts = useMemo(
-    () => ({
-      pending: requests.filter((r) => r.status === "pending").length,
-      approved: requests.filter((r) => r.status === "approved").length,
-      rejected: requests.filter((r) => r.status === "rejected").length,
-      all: requests.length,
-    }),
-    [requests],
-  );
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setErrored(false);
+
+    getStudentLeaveRequests()
+      .then((data) => {
+        if (!cancelled) setRequests(data);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setErrored(true);
+        toast.error(getApiErrorMessage(error, "Couldn't load your review queue. Please try again."));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadToken]);
+
+  const counts = useMemo(() => {
+    const list = requests ?? [];
+    return {
+      pending: list.filter((r) => matchesFilter(r.status, "pending")).length,
+      approved: list.filter((r) => matchesFilter(r.status, "approved")).length,
+      rejected: list.filter((r) => matchesFilter(r.status, "rejected")).length,
+      all: list.length,
+    };
+  }, [requests]);
 
   const filteredRequests = useMemo(
-    () => (statusFilter === "all" ? requests : requests.filter((r) => r.status === statusFilter)),
+    () => (requests ?? []).filter((r) => matchesFilter(r.status, statusFilter)),
     [requests, statusFilter],
   );
 
-  function updateStatus(id: string, status: StudentLeaveStatus) {
-    setRequests((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
-  }
+  // The distinct sections this mentor covers - shown instead of a single
+  // hardcoded section, since class_mentors supports mentoring more than
+  // one class (unlike the old mock's single "III CSE-A" assumption).
+  const sectionsCovered = useMemo(() => {
+    const labels = new Set<string>();
+    for (const r of requests ?? []) {
+      if (r.student.section) labels.add(`${r.student.department_name ?? "—"} - ${r.student.section}`);
+    }
+    return Array.from(labels);
+  }, [requests]);
 
-  function handleApprove(id: string) {
-    updateStatus(id, "approved");
-    toast.success("Leave request approved");
-  }
-
-  function handleReject(id: string) {
-    updateStatus(id, "rejected");
-    toast.info("Leave request rejected");
+  function handleDecision(id: number, decision: "approved" | "rejected") {
+    setDecidingId(id);
+    facultyApproveLeave(id, decision)
+      .then((updated) => {
+        setRequests((prev) => (prev ? prev.map((r) => (r.id === id ? updated : r)) : prev));
+        if (decision === "approved") toast.success("Leave approved - forwarded to the HoD for final approval");
+        else toast.info("Leave rejected");
+      })
+      .catch((error) =>
+        toast.error(getApiErrorMessage(error, "Couldn't record your decision. Please try again.")),
+      )
+      .finally(() => setDecidingId(null));
   }
 
   return (
@@ -95,78 +152,108 @@ export function StudentLeaveScreen() {
       </LinearGradient>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.contextCard}>
-          <View style={styles.contextIconWrap}>
-            <Ionicons name="school-outline" size={16} color="#2F6FE0" />
+        {loading ? (
+          <View style={styles.centerState}>
+            <ActivityIndicator size="small" color="#2F6FE0" />
+            <Text style={styles.centerStateText}>Loading...</Text>
           </View>
-          <View style={styles.contextTextWrap}>
-            <Text style={styles.contextTitle}>{classInfo.section}</Text>
-            <Text style={styles.contextSubtitle}>{classInfo.studentCount} students · Class Advisor</Text>
-          </View>
-          <View style={styles.myClassBadge}>
-            <Text style={styles.myClassBadgeText}>MY CLASS</Text>
-          </View>
-        </View>
-
-        <View style={styles.statusRow}>
-          {STATUS_FILTERS.map((status) => (
-            <TouchableOpacity
-              key={status}
-              style={[styles.statusPill, statusFilter === status && styles.statusPillActive]}
-              onPress={() => setStatusFilter(status)}
-            >
-              <Text style={[styles.statusPillText, statusFilter === status && styles.statusPillTextActive]}>
-                {status.charAt(0).toUpperCase() + status.slice(1)} ({counts[status]})
-              </Text>
+        ) : errored ? (
+          <View style={styles.centerState}>
+            <Ionicons name="cloud-offline-outline" size={32} color="#B0B7C3" />
+            <Text style={styles.centerStateText}>Couldn't load your review queue.</Text>
+            <TouchableOpacity onPress={() => setReloadToken((n) => n + 1)} activeOpacity={0.8}>
+              <Text style={styles.retryText}>Tap to retry</Text>
             </TouchableOpacity>
-          ))}
-        </View>
-
-        {filteredRequests.map((request) => (
-          <StudentLeaveCard
-            key={request.id}
-            request={request}
-            onApprove={() => handleApprove(request.id)}
-            onReject={() => handleReject(request.id)}
-          />
-        ))}
-
-        {filteredRequests.length === 0 && (
-          <View style={styles.emptyState}>
-            <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
-            <Text style={styles.emptyStateText}>No requests here</Text>
           </View>
+        ) : (
+          <>
+            <View style={styles.contextCard}>
+              <View style={styles.contextIconWrap}>
+                <Ionicons name="school-outline" size={16} color="#2F6FE0" />
+              </View>
+              <View style={styles.contextTextWrap}>
+                <Text style={styles.contextTitle}>
+                  {sectionsCovered.length > 0 ? sectionsCovered.join(" · ") : "No mentored class yet"}
+                </Text>
+                <Text style={styles.contextSubtitle}>{counts.all} leave requests · Class Mentor</Text>
+              </View>
+              <View style={styles.myClassBadge}>
+                <Text style={styles.myClassBadgeText}>MY CLASS</Text>
+              </View>
+            </View>
+
+            <View style={styles.statusRow}>
+              {STATUS_FILTERS.map((status) => (
+                <TouchableOpacity
+                  key={status}
+                  style={[styles.statusPill, statusFilter === status && styles.statusPillActive]}
+                  onPress={() => setStatusFilter(status)}
+                >
+                  <Text style={[styles.statusPillText, statusFilter === status && styles.statusPillTextActive]}>
+                    {status.charAt(0).toUpperCase() + status.slice(1)} ({counts[status]})
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {filteredRequests.map((request) => (
+              <StudentLeaveCard
+                key={request.id}
+                request={request}
+                deciding={decidingId === request.id}
+                onApprove={() => handleDecision(request.id, "approved")}
+                onReject={() => handleDecision(request.id, "rejected")}
+              />
+            ))}
+
+            {filteredRequests.length === 0 && (
+              <View style={styles.emptyState}>
+                <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
+                <Text style={styles.emptyStateText}>No requests here</Text>
+              </View>
+            )}
+          </>
         )}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
+const STATUS_META: Record<StudentLeaveRequest["status"], { label: string; bg: string; text: string; icon: keyof typeof Ionicons.glyphMap }> = {
+  pending: { label: "Pending", bg: "#FEF3C7", text: "#D97706", icon: "time-outline" },
+  faculty_approved: { label: "Approved · awaiting HoD", bg: "#F0FDF4", text: "#16A34A", icon: "checkmark-circle" },
+  hod_approved: { label: "Approved", bg: "#F0FDF4", text: "#16A34A", icon: "checkmark-circle" },
+  rejected: { label: "Rejected", bg: "#FEF2F2", text: "#DC2626", icon: "close-circle" },
+};
+
 function StudentLeaveCard({
   request,
+  deciding,
   onApprove,
   onReject,
 }: {
   request: StudentLeaveRequest;
+  deciding: boolean;
   onApprove: () => void;
   onReject: () => void;
 }) {
-  const { name, rollNo, section, category, date, session, docs, reason, status } = request;
+  const { student, from_date, to_date, reason, status } = request;
+  const meta = STATUS_META[status];
+  const classLabel = student.section
+    ? `${student.department_name ?? "—"} - ${student.section}`
+    : "No class assigned";
 
   return (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{initialsFromName(name)}</Text>
+          <Text style={styles.avatarText}>{initialsFromName(student.name)}</Text>
         </View>
         <View style={styles.cardHeaderTextWrap}>
-          <Text style={styles.cardName}>{name}</Text>
+          <Text style={styles.cardName}>{student.name}</Text>
           <Text style={styles.cardSubtitle}>
-            {rollNo} · {section}
+            {student.student_id_no} · {classLabel}
           </Text>
-        </View>
-        <View style={styles.categoryBadge}>
-          <Text style={styles.categoryBadgeText}>{category}</Text>
         </View>
       </View>
 
@@ -174,46 +261,45 @@ function StudentLeaveCard({
 
       <View style={styles.metaRow}>
         <View style={styles.metaCol}>
-          <Text style={styles.metaLabel}>DATES</Text>
-          <Text style={styles.metaValue}>{date}</Text>
+          <Text style={styles.metaLabel}>FROM</Text>
+          <Text style={styles.metaValue}>{formatDate(new Date(from_date))}</Text>
         </View>
         <View style={styles.metaCol}>
-          <Text style={styles.metaLabel}>SESSION</Text>
-          <Text style={styles.metaValue}>{session}</Text>
-        </View>
-        <View style={styles.metaCol}>
-          <Text style={styles.metaLabel}>DOCS</Text>
-          <Text style={styles.metaValue}>{docs}</Text>
+          <Text style={styles.metaLabel}>TO</Text>
+          <Text style={styles.metaValue}>{formatDate(new Date(to_date))}</Text>
         </View>
       </View>
 
       <Text style={styles.reasonLabel}>REASON</Text>
-      <Text style={styles.reasonText}>{reason}</Text>
+      <Text style={styles.reasonText}>{reason ?? "—"}</Text>
 
       {status === "pending" ? (
         <View style={styles.actionsRow}>
-          <TouchableOpacity style={styles.rejectButton} onPress={onReject} activeOpacity={0.85}>
+          <TouchableOpacity
+            style={[styles.rejectButton, deciding && styles.buttonDisabled]}
+            onPress={onReject}
+            activeOpacity={0.85}
+            disabled={deciding}
+          >
             <Text style={styles.rejectButtonText}>Reject</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.approveButton} onPress={onApprove} activeOpacity={0.85}>
-            <Text style={styles.approveButtonText}>Approve</Text>
+          <TouchableOpacity
+            style={[styles.approveButton, deciding && styles.buttonDisabled]}
+            onPress={onApprove}
+            activeOpacity={0.85}
+            disabled={deciding}
+          >
+            {deciding ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.approveButtonText}>Approve</Text>
+            )}
           </TouchableOpacity>
         </View>
       ) : (
-        <View
-          style={[
-            styles.statusBadge,
-            status === "approved" ? styles.statusBadgeApproved : styles.statusBadgeRejected,
-          ]}
-        >
-          <Ionicons
-            name={status === "approved" ? "checkmark-circle" : "close-circle"}
-            size={14}
-            color={status === "approved" ? "#16A34A" : "#DC2626"}
-          />
-          <Text style={[styles.statusBadgeText, { color: status === "approved" ? "#16A34A" : "#DC2626" }]}>
-            {status === "approved" ? "Approved" : "Rejected"}
-          </Text>
+        <View style={[styles.statusBadge, { backgroundColor: meta.bg }]}>
+          <Ionicons name={meta.icon} size={14} color={meta.text} />
+          <Text style={[styles.statusBadgeText, { color: meta.text }]}>{meta.label}</Text>
         </View>
       )}
     </View>
@@ -377,17 +463,6 @@ const styles = StyleSheet.create({
     color: "#9AA6B2",
     marginTop: 1,
   },
-  categoryBadge: {
-    backgroundColor: "#E4EBFB",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  categoryBadgeText: {
-    fontSize: 11,
-    fontFamily: fonts.bold,
-    color: "#2F6FE0",
-  },
   divider: {
     height: 1,
     backgroundColor: "#F1F3F6",
@@ -457,6 +532,9 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     color: "#fff",
   },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
   statusBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -466,15 +544,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
-  statusBadgeApproved: {
-    backgroundColor: "#F0FDF4",
-  },
-  statusBadgeRejected: {
-    backgroundColor: "#FEF2F2",
-  },
   statusBadgeText: {
     fontSize: 12,
     fontFamily: fonts.semibold,
+  },
+  centerState: {
+    alignItems: "center",
+    paddingVertical: 60,
+    gap: 8,
+  },
+  centerStateText: {
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    color: "#9AA6B2",
+    textAlign: "center",
+  },
+  retryText: {
+    fontSize: 13,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+    marginTop: 4,
   },
   emptyState: {
     alignItems: "center",
