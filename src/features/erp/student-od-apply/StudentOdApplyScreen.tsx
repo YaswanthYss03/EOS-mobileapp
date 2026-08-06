@@ -1,5 +1,15 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  View,
+  Text,
+  ScrollView,
+  TextInput,
+  TouchableOpacity,
+  Modal,
+  ActivityIndicator,
+  Alert,
+  StyleSheet,
+} from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -8,32 +18,32 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
-import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, formatDate } from "@/utils/calendar";
-import { mockOdHistory, timeSlots, type OdHistoryItem, type OdHistoryStatus } from "./data/mockStudentOdApply";
+import { getApiErrorMessage } from "@/services/api/client";
+import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, formatDate, toIsoDate } from "@/utils/calendar";
+import {
+  getMyOdTeams,
+  createOdTeam,
+  joinOdTeam,
+  submitOdRequest,
+  getMyOdRequests,
+  type OdTeam,
+  type OdRequestSummary,
+} from "@/services/api/od.api";
+import { getFacultyDirectory, type FacultyDirectoryEntry } from "@/services/api/faculty.api";
+import { OD_STATUS_META, timeSlots } from "./data/mockStudentOdApply";
 
 type Tab = "apply" | "history";
 type TeamMode = "create" | "join";
-type DateField = "start" | "end" | null;
-type TimeField = "start" | "end" | null;
+type DateField = "from" | "to" | null;
+type TimeField = "from" | "to" | null;
 
-const STATUS_META: Record<OdHistoryStatus, { label: string; bg: string; text: string }> = {
-  pending: { label: "Pending", bg: "#FEF3C7", text: "#D97706" },
-  approved: { label: "Approved", bg: "#EAF0FD", text: "#2F6FE0" },
-  rejected: { label: "Rejected", bg: "#FEF2F2", text: "#DC2626" },
-};
-
-// 3-letter prefix from the team name + a 3-digit number - 6 characters total,
-// matching the "6-character code" the Join tab expects.
-function generateTeamCode(teamName: string) {
-  const prefix = teamName.trim().slice(0, 3).toUpperCase().padEnd(3, "X");
-  const suffix = Math.floor(100 + Math.random() * 900);
-  return `${prefix}${suffix}`;
-}
-
-// TODO: this is a create/join team + history UI over local state and
-// mockStudentOdApply - wire to a real on-duty backend endpoint once one
-// exists. This is the student's own self-service application, distinct from
-// the Class Advisor's review screen (see erp/student-od).
+// Wired to EOS-backend's on-duty module (see @/services/api/od.api.ts) - a
+// shareable team code, a from/to date (+ optional time), a mandatory Event
+// name (wire format: `reason`), and an optional Faculty guide picked from
+// @/services/api/faculty.api.ts's directory - distinct from the student's
+// standing class mentor, who gates mentor_approval_status automatically and
+// isn't picked here. Reachable from the Student dashboard's "OD"
+// quick-access item.
 export function StudentOdApplyScreen() {
   const navigation = useNavigation();
   const router = useRouter();
@@ -42,23 +52,34 @@ export function StudentOdApplyScreen() {
   const [tab, setTab] = useState<Tab>("apply");
   const [mode, setMode] = useState<TeamMode>("create");
 
-  const [teamName, setTeamName] = useState("");
-  const [eventName, setEventName] = useState("");
-  const [startDateObj, setStartDateObj] = useState<Date | null>(null);
-  const [endDateObj, setEndDateObj] = useState<Date | null>(null);
-  const [startTime, setStartTime] = useState<string | null>(null);
-  const [endTime, setEndTime] = useState<string | null>(null);
-  const [venue, setVenue] = useState("");
-  const [facultyMentor, setFacultyMentor] = useState("");
-  const [declared, setDeclared] = useState(false);
+  const [teams, setTeams] = useState<OdTeam[] | null>(null);
+  const [teamsLoading, setTeamsLoading] = useState(true);
+  const [teamsErrored, setTeamsErrored] = useState(false);
+  const [teamsReloadToken, setTeamsReloadToken] = useState(0);
 
+  const [creating, setCreating] = useState(false);
+  const [teamCode, setTeamCode] = useState("");
+  const [joining, setJoining] = useState(false);
+
+  const [fromDateObj, setFromDateObj] = useState<Date | null>(null);
+  const [toDateObj, setToDateObj] = useState<Date | null>(null);
+  const [fromTime, setFromTime] = useState<string | null>(null);
+  const [toTime, setToTime] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+  const [facultyList, setFacultyList] = useState<FacultyDirectoryEntry[] | null>(null);
+  const [facultyGuide, setFacultyGuide] = useState<FacultyDirectoryEntry | null>(null);
+  const [facultyPickerOpen, setFacultyPickerOpen] = useState(false);
+  const [facultySearch, setFacultySearch] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [datePickerFor, setDatePickerFor] = useState<DateField>(null);
   const [timePickerFor, setTimePickerFor] = useState<TimeField>(null);
   const [pickerYear, setPickerYear] = useState(2026);
   const [pickerMonth, setPickerMonth] = useState(7); // August (0-indexed)
 
-  const [teamCode, setTeamCode] = useState("");
-  const [history, setHistory] = useState(mockOdHistory);
+  const [history, setHistory] = useState<OdRequestSummary[] | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyErrored, setHistoryErrored] = useState(false);
+  const [historyReloadToken, setHistoryReloadToken] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
@@ -68,6 +89,86 @@ export function StudentOdApplyScreen() {
       };
     }, [navigation]),
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    setTeamsLoading(true);
+    setTeamsErrored(false);
+
+    getMyOdTeams()
+      .then((data) => {
+        if (!cancelled) setTeams(data);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setTeamsErrored(true);
+        toast.error(getApiErrorMessage(error, "Couldn't load your OD teams. Please try again."));
+      })
+      .finally(() => {
+        if (!cancelled) setTeamsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [teamsReloadToken]);
+
+  useEffect(() => {
+    if (tab !== "history") return;
+    let cancelled = false;
+    setHistoryLoading(true);
+    setHistoryErrored(false);
+
+    getMyOdRequests()
+      .then(({ data }) => {
+        if (!cancelled) setHistory(data);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setHistoryErrored(true);
+        toast.error(getApiErrorMessage(error, "Couldn't load your OD history. Please try again."));
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, historyReloadToken]);
+
+  // Fetched once - the faculty roster (~70 rows) barely changes within a
+  // session, unlike teams/history which need a reload token.
+  useEffect(() => {
+    let cancelled = false;
+    getFacultyDirectory()
+      .then((data) => {
+        if (!cancelled) setFacultyList(data);
+      })
+      .catch(() => {
+        // Silent - the picker just shows "Couldn't load faculty list" and
+        // the field stays optional, so a failed fetch here shouldn't block
+        // the rest of the form with a toast.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // has_request (not is_locked) is the authoritative "already submitted"
+  // signal - it's the field the backend derived specifically for this
+  // decision, and won't drift out of sync the way a locally-mirrored
+  // is_locked flag theoretically could.
+  const activeTeam = useMemo(() => teams?.find((team) => !team.has_request) ?? null, [teams]);
+
+  const filteredFacultyList = useMemo(() => {
+    if (!facultyList) return null;
+    const query = facultySearch.trim().toLowerCase();
+    if (!query) return facultyList;
+    return facultyList.filter(
+      (entry) => entry.name.toLowerCase().includes(query) || entry.department_name.toLowerCase().includes(query),
+    );
+  }, [facultyList, facultySearch]);
 
   const pickerWeeks = useMemo(() => getCalendarWeeks(pickerYear, pickerMonth), [pickerYear, pickerMonth]);
 
@@ -91,66 +192,30 @@ export function StudentOdApplyScreen() {
 
   function handlePickDate(day: number) {
     const picked = new Date(pickerYear, pickerMonth, day);
-    if (datePickerFor === "start") {
-      setStartDateObj(picked);
-      if (endDateObj && endDateObj < picked) setEndDateObj(picked);
-    } else if (datePickerFor === "end") {
-      setEndDateObj(picked);
+    if (datePickerFor === "from") {
+      setFromDateObj(picked);
+      if (toDateObj && toDateObj < picked) setToDateObj(picked);
+    } else if (datePickerFor === "to") {
+      setToDateObj(picked);
     }
     setDatePickerFor(null);
   }
 
-  function handlePickTime(slot: string) {
-    if (timePickerFor === "start") setStartTime(slot);
-    else if (timePickerFor === "end") setEndTime(slot);
+  function handlePickTime(value: string) {
+    if (timePickerFor === "from") setFromTime(value);
+    else if (timePickerFor === "to") setToTime(value);
     setTimePickerFor(null);
   }
 
-  function resetCreateForm() {
-    setTeamName("");
-    setEventName("");
-    setStartDateObj(null);
-    setEndDateObj(null);
-    setStartTime(null);
-    setEndTime(null);
-    setVenue("");
-    setFacultyMentor("");
-    setDeclared(false);
-  }
-
   function handleCreateTeam() {
-    if (!teamName.trim()) {
-      toast.warning("Add a team name");
-      return;
-    }
-    if (!eventName.trim()) {
-      toast.warning("Add the event or activity");
-      return;
-    }
-    if (!startDateObj || !endDateObj) {
-      toast.warning("Select a start and end date");
-      return;
-    }
-    if (!startTime || !endTime) {
-      toast.warning("Select a start and end time");
-      return;
-    }
-    if (!venue.trim()) {
-      toast.warning("Add the venue");
-      return;
-    }
-    if (!facultyMentor.trim()) {
-      toast.warning("Add your faculty mentor");
-      return;
-    }
-    if (!declared) {
-      toast.warning("Accept the declaration to continue");
-      return;
-    }
-    const code = generateTeamCode(teamName);
-    toast.success(`Team created - share code ${code} with your teammates`);
-    resetCreateForm();
-    setTab("history");
+    setCreating(true);
+    createOdTeam()
+      .then((team) => {
+        toast.success(`Team created - share code ${team.unique_code} with your teammates`);
+        setTeams((prev) => [team, ...(prev ?? [])]);
+      })
+      .catch((error) => toast.error(getApiErrorMessage(error, "Couldn't create the team. Please try again.")))
+      .finally(() => setCreating(false));
   }
 
   function handleJoinTeam() {
@@ -158,12 +223,72 @@ export function StudentOdApplyScreen() {
       toast.warning("Enter the 6-character team code");
       return;
     }
-    toast.success(`Joined team ${teamCode.trim().toUpperCase()} - event details filled in automatically`);
-    setTeamCode("");
+    setJoining(true);
+    joinOdTeam(teamCode.trim())
+      .then(() => {
+        toast.success(`Joined team ${teamCode.trim().toUpperCase()}`);
+        setTeamCode("");
+        setTeamsReloadToken((n) => n + 1);
+      })
+      .catch((error) => toast.error(getApiErrorMessage(error, "Couldn't join that team. Please try again.")))
+      .finally(() => setJoining(false));
   }
 
-  function markDocumentsSubmitted(id: string) {
-    setHistory((prev) => prev.map((item) => (item.id === id ? { ...item, documentsSubmitted: true } : item)));
+  function handleSubmitRequest() {
+    if (!activeTeam) return;
+    if (!fromDateObj || !toDateObj) {
+      toast.warning("Select a start and end date");
+      return;
+    }
+    if (!reason.trim()) {
+      toast.warning("Add the event");
+      return;
+    }
+
+    // Submitting locks the team server-side - no one still outside it will
+    // be able to join afterwards. Confirm first rather than let a creator
+    // who just tapped "Create team" immediately lock out teammates who
+    // haven't had a chance to join with the code yet (especially likely
+    // when they're still the only member).
+    const soloWarning =
+      activeTeam.member_count <= 1
+        ? "You're still the only member. "
+        : `Only ${activeTeam.member_count} ${activeTeam.member_count === 1 ? "member" : "members"} have joined so far. `;
+    Alert.alert(
+      "Submit OD request?",
+      `${soloWarning}Submitting locks the team - no one else will be able to join with the code after this.`,
+      [
+        { text: "Wait, not yet", style: "cancel" },
+        { text: "Submit", style: "destructive", onPress: doSubmitRequest },
+      ],
+    );
+  }
+
+  function doSubmitRequest() {
+    if (!activeTeam || !fromDateObj || !toDateObj || !reason.trim()) return;
+    setSubmitting(true);
+    submitOdRequest(activeTeam.id, {
+      from_date: toIsoDate(fromDateObj),
+      to_date: toIsoDate(toDateObj),
+      reason: reason.trim(),
+      from_time: fromTime ?? undefined,
+      to_time: toTime ?? undefined,
+      faculty_guide_id: facultyGuide?.id,
+    })
+      .then(() => {
+        toast.success("OD request submitted");
+        setFromDateObj(null);
+        setToDateObj(null);
+        setFromTime(null);
+        setToTime(null);
+        setReason("");
+        setFacultyGuide(null);
+        setTeamsReloadToken((n) => n + 1);
+        setHistoryReloadToken((n) => n + 1);
+        setTab("history");
+      })
+      .catch((error) => toast.error(getApiErrorMessage(error, "Couldn't submit the OD request. Please try again.")))
+      .finally(() => setSubmitting(false));
   }
 
   return (
@@ -201,168 +326,255 @@ export function StudentOdApplyScreen() {
         </View>
 
         {tab === "apply" ? (
-          <>
-            <View style={styles.modeRow}>
-              <ModeCard
-                icon="people"
-                label="Create team"
-                selected={mode === "create"}
-                onPress={() => setMode("create")}
-              />
-              <ModeCard
-                icon="mail-open-outline"
-                label="Join team"
-                selected={mode === "join"}
-                onPress={() => setMode("join")}
-              />
+          teamsLoading ? (
+            <View style={styles.loadingState}>
+              <ActivityIndicator size="small" color="#2F6FE0" />
+              <Text style={styles.loadingStateText}>Loading...</Text>
             </View>
-
-            {mode === "create" ? (
+          ) : teamsErrored ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="cloud-offline-outline" size={32} color="#B0B7C3" />
+              <Text style={styles.emptyStateText}>Couldn't load your OD teams</Text>
+              <TouchableOpacity onPress={() => setTeamsReloadToken((n) => n + 1)} activeOpacity={0.8}>
+                <Text style={styles.retryText}>Tap to retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : activeTeam ? (
+            <>
               <View style={styles.card}>
-                <Text style={styles.fieldLabel}>Team name</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g. Team Nexus"
-                  placeholderTextColor="#9AA6B2"
-                  value={teamName}
-                  onChangeText={setTeamName}
-                />
-
-                <Text style={styles.fieldLabel}>Event or activity</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g. IEEE paper presentation"
-                  placeholderTextColor="#9AA6B2"
-                  value={eventName}
-                  onChangeText={setEventName}
-                />
-
-                <View style={styles.rowFields}>
-                  <View style={styles.rowField}>
-                    <Text style={styles.fieldLabel}>Start date</Text>
-                    <TouchableOpacity
-                      style={styles.pickerButton}
-                      onPress={() => setDatePickerFor("start")}
-                      activeOpacity={0.8}
-                    >
-                      <Ionicons name="calendar-outline" size={14} color="#2F6FE0" />
-                      <Text style={[styles.pickerButtonText, !startDateObj && styles.pickerButtonPlaceholder]}>
-                        {startDateObj ? formatDate(startDateObj) : "Select date"}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                  <View style={styles.rowField}>
-                    <Text style={styles.fieldLabel}>End date</Text>
-                    <TouchableOpacity
-                      style={styles.pickerButton}
-                      onPress={() => setDatePickerFor("end")}
-                      activeOpacity={0.8}
-                    >
-                      <Ionicons name="calendar-outline" size={14} color="#2F6FE0" />
-                      <Text style={[styles.pickerButtonText, !endDateObj && styles.pickerButtonPlaceholder]}>
-                        {endDateObj ? formatDate(endDateObj) : "Select date"}
-                      </Text>
-                    </TouchableOpacity>
+                <Text style={styles.fieldLabel}>Your team</Text>
+                <View style={styles.codeDisplayRow}>
+                  <Text style={styles.codeDisplayText}>{activeTeam.unique_code}</Text>
+                  <View style={styles.memberBadge}>
+                    <Ionicons name="people" size={13} color="#2F6FE0" />
+                    <Text style={styles.memberBadgeText}>
+                      {activeTeam.member_count} {activeTeam.member_count === 1 ? "member" : "members"}
+                    </Text>
                   </View>
                 </View>
-
-                <View style={styles.rowFields}>
-                  <View style={styles.rowField}>
-                    <Text style={styles.fieldLabel}>Start time</Text>
-                    <TouchableOpacity
-                      style={styles.pickerButton}
-                      onPress={() => setTimePickerFor("start")}
-                      activeOpacity={0.8}
-                    >
-                      <Ionicons name="time-outline" size={14} color="#2F6FE0" />
-                      <Text style={[styles.pickerButtonText, !startTime && styles.pickerButtonPlaceholder]}>
-                        {startTime ?? "Select"}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                  <View style={styles.rowField}>
-                    <Text style={styles.fieldLabel}>End time</Text>
-                    <TouchableOpacity
-                      style={styles.pickerButton}
-                      onPress={() => setTimePickerFor("end")}
-                      activeOpacity={0.8}
-                    >
-                      <Ionicons name="time-outline" size={14} color="#2F6FE0" />
-                      <Text style={[styles.pickerButtonText, !endTime && styles.pickerButtonPlaceholder]}>
-                        {endTime ?? "Select"}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                <Text style={styles.fieldLabel}>Venue</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Institution or location"
-                  placeholderTextColor="#9AA6B2"
-                  value={venue}
-                  onChangeText={setVenue}
-                />
-
-                <Text style={styles.fieldLabel}>Faculty mentor</Text>
-                <TextInput
-                  style={[styles.input, styles.inputLast]}
-                  placeholder="e.g. Dr. Kavitha R"
-                  placeholderTextColor="#9AA6B2"
-                  value={facultyMentor}
-                  onChangeText={setFacultyMentor}
-                />
-
-                <TouchableOpacity
-                  style={styles.declarationCard}
-                  onPress={() => setDeclared((prev) => !prev)}
-                  activeOpacity={0.8}
-                >
-                  <View style={[styles.checkbox, declared && styles.checkboxChecked]}>
-                    {declared && <Ionicons name="checkmark" size={13} color="#fff" />}
-                  </View>
-                  <Text style={styles.declarationText}>
-                    I declare that the details above are true, that I will attend the event as stated, and
-                    that I will upload the event photographs in the Academics · On-duty page within 7 days
-                    of completion. I understand attendance is not credited otherwise.
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.submitButton} onPress={handleCreateTeam} activeOpacity={0.85}>
-                  <Text style={styles.submitButtonText}>Create team & generate code</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <View style={styles.card}>
-                <Text style={styles.fieldLabel}>Team code</Text>
-                <TextInput
-                  style={[styles.codeInput, styles.inputLast]}
-                  placeholder="6-CHARACTER CODE"
-                  placeholderTextColor="#9AA6B2"
-                  autoCapitalize="characters"
-                  maxLength={6}
-                  value={teamCode}
-                  onChangeText={(text) => setTeamCode(text.replace(/[^a-zA-Z0-9]/g, "").toUpperCase())}
-                />
                 <Text style={styles.codeHint}>
-                  Ask your team lead for the code generated when the team was created. Event details are
-                  filled in automatically.
+                  {activeTeam.is_creator
+                    ? "Share this code with your teammates and wait for everyone to join - submitting the request below locks the team and no one else will be able to join afterwards."
+                    : "You've joined this team. Only the team creator can submit the OD request."}
                 </Text>
-                <TouchableOpacity style={styles.submitButton} onPress={handleJoinTeam} activeOpacity={0.85}>
-                  <Text style={styles.submitButtonText}>Join team</Text>
-                </TouchableOpacity>
+
+                {activeTeam.members.length > 0 && (
+                  <View style={styles.membersList}>
+                    {activeTeam.members.map((member) => (
+                      <View key={member.student_id} style={styles.memberRow}>
+                        <View style={styles.memberAvatar}>
+                          <Text style={styles.memberAvatarText}>
+                            {member.name.trim().charAt(0).toUpperCase() || "?"}
+                          </Text>
+                        </View>
+                        <Text style={styles.memberName}>{member.name}</Text>
+                        {member.is_creator && (
+                          <View style={styles.creatorBadge}>
+                            <Text style={styles.creatorBadgeText}>Creator</Text>
+                          </View>
+                        )}
+                      </View>
+                    ))}
+                  </View>
+                )}
               </View>
-            )}
-          </>
-        ) : history.length === 0 ? (
+
+              {activeTeam.is_creator ? (
+                <View style={styles.card}>
+                  <Text style={styles.fieldLabel}>Submit OD request</Text>
+                  <View style={styles.rowFields}>
+                    <View style={styles.rowField}>
+                      <Text style={styles.fieldLabel}>From date</Text>
+                      <TouchableOpacity
+                        style={styles.pickerButton}
+                        onPress={() => setDatePickerFor("from")}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="calendar-outline" size={14} color="#2F6FE0" />
+                        <Text style={[styles.pickerButtonText, !fromDateObj && styles.pickerButtonPlaceholder]}>
+                          {fromDateObj ? formatDate(fromDateObj) : "Select date"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.rowField}>
+                      <Text style={styles.fieldLabel}>To date</Text>
+                      <TouchableOpacity
+                        style={styles.pickerButton}
+                        onPress={() => setDatePickerFor("to")}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="calendar-outline" size={14} color="#2F6FE0" />
+                        <Text style={[styles.pickerButtonText, !toDateObj && styles.pickerButtonPlaceholder]}>
+                          {toDateObj ? formatDate(toDateObj) : "Select date"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  <View style={styles.rowFields}>
+                    <View style={styles.rowField}>
+                      <Text style={styles.fieldLabel}>From time (optional)</Text>
+                      <TouchableOpacity
+                        style={styles.pickerButton}
+                        onPress={() => setTimePickerFor("from")}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="time-outline" size={14} color="#2F6FE0" />
+                        <Text style={[styles.pickerButtonText, !fromTime && styles.pickerButtonPlaceholder]}>
+                          {fromTime ? timeSlots.find((s) => s.value === fromTime)?.label ?? fromTime : "Select"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.rowField}>
+                      <Text style={styles.fieldLabel}>To time (optional)</Text>
+                      <TouchableOpacity
+                        style={styles.pickerButton}
+                        onPress={() => setTimePickerFor("to")}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="time-outline" size={14} color="#2F6FE0" />
+                        <Text style={[styles.pickerButtonText, !toTime && styles.pickerButtonPlaceholder]}>
+                          {toTime ? timeSlots.find((s) => s.value === toTime)?.label ?? toTime : "Select"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  <Text style={styles.fieldLabel}>Event</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. IEEE paper presentation at SSN College"
+                    placeholderTextColor="#9AA6B2"
+                    value={reason}
+                    onChangeText={setReason}
+                    multiline
+                  />
+
+                  <Text style={styles.fieldLabel}>Faculty guide (optional)</Text>
+                  <TouchableOpacity
+                    style={[styles.pickerButton, styles.inputLast]}
+                    onPress={() => setFacultyPickerOpen(true)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="person-outline" size={14} color="#2F6FE0" />
+                    <Text style={[styles.pickerButtonText, !facultyGuide && styles.pickerButtonPlaceholder]}>
+                      {facultyGuide ? facultyGuide.name : "Select faculty"}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <View style={styles.lockWarningRow}>
+                    <Ionicons name="lock-closed-outline" size={13} color="#D97706" />
+                    <Text style={styles.lockWarningText}>This locks the team - no one else can join after.</Text>
+                  </View>
+
+                  <TouchableOpacity
+                    style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
+                    onPress={handleSubmitRequest}
+                    activeOpacity={0.85}
+                    disabled={submitting}
+                  >
+                    {submitting ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={styles.submitButtonText}>Submit OD request</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="time-outline" size={32} color="#B0B7C3" />
+                  <Text style={styles.emptyStateText}>Waiting for the team creator</Text>
+                  <Text style={styles.emptyStateSubtext}>
+                    They'll submit the OD request once everyone has joined.
+                  </Text>
+                </View>
+              )}
+            </>
+          ) : (
+            <>
+              <View style={styles.modeRow}>
+                <ModeCard
+                  icon="people"
+                  label="Create team"
+                  selected={mode === "create"}
+                  onPress={() => setMode("create")}
+                />
+                <ModeCard
+                  icon="mail-open-outline"
+                  label="Join team"
+                  selected={mode === "join"}
+                  onPress={() => setMode("join")}
+                />
+              </View>
+
+              {mode === "create" ? (
+                <View style={styles.card}>
+                  <Text style={styles.codeHint}>
+                    Create a team to get a shareable code. Add your teammates, then submit the OD request with
+                    the dates and reason - anyone on the team can view its status.
+                  </Text>
+                  <TouchableOpacity
+                    style={[styles.submitButton, creating && styles.submitButtonDisabled]}
+                    onPress={handleCreateTeam}
+                    activeOpacity={0.85}
+                    disabled={creating}
+                  >
+                    {creating ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={styles.submitButtonText}>Create team</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.card}>
+                  <Text style={styles.fieldLabel}>Team code</Text>
+                  <TextInput
+                    style={[styles.codeInput, styles.inputLast]}
+                    placeholder="6-CHARACTER CODE"
+                    placeholderTextColor="#9AA6B2"
+                    autoCapitalize="characters"
+                    maxLength={6}
+                    value={teamCode}
+                    onChangeText={(text) => setTeamCode(text.replace(/[^a-zA-Z0-9]/g, "").toUpperCase())}
+                  />
+                  <Text style={styles.codeHint}>Ask your team lead for the code generated when the team was created.</Text>
+                  <TouchableOpacity
+                    style={[styles.submitButton, joining && styles.submitButtonDisabled]}
+                    onPress={handleJoinTeam}
+                    activeOpacity={0.85}
+                    disabled={joining}
+                  >
+                    {joining ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={styles.submitButtonText}>Join team</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              )}
+            </>
+          )
+        ) : historyLoading ? (
+          <View style={styles.loadingState}>
+            <ActivityIndicator size="small" color="#2F6FE0" />
+            <Text style={styles.loadingStateText}>Loading history...</Text>
+          </View>
+        ) : historyErrored ? (
+          <View style={styles.emptyState}>
+            <Ionicons name="cloud-offline-outline" size={32} color="#B0B7C3" />
+            <Text style={styles.emptyStateText}>Couldn't load your history</Text>
+            <TouchableOpacity onPress={() => setHistoryReloadToken((n) => n + 1)} activeOpacity={0.8}>
+              <Text style={styles.retryText}>Tap to retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : !history || history.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
             <Text style={styles.emptyStateText}>No on-duty applications yet</Text>
           </View>
         ) : (
-          history.map((item) => (
-            <HistoryCard key={item.id} item={item} onSubmitDocuments={() => markDocumentsSubmitted(item.id)} />
-          ))
+          history.map((item) => <HistoryCard key={item.id} item={item} />)
         )}
       </ScrollView>
 
@@ -420,21 +632,95 @@ export function StudentOdApplyScreen() {
       >
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setTimePickerFor(null)}>
           <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>{timePickerFor === "start" ? "Start Time" : "End Time"}</Text>
+            <Text style={styles.modalTitle}>{timePickerFor === "from" ? "From Time" : "To Time"}</Text>
             <ScrollView style={styles.modalList}>
               {timeSlots.map((slot) => (
                 <TouchableOpacity
-                  key={slot}
+                  key={slot.value}
                   style={styles.modalOptionRow}
-                  onPress={() => handlePickTime(slot)}
+                  onPress={() => handlePickTime(slot.value)}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.modalOptionName}>{slot}</Text>
-                  {(timePickerFor === "start" ? startTime : endTime) === slot && (
+                  <Text style={styles.modalOptionName}>{slot.label}</Text>
+                  {(timePickerFor === "from" ? fromTime : toTime) === slot.value && (
                     <Ionicons name="checkmark" size={18} color="#2F6FE0" />
                   )}
                 </TouchableOpacity>
               ))}
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal
+        visible={facultyPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setFacultyPickerOpen(false);
+          setFacultySearch("");
+        }}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => {
+            setFacultyPickerOpen(false);
+            setFacultySearch("");
+          }}
+        >
+          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
+            <Text style={styles.modalTitle}>Faculty guide</Text>
+
+            {facultyList !== null && facultyList.length > 0 && (
+              <View style={styles.searchInputWrap}>
+                <Ionicons name="search-outline" size={15} color="#9AA6B2" />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Search by name or department"
+                  placeholderTextColor="#9AA6B2"
+                  value={facultySearch}
+                  onChangeText={setFacultySearch}
+                  autoFocus
+                />
+                {facultySearch.length > 0 && (
+                  <TouchableOpacity onPress={() => setFacultySearch("")} hitSlop={8}>
+                    <Ionicons name="close-circle" size={16} color="#9AA6B2" />
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+
+            <ScrollView style={styles.modalList}>
+              {facultyList === null ? (
+                <View style={styles.modalLoadingRow}>
+                  <ActivityIndicator size="small" color="#2F6FE0" />
+                  <Text style={styles.modalLoadingText}>Loading faculty...</Text>
+                </View>
+              ) : facultyList.length === 0 ? (
+                <Text style={styles.modalLoadingText}>Couldn't load the faculty list.</Text>
+              ) : filteredFacultyList && filteredFacultyList.length === 0 ? (
+                <Text style={styles.modalLoadingText}>No faculty match "{facultySearch}".</Text>
+              ) : (
+                filteredFacultyList?.map((entry) => (
+                  <TouchableOpacity
+                    key={entry.id}
+                    style={styles.modalOptionRow}
+                    onPress={() => {
+                      setFacultyGuide(entry);
+                      setFacultyPickerOpen(false);
+                      setFacultySearch("");
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.modalOptionTextWrap}>
+                      <Text style={styles.modalOptionName}>{entry.name}</Text>
+                      <Text style={styles.modalOptionSubtext}>{entry.department_name}</Text>
+                    </View>
+                    {facultyGuide?.id === entry.id && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
+                  </TouchableOpacity>
+                ))
+              )}
             </ScrollView>
           </TouchableOpacity>
         </TouchableOpacity>
@@ -468,102 +754,35 @@ function ModeCard({
   );
 }
 
-function HistoryCard({ item, onSubmitDocuments }: { item: OdHistoryItem; onSubmitDocuments: () => void }) {
-  const meta = STATUS_META[item.status];
-  const [expanded, setExpanded] = useState(false);
-  const [certAttached, setCertAttached] = useState(false);
-  const [photoAttached, setPhotoAttached] = useState(false);
-  const needsDocuments = item.status === "approved" && !item.documentsSubmitted;
+function timeLabel(value: string | null): string | null {
+  if (!value) return null;
+  return timeSlots.find((slot) => slot.value === value)?.label ?? value;
+}
 
-  function handleSubmitDocuments() {
-    if (!certAttached || !photoAttached) {
-      toast.warning("Attach both the certificate and the event photograph");
-      return;
-    }
-    toast.success("Documents submitted for attendance credit");
-    onSubmitDocuments();
-    setExpanded(false);
-  }
+function HistoryCard({ item }: { item: OdRequestSummary }) {
+  const meta = OD_STATUS_META[item.overall_status];
+  const fromTimeLabel = timeLabel(item.from_time);
+  const toTimeLabel = timeLabel(item.to_time);
 
   return (
     <View style={styles.historyCard}>
       <View style={styles.historyHeader}>
-        <Text style={styles.historyEvent}>{item.event}</Text>
+        <Text style={styles.historyEvent}>{item.reason ?? "On-duty request"}</Text>
         <View style={[styles.statusBadge, { backgroundColor: meta.bg }]}>
           <Text style={[styles.statusBadgeText, { color: meta.text }]}>{meta.label}</Text>
         </View>
       </View>
       <Text style={styles.historyMeta}>
-        {item.date} · {item.durationHours} hrs · {item.venue}
+        {item.from_date} to {item.to_date}
+        {(fromTimeLabel || toTimeLabel) && ` · ${fromTimeLabel ?? "?"} - ${toTimeLabel ?? "?"}`}
       </Text>
       <Text style={styles.historyTeamLine}>
-        {item.teamName} · code {item.code}
+        Team code {item.unique_code} · {item.member_count} {item.member_count === 1 ? "member" : "members"}
+        {item.member_count > 1 &&
+          ` · ${item.approved_count} approved, ${item.pending_count} pending, ${item.rejected_count} rejected`}
       </Text>
-
-      {needsDocuments && (
-        <TouchableOpacity onPress={() => setExpanded((prev) => !prev)} hitSlop={4}>
-          <Text style={styles.uploadPromptLink}>
-            {expanded ? "Hide upload form" : "Tap to upload certificate and photograph"}
-          </Text>
-        </TouchableOpacity>
-      )}
-      {item.status === "rejected" && <Text style={styles.notApprovedNote}>Not approved — no documents required</Text>}
-
-      {needsDocuments && expanded && (
-        <View style={styles.uploadSection}>
-          <Text style={styles.uploadInstructions}>
-            Attach the participation certificate and an event photograph so the attendance is credited.
-          </Text>
-
-          <UploadBox
-            icon="document-text-outline"
-            title="Participation certificate"
-            subtitle="PDF or image, up to 5 MB"
-            attached={certAttached}
-            onPress={() => setCertAttached((prev) => !prev)}
-          />
-          <UploadBox
-            icon="image-outline"
-            title="Event photograph"
-            subtitle="Geo-tagged photo at the venue"
-            attached={photoAttached}
-            onPress={() => setPhotoAttached((prev) => !prev)}
-          />
-
-          <TouchableOpacity style={styles.submitButton} onPress={handleSubmitDocuments} activeOpacity={0.85}>
-            <Text style={styles.submitButtonText}>Submit documents</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      {item.faculty_guide_name && <Text style={styles.historyTeamLine}>Faculty guide: {item.faculty_guide_name}</Text>}
     </View>
-  );
-}
-
-function UploadBox({
-  icon,
-  title,
-  subtitle,
-  attached,
-  onPress,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  subtitle: string;
-  attached: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <TouchableOpacity
-      style={[styles.uploadBox, attached && styles.uploadBoxAttached]}
-      onPress={onPress}
-      activeOpacity={0.8}
-    >
-      <Ionicons name={attached ? "checkmark-circle" : icon} size={22} color="#2F6FE0" />
-      <View style={styles.uploadBoxTextWrap}>
-        <Text style={styles.uploadBoxTitle}>{title}</Text>
-        <Text style={styles.uploadBoxSubtitle}>{attached ? "Selected" : subtitle}</Text>
-      </View>
-    </TouchableOpacity>
   );
 }
 
@@ -630,6 +849,16 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontFamily: fonts.bold,
   },
+  loadingState: {
+    alignItems: "center",
+    paddingVertical: 48,
+    gap: 10,
+  },
+  loadingStateText: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#9AA6B2",
+  },
   modeRow: {
     flexDirection: "row",
     gap: 12,
@@ -671,6 +900,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 16,
     padding: 16,
+    marginBottom: 16,
     elevation: 2,
     shadowColor: "#0F172A",
     shadowOffset: { width: 0, height: 2 },
@@ -682,6 +912,76 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     color: "#374151",
     marginBottom: 6,
+  },
+  codeDisplayRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  codeDisplayText: {
+    fontSize: 24,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+    letterSpacing: 3,
+  },
+  memberBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#EAF0FD",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  memberBadgeText: {
+    fontSize: 12,
+    fontFamily: fonts.semibold,
+    color: "#2F6FE0",
+  },
+  membersList: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#F1F3F6",
+    gap: 10,
+  },
+  memberRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  memberAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#EAF0FD",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  memberAvatarText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+  },
+  memberName: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: fonts.semibold,
+    color: "#111827",
+  },
+  creatorBadge: {
+    backgroundColor: "#F1F3F6",
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+  },
+  creatorBadgeText: {
+    fontSize: 10,
+    fontFamily: fonts.bold,
+    color: "#6B7280",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
   },
   input: {
     borderWidth: 1,
@@ -745,35 +1045,16 @@ const styles = StyleSheet.create({
     color: "#9AA6B2",
     fontFamily: fonts.regular,
   },
-  declarationCard: {
+  lockWarningRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-    backgroundColor: "#F7F8FA",
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 16,
-  },
-  checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 6,
-    borderWidth: 1.5,
-    borderColor: "#D1D5DB",
     alignItems: "center",
-    justifyContent: "center",
-    marginTop: 1,
+    gap: 6,
+    marginBottom: 12,
   },
-  checkboxChecked: {
-    backgroundColor: "#2F6FE0",
-    borderColor: "#2F6FE0",
-  },
-  declarationText: {
-    flex: 1,
+  lockWarningText: {
     fontSize: 12,
-    fontFamily: fonts.regular,
-    color: "#4B5563",
-    lineHeight: 18,
+    fontFamily: fonts.medium,
+    color: "#D97706",
   },
   submitButton: {
     alignItems: "center",
@@ -786,6 +1067,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
+  },
+  submitButtonDisabled: {
+    opacity: 0.7,
   },
   submitButtonText: {
     fontSize: 14,
@@ -836,61 +1120,6 @@ const styles = StyleSheet.create({
     color: "#9AA6B2",
     marginTop: 4,
   },
-  uploadPromptLink: {
-    fontSize: 13,
-    fontFamily: fonts.bold,
-    color: "#2F6FE0",
-    marginTop: 10,
-  },
-  notApprovedNote: {
-    fontSize: 13,
-    fontFamily: fonts.semibold,
-    color: "#9AA6B2",
-    marginTop: 10,
-  },
-  uploadSection: {
-    marginTop: 14,
-    paddingTop: 14,
-    borderTopWidth: 1,
-    borderTopColor: "#F1F3F6",
-  },
-  uploadInstructions: {
-    fontSize: 12,
-    fontFamily: fonts.regular,
-    color: "#9AA6B2",
-    lineHeight: 18,
-    marginBottom: 14,
-  },
-  uploadBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    borderWidth: 1.5,
-    borderColor: "#D1D5DB",
-    borderStyle: "dashed",
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 12,
-  },
-  uploadBoxAttached: {
-    borderStyle: "solid",
-    borderColor: "#2F6FE0",
-    backgroundColor: "#EAF0FD",
-  },
-  uploadBoxTextWrap: {
-    flex: 1,
-  },
-  uploadBoxTitle: {
-    fontSize: 14,
-    fontFamily: fonts.bold,
-    color: "#111827",
-  },
-  uploadBoxSubtitle: {
-    fontSize: 12,
-    fontFamily: fonts.regular,
-    color: "#9AA6B2",
-    marginTop: 2,
-  },
   emptyState: {
     alignItems: "center",
     paddingVertical: 48,
@@ -900,6 +1129,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: fonts.medium,
     color: "#9AA6B2",
+  },
+  emptyStateSubtext: {
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    color: "#9AA6B2",
+    textAlign: "center",
+    paddingHorizontal: 24,
+  },
+  retryText: {
+    fontSize: 13,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+    marginTop: 4,
   },
   modalOverlay: {
     flex: 1,
@@ -922,6 +1164,24 @@ const styles = StyleSheet.create({
   modalList: {
     marginBottom: 4,
   },
+  searchInputWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#F9FAFB",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    marginBottom: 10,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 10,
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#111827",
+  },
   modalOptionRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -934,6 +1194,26 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: fonts.semibold,
     color: "#111827",
+  },
+  modalOptionTextWrap: {
+    flex: 1,
+  },
+  modalOptionSubtext: {
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    color: "#9AA6B2",
+    marginTop: 2,
+  },
+  modalLoadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 20,
+  },
+  modalLoadingText: {
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    color: "#9AA6B2",
   },
   calendarNav: {
     flexDirection: "row",

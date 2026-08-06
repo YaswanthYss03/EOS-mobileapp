@@ -67,14 +67,27 @@ export function AcademicsChooserScreen() {
   // Swaps the shared CollegeHeader (mounted at the Tabs level, see
   // app/(tabs)/_layout.tsx) for this screen's own header while it's focused,
   // same pattern used by the ERP hod/employee dashboards.
+  //
+  // No blur-cleanup here on purpose: this screen leads to other
+  // header-swapping screens (Overview, Placements), and a cleanup that
+  // unconditionally restores CollegeHeader races their own focus-effect -
+  // observed live as "College header shows instead of Placements" when
+  // pushing forward, since the child's setup and this cleanup can both
+  // fire on the same transition and whichever runs last wins. Restoring
+  // CollegeHeader is instead handled explicitly below, only on the one
+  // path that actually needs it - leaving the Academics tab for Home.
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({
-        header: () => <EduHeader onBack={() => router.replace("/(tabs)/home")} />,
+        header: () => (
+          <EduHeader
+            onBack={() => {
+              navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
+              router.replace("/(tabs)/home");
+            }}
+          />
+        ),
       });
-      return () => {
-        navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
-      };
     }, [navigation, router]),
   );
 

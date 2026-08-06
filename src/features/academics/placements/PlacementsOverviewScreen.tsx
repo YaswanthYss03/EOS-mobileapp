@@ -1,27 +1,42 @@
-import { useCallback, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
-import { mockDrives, placementStats, type Drive } from "./data/mockDrives";
-import { mockPlaced, type PlacedStudent } from "./data/mockPlaced";
-import { mockTraining, type TrainingProgramme } from "./data/mockTraining";
-import { mockBatchHistory, type BatchRecord } from "./data/mockBatchHistory";
+import { formatDate } from "@/utils/calendar";
+import { useRole } from "@/hooks/useRole";
+import {
+  getUpcomingDrives,
+  getDriveHistory,
+  type UpcomingDrive,
+  type DriveHistoryItem,
+  type ApplicationStatus,
+} from "@/services/api/placements.api";
+import {
+  getUpcomingDrivesForFaculty,
+  getMentoredStudents,
+  type UpcomingDrive as FacultyUpcomingDrive,
+  type MentoredStudent,
+} from "@/services/api/faculty-placements.api";
 
-type PlacementTab = "drives" | "placed" | "training" | "history";
+type PlacementTab = "upcoming" | "history";
 
-const TABS: { id: PlacementTab; label: string }[] = [
-  { id: "drives", label: "Drives" },
-  { id: "placed", label: "Placed" },
-  { id: "training", label: "Training" },
-  { id: "history", label: "History" },
-];
-
-const SECTION_FILTERS = ["All", "CSE-A", "CSE-B", "CSE-C"];
+// "Round N cleared" comes straight from drive_application_status_enum
+// (applied/r1_cleared/r2_cleared/r3_cleared/rejected/placed) - the schema
+// has no named-round checklist (no "Online assessment"/"Technical
+// interview"/etc.), just this one coarse per-drive status, so that's the
+// most detail a status can ever show.
+const APPLICATION_STATUS_META: Record<ApplicationStatus, { label: string; bg: string; text: string }> = {
+  applied: { label: "Applied", bg: "#EAF0FD", text: "#2F6FE0" },
+  r1_cleared: { label: "Round 1 cleared", bg: "#FEF3C7", text: "#D97706" },
+  r2_cleared: { label: "Round 2 cleared", bg: "#FEF3C7", text: "#D97706" },
+  r3_cleared: { label: "Round 3 cleared", bg: "#FEF3C7", text: "#D97706" },
+  placed: { label: "Offer", bg: "#F0FDF4", text: "#16A34A" },
+  rejected: { label: "Rejected", bg: "#FEF2F2", text: "#DC2626" },
+};
 
 function PlacementsHeader({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
@@ -40,293 +55,351 @@ function PlacementsHeader({ onBack }: { onBack: () => void }) {
       >
         <Ionicons name="arrow-back" size={20} color="#fff" />
       </TouchableOpacity>
-      <View>
-        <Text style={styles.headerTitle}>Placements</Text>
-        <Text style={styles.headerSubtitle}>CSE · batch 2026</Text>
-      </View>
+      <Text style={styles.headerTitle}>Placements</Text>
     </LinearGradient>
   );
 }
 
-// TODO: view-only - replace mockDrives/mockHistory with real placement backend
-// calls once they exist. Placed and Training don't have a data model yet.
+// Wired to EOS-backend's placement/drives module - see
+// @/services/api/placements.api.ts (student's own self-service view) and
+// @/services/api/faculty-placements.api.ts (faculty/HoD mentor view).
+// Reachable from the Academics tab's chooser for every role; branches on
+// useRole() since a student and a faculty/HoD mentor need genuinely
+// different data here - a student has their own application outcome to
+// track, a mentor has none (they're not an applicant) but instead needs to
+// see their mentees' histories.
 export function PlacementsOverviewScreen() {
+  const role = useRole();
   const router = useRouter();
   const navigation = useNavigation();
-  const [tab, setTab] = useState<PlacementTab>("drives");
 
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({
         header: () => <PlacementsHeader onBack={() => router.back()} />,
       });
-      return () => {
-        navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
-      };
     }, [navigation, router]),
   );
 
+  return role === "student" ? <StudentPlacementsBody /> : <FacultyPlacementsBody />;
+}
+
+// ───────────────────────────── Student body ─────────────────────────────
+
+function StudentPlacementsBody() {
+  const [tab, setTab] = useState<PlacementTab>("upcoming");
+
+  const [upcoming, setUpcoming] = useState<UpcomingDrive[] | null>(null);
+  const [upcomingLoading, setUpcomingLoading] = useState(true);
+  const [upcomingErrored, setUpcomingErrored] = useState(false);
+  const [upcomingReloadToken, setUpcomingReloadToken] = useState(0);
+
+  const [history, setHistory] = useState<DriveHistoryItem[] | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyErrored, setHistoryErrored] = useState(false);
+  const [historyReloadToken, setHistoryReloadToken] = useState(0);
+
+  useEffect(() => {
+    setUpcomingLoading(true);
+    setUpcomingErrored(false);
+    getUpcomingDrives()
+      .then(setUpcoming)
+      .catch(() => setUpcomingErrored(true))
+      .finally(() => setUpcomingLoading(false));
+  }, [upcomingReloadToken]);
+
+  useEffect(() => {
+    setHistoryLoading(true);
+    setHistoryErrored(false);
+    getDriveHistory()
+      .then(setHistory)
+      .catch(() => setHistoryErrored(true))
+      .finally(() => setHistoryLoading(false));
+  }, [historyReloadToken]);
+
   return (
     <SafeAreaView style={styles.container} edges={[]}>
-      <View style={styles.tabRow}>
-        {TABS.map((t) => (
-          <TouchableOpacity
-            key={t.id}
-            style={[styles.tabPill, tab === t.id && styles.tabPillActive]}
-            onPress={() => setTab(t.id)}
-          >
-            <Text style={[styles.tabPillText, tab === t.id && styles.tabPillTextActive]}>{t.label}</Text>
-          </TouchableOpacity>
-        ))}
+      <View style={styles.content}>
+        <TabSwitch tab={tab} setTab={setTab} />
+
+        <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+          {tab === "upcoming" ? (
+            upcomingLoading ? (
+              <LoadingState />
+            ) : upcomingErrored ? (
+              <ErrorState onRetry={() => setUpcomingReloadToken((n) => n + 1)} />
+            ) : upcoming && upcoming.length > 0 ? (
+              upcoming.map((drive) => <StudentUpcomingCard key={drive.drive_id} drive={drive} />)
+            ) : (
+              <EmptyState icon="briefcase-outline" text="No drives coming up right now." />
+            )
+          ) : historyLoading ? (
+            <LoadingState />
+          ) : historyErrored ? (
+            <ErrorState onRetry={() => setHistoryReloadToken((n) => n + 1)} />
+          ) : history && history.length > 0 ? (
+            history.map((item) => <HistoryCard key={item.drive_id} item={item} />)
+          ) : (
+            <EmptyState icon="document-text-outline" text="No placement history yet." />
+          )}
+        </ScrollView>
       </View>
-
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.statsRow}>
-          <StatCard value={String(mockDrives.length)} label="Active drives" />
-          <StatCard value={String(placementStats.studentsPlaced)} label="Students placed" />
-          <StatCard value={`${placementStats.placementRate}%`} label="Placement rate" />
-          <StatCard value={placementStats.highestCtc} label="Highest CTC" />
-        </View>
-
-        {tab === "drives" && <DrivesTab />}
-        {tab === "placed" && <PlacedTab />}
-        {tab === "training" && <TrainingTab />}
-        {tab === "history" && <HistoryTab />}
-      </ScrollView>
     </SafeAreaView>
   );
 }
 
-function DrivesTab() {
-  return (
-    <View>
-      <Text style={styles.sectionTitle}>Drive details</Text>
-      {mockDrives.map((drive) => (
-        <DriveCard key={drive.id} drive={drive} />
-      ))}
-    </View>
-  );
-}
-
-function PlacedTab() {
-  const [section, setSection] = useState("All");
-  const students = section === "All" ? mockPlaced : mockPlaced.filter((s) => s.section === section);
+function StudentUpcomingCard({ drive }: { drive: UpcomingDrive }) {
+  const meta = APPLICATION_STATUS_META[drive.application_status];
 
   return (
-    <View>
-      <View style={styles.tabRowInline}>
-        {SECTION_FILTERS.map((s) => (
-          <TouchableOpacity
-            key={s}
-            style={[styles.tabPill, section === s && styles.tabPillActive]}
-            onPress={() => setSection(s)}
-          >
-            <Text style={[styles.tabPillText, section === s && styles.tabPillTextActive]}>{s}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {students.map((student) => (
-        <PlacedCard key={student.id} student={student} />
-      ))}
-
-      {students.length === 0 && <ComingSoon icon="ribbon-outline" text="No placements in this section yet." />}
-    </View>
-  );
-}
-
-function PlacedCard({ student }: { student: PlacedStudent }) {
-  const accepted = student.status === "Offer accepted";
-
-  return (
-    <View style={styles.driveCard}>
-      <View style={styles.driveHeader}>
-        <View style={styles.placedAvatar}>
-          <Text style={styles.avatarText}>{initialsFromName(student.name)}</Text>
+    <View style={[styles.card, !drive.is_disclosed && styles.cardUndisclosed]}>
+      <View style={styles.cardHeaderRow}>
+        <View style={styles.cardHeader}>
+          {!drive.is_disclosed && <Ionicons name="lock-closed" size={14} color="#8A93A3" />}
+          <Text style={[styles.company, !drive.is_disclosed && styles.companyUndisclosed]}>{drive.company_name}</Text>
         </View>
-        <View style={styles.driveHeaderText}>
-          <Text style={styles.company}>{student.name}</Text>
-          <Text style={styles.roleLine}>
-            {student.rollNo} · {student.section} · CGPA {student.cgpa}
-          </Text>
-        </View>
-        <View style={styles.placedMeta}>
-          <Text style={styles.placedPackage}>{student.package}</Text>
-          <Text style={styles.appliedOn}>{student.placedOn}</Text>
+        <View style={[styles.statusBadge, { backgroundColor: meta.bg }]}>
+          <Text style={[styles.statusBadgeText, { color: meta.text }]}>{meta.label}</Text>
         </View>
       </View>
 
-      <View style={styles.divider} />
+      <View style={styles.metaRow}>
+        <Ionicons name="calendar-outline" size={13} color="#8A93A3" />
+        <Text style={styles.metaText}>Drive on {formatDate(new Date(drive.scheduled_date))}</Text>
+      </View>
 
-      <View style={styles.footerRow}>
-        <Text style={styles.roundsText}>
-          {student.company} · {student.role}
+      {drive.is_disclosed && drive.company_profile_info && (
+        <Text style={styles.profileInfo}>{drive.company_profile_info}</Text>
+      )}
+
+      {!drive.is_disclosed && (
+        <Text style={styles.revealHint}>
+          {drive.disclosed_reveal_date
+            ? `Company name reveals on ${formatDate(new Date(drive.disclosed_reveal_date))}`
+            : "Company name will be revealed closer to the drive date."}
         </Text>
-        <View style={[styles.statusBadge, !accepted && styles.statusBadgeNeutral]}>
-          <Text style={[styles.statusBadgeText, !accepted && styles.statusBadgeTextNeutral]}>{student.status}</Text>
+      )}
+    </View>
+  );
+}
+
+// A rejection overwrites application_status, but last_cleared_round is
+// tracked separately and survives it - so a student rejected after
+// clearing a round gets to see that progress, not just a flat "Rejected".
+function historyStatusLabel(item: DriveHistoryItem): string {
+  const base = APPLICATION_STATUS_META[item.application_status].label;
+  if (item.application_status === "rejected" && item.last_cleared_round) {
+    return `Round ${item.last_cleared_round} cleared · ${base}`;
+  }
+  return base;
+}
+
+function HistoryCard({ item }: { item: DriveHistoryItem }) {
+  const meta = APPLICATION_STATUS_META[item.application_status];
+
+  return (
+    <View style={styles.card}>
+      <View style={styles.cardHeaderRow}>
+        <Text style={styles.company}>{item.company_name}</Text>
+        <View style={[styles.statusBadge, { backgroundColor: meta.bg }]}>
+          <Text style={[styles.statusBadgeText, { color: meta.text }]}>{historyStatusLabel(item)}</Text>
         </View>
+      </View>
+
+      <View style={styles.metaRow}>
+        <Ionicons name="calendar-outline" size={13} color="#8A93A3" />
+        <Text style={styles.metaText}>Drive on {formatDate(new Date(item.scheduled_date))}</Text>
       </View>
     </View>
   );
 }
 
-// Names are "A. Karthikeyan" / "R. Bala Krishnan" style - initial + first name -> "AK" / "RB".
+// ───────────────────────────── Faculty/HoD (mentor) body ─────────────────────────────
+
 function initialsFromName(name: string) {
-  const [first, second] = name.split(/\s+/);
-  return `${first.charAt(0)}${second?.charAt(0) ?? ""}`.toUpperCase();
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("");
 }
 
-function TrainingTab() {
+function FacultyPlacementsBody() {
+  const router = useRouter();
+  const [tab, setTab] = useState<PlacementTab>("upcoming");
+
+  const [upcoming, setUpcoming] = useState<FacultyUpcomingDrive[] | null>(null);
+  const [upcomingLoading, setUpcomingLoading] = useState(true);
+  const [upcomingErrored, setUpcomingErrored] = useState(false);
+  const [upcomingReloadToken, setUpcomingReloadToken] = useState(0);
+
+  const [students, setStudents] = useState<MentoredStudent[] | null>(null);
+  const [studentsLoading, setStudentsLoading] = useState(true);
+  const [studentsErrored, setStudentsErrored] = useState(false);
+  const [studentsReloadToken, setStudentsReloadToken] = useState(0);
+
+  useEffect(() => {
+    setUpcomingLoading(true);
+    setUpcomingErrored(false);
+    getUpcomingDrivesForFaculty()
+      .then(setUpcoming)
+      .catch(() => setUpcomingErrored(true))
+      .finally(() => setUpcomingLoading(false));
+  }, [upcomingReloadToken]);
+
+  useEffect(() => {
+    setStudentsLoading(true);
+    setStudentsErrored(false);
+    getMentoredStudents()
+      .then(setStudents)
+      .catch(() => setStudentsErrored(true))
+      .finally(() => setStudentsLoading(false));
+  }, [studentsReloadToken]);
+
+  function openStudentHistory(student: MentoredStudent) {
+    router.push({
+      pathname: "/(tabs)/academics/placements/student/[studentId]",
+      params: {
+        studentId: String(student.student_id),
+        name: student.name,
+        studentIdNo: student.student_id_no,
+      },
+    } as never);
+  }
+
   return (
-    <View>
-      <Text style={styles.sectionTitle}>Training programmes</Text>
-      {mockTraining.map((programme) => (
-        <TrainingCard key={programme.id} programme={programme} />
-      ))}
-    </View>
+    <SafeAreaView style={styles.container} edges={[]}>
+      <View style={styles.content}>
+        <TabSwitch tab={tab} setTab={setTab} />
+
+        <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+          {tab === "upcoming" ? (
+            upcomingLoading ? (
+              <LoadingState />
+            ) : upcomingErrored ? (
+              <ErrorState onRetry={() => setUpcomingReloadToken((n) => n + 1)} />
+            ) : upcoming && upcoming.length > 0 ? (
+              upcoming.map((drive) => <FacultyUpcomingCard key={drive.drive_id} drive={drive} />)
+            ) : (
+              <EmptyState icon="briefcase-outline" text="No drives coming up right now." />
+            )
+          ) : studentsLoading ? (
+            <LoadingState />
+          ) : studentsErrored ? (
+            <ErrorState onRetry={() => setStudentsReloadToken((n) => n + 1)} />
+          ) : students && students.length > 0 ? (
+            <>
+              <Text style={styles.sectionHint}>Tap a student to see their placement history.</Text>
+              {students.map((student) => (
+                <StudentRow key={student.student_id} student={student} onPress={() => openStudentHistory(student)} />
+              ))}
+            </>
+          ) : (
+            <EmptyState icon="people-outline" text="You aren't mentoring any class yet." />
+          )}
+        </ScrollView>
+      </View>
+    </SafeAreaView>
   );
 }
 
-function TrainingCard({ programme }: { programme: TrainingProgramme }) {
-  const percent = Math.round((programme.completedSessions / programme.totalSessions) * 100);
-
+function FacultyUpcomingCard({ drive }: { drive: FacultyUpcomingDrive }) {
   return (
-    <View style={styles.driveCard}>
-      <View style={styles.trainingHeader}>
-        <Text style={styles.trainingTitle}>{programme.title}</Text>
-        <View style={styles.statusBadge}>
-          <Text style={styles.statusBadgeText}>{programme.status}</Text>
-        </View>
-      </View>
-      <Text style={styles.roleLine}>
-        {programme.conductedBy} · {programme.schedule}
-      </Text>
-
-      <View style={styles.progressTrack}>
-        <View style={[styles.progressFill, { width: `${percent}%` }]} />
+    <View style={[styles.card, !drive.is_disclosed && styles.cardUndisclosed]}>
+      <View style={styles.cardHeader}>
+        {!drive.is_disclosed && <Ionicons name="lock-closed" size={14} color="#8A93A3" />}
+        <Text style={[styles.company, !drive.is_disclosed && styles.companyUndisclosed]}>{drive.company_name}</Text>
       </View>
 
-      <View style={styles.footerRow}>
-        <Text style={styles.roundsText}>
-          {programme.completedSessions} of {programme.totalSessions} sessions
+      <View style={styles.metaRow}>
+        <Ionicons name="calendar-outline" size={13} color="#8A93A3" />
+        <Text style={styles.metaText}>Drive on {formatDate(new Date(drive.scheduled_date))}</Text>
+      </View>
+
+      {drive.is_disclosed && drive.company_profile_info && (
+        <Text style={styles.profileInfo}>{drive.company_profile_info}</Text>
+      )}
+
+      {!drive.is_disclosed && (
+        <Text style={styles.revealHint}>
+          {drive.disclosed_reveal_date
+            ? `Company name reveals on ${formatDate(new Date(drive.disclosed_reveal_date))}`
+            : "Company name will be revealed closer to the drive date."}
         </Text>
-        <Text style={styles.studentListLink}>{percent}%</Text>
-      </View>
+      )}
     </View>
   );
 }
 
-function StatCard({ value, label }: { value: string; label: string }) {
+function StudentRow({ student, onPress }: { student: MentoredStudent; onPress: () => void }) {
+  const classLabel = student.section
+    ? `${student.department_name ?? "—"} - ${student.section}`
+    : "No class assigned";
+
   return (
-    <View style={styles.statCard}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
+    <TouchableOpacity style={styles.studentRow} onPress={onPress} activeOpacity={0.8}>
+      <View style={styles.avatar}>
+        <Text style={styles.avatarText}>{initialsFromName(student.name)}</Text>
+      </View>
+      <View style={styles.studentTextWrap}>
+        <Text style={styles.studentName}>{student.name}</Text>
+        <Text style={styles.studentSubtext}>
+          {student.student_id_no} · {classLabel}
+        </Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color="#B0B7C3" />
+    </TouchableOpacity>
+  );
+}
+
+// ───────────────────────────── Shared ─────────────────────────────
+
+function TabSwitch({ tab, setTab }: { tab: PlacementTab; setTab: (tab: PlacementTab) => void }) {
+  return (
+    <View style={styles.tabSwitch}>
+      <TouchableOpacity
+        style={[styles.tabSwitchButton, tab === "upcoming" && styles.tabSwitchButtonActive]}
+        onPress={() => setTab("upcoming")}
+      >
+        <Text style={[styles.tabSwitchText, tab === "upcoming" && styles.tabSwitchTextActive]}>Upcoming drives</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.tabSwitchButton, tab === "history" && styles.tabSwitchButtonActive]}
+        onPress={() => setTab("history")}
+      >
+        <Text style={[styles.tabSwitchText, tab === "history" && styles.tabSwitchTextActive]}>History</Text>
+      </TouchableOpacity>
     </View>
   );
 }
 
-function DriveCard({ drive }: { drive: Drive }) {
+function LoadingState() {
   return (
-    <View style={styles.driveCard}>
-      <View style={styles.driveHeader}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{drive.initials}</Text>
-        </View>
-        <View style={styles.driveHeaderText}>
-          <Text style={styles.company}>{drive.company}</Text>
-          <Text style={styles.roleLine}>
-            {drive.role} · {drive.package}
-          </Text>
-        </View>
-        <View style={styles.statusBadge}>
-          <Text style={styles.statusBadgeText}>{drive.status}</Text>
-        </View>
-      </View>
-
-      <View style={styles.chipRow}>
-        <Chip text={drive.driveDate} />
-        <Chip text={drive.mode} />
-        <Chip text={drive.minCgpa} />
-        <Chip text={drive.arrearsRule} />
-      </View>
-
-      <View style={styles.miniStatsRow}>
-        <MiniStat value={String(drive.eligible)} label="Eligible" />
-        <MiniStat value={String(drive.applied)} label="Applied" />
-        <MiniStat value={drive.selected === null ? "—" : String(drive.selected)} label="Selected" />
-      </View>
-
-      <View style={styles.divider} />
-
-      <View style={styles.footerRow}>
-        <Text style={styles.roundsText}>Rounds: {drive.rounds}</Text>
-        <Text style={styles.studentListLink}>Student list</Text>
-      </View>
+    <View style={styles.centerState}>
+      <ActivityIndicator size="small" color="#2F6FE0" />
+      <Text style={styles.centerStateText}>Loading...</Text>
     </View>
   );
 }
 
-function Chip({ text }: { text: string }) {
+function ErrorState({ onRetry }: { onRetry: () => void }) {
   return (
-    <View style={styles.chip}>
-      <Text style={styles.chipText}>{text}</Text>
+    <View style={styles.centerState}>
+      <Ionicons name="cloud-offline-outline" size={32} color="#B0B7C3" />
+      <Text style={styles.centerStateText}>Couldn't load this. Please try again.</Text>
+      <TouchableOpacity onPress={onRetry} activeOpacity={0.8}>
+        <Text style={styles.retryText}>Tap to retry</Text>
+      </TouchableOpacity>
     </View>
   );
 }
 
-function MiniStat({ value, label }: { value: string; label: string }) {
+function EmptyState({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: string }) {
   return (
-    <View style={styles.miniStat}>
-      <Text style={styles.miniStatValue}>{value}</Text>
-      <Text style={styles.miniStatLabel}>{label}</Text>
-    </View>
-  );
-}
-
-function ComingSoon({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: string }) {
-  return (
-    <View style={styles.comingSoon}>
+    <View style={styles.centerState}>
       <Ionicons name={icon} size={32} color="#B0B7C3" />
-      <Text style={styles.comingSoonText}>{text}</Text>
-    </View>
-  );
-}
-
-function HistoryTab() {
-  return (
-    <View>
-      <Text style={styles.sectionTitle}>Batch-wise record</Text>
-      {mockBatchHistory.map((record) => (
-        <BatchCard key={record.id} record={record} />
-      ))}
-    </View>
-  );
-}
-
-function BatchCard({ record }: { record: BatchRecord }) {
-  return (
-    <View style={styles.driveCard}>
-      <View style={styles.trainingHeader}>
-        <Text style={styles.trainingTitle}>Batch {record.year}</Text>
-        <View style={styles.rateBadge}>
-          <Text style={styles.rateBadgeText}>{record.placementRate}% placed</Text>
-        </View>
-      </View>
-
-      <View style={styles.miniStatsRow}>
-        <MiniStat value={String(record.drives)} label="Drives" />
-        <MiniStat value={String(record.placed)} label="Placed" />
-        <MiniStat value={record.avgCtc} label="Avg CTC" />
-      </View>
-
-      <View style={styles.divider} />
-
-      <View style={styles.footerRow}>
-        <Text style={styles.roundsText}>
-          Top offer · {record.topOfferCompany} · {record.topOfferPackage}
-        </Text>
-        <Text style={styles.studentListLink}>Report</Text>
-      </View>
+      <Text style={styles.centerStateText}>{text}</Text>
     </View>
   );
 }
@@ -334,7 +407,7 @@ function BatchCard({ record }: { record: BatchRecord }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#fff",
+    backgroundColor: "#F7F8FA",
   },
   header: {
     flexDirection: "row",
@@ -358,173 +431,111 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontFamily: fonts.bold,
   },
-  headerSubtitle: {
-    color: "#D7E2FA",
-    fontSize: 12,
-    fontFamily: fonts.medium,
-    marginTop: 2,
+  content: {
+    flex: 1,
+    padding: 16,
   },
-  tabRow: {
+  tabSwitch: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F1F3F6",
-  },
-  tabPill: {
-    borderRadius: 999,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
     backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
+    borderRadius: 12,
+    padding: 4,
+    gap: 4,
+    marginBottom: 16,
+    elevation: 2,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
   },
-  tabPillActive: {
+  tabSwitchButton: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 9,
+    paddingVertical: 12,
+  },
+  tabSwitchButtonActive: {
     backgroundColor: "#2F6FE0",
-    borderColor: "#2F6FE0",
   },
-  tabPillText: {
-    fontSize: 13,
+  tabSwitchText: {
+    fontSize: 14,
     fontFamily: fonts.semibold,
     color: "#4B5563",
   },
-  tabPillTextActive: {
+  tabSwitchTextActive: {
     color: "#fff",
+    fontFamily: fonts.bold,
   },
-  tabRowInline: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 14,
-  },
-  content: {
-    padding: 16,
+  list: {
     paddingBottom: 32,
   },
-  statsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    marginBottom: 20,
-  },
-  statCard: {
-    flexGrow: 1,
-    minWidth: "22%",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#EEF0F4",
-    paddingVertical: 14,
-    paddingHorizontal: 8,
-    alignItems: "center",
-    gap: 4,
-  },
-  statValue: {
-    fontSize: 18,
-    fontFamily: fonts.bold,
-    color: "#2F6FE0",
-  },
-  statLabel: {
-    fontSize: 9,
-    fontFamily: fonts.bold,
-    color: "#9AA6B2",
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-    textAlign: "center",
-  },
-  sectionTitle: {
+  sectionHint: {
     fontSize: 12,
-    fontFamily: fonts.bold,
-    color: "#8A93A3",
-    letterSpacing: 1,
-    textTransform: "uppercase",
-    marginBottom: 12,
+    fontFamily: fonts.medium,
+    color: "#9AA6B2",
+    marginBottom: 10,
   },
-  driveCard: {
+  card: {
     backgroundColor: "#fff",
     borderRadius: 16,
     borderWidth: 1,
     borderColor: "#EEF0F4",
-    padding: 14,
+    padding: 16,
     marginBottom: 14,
   },
-  driveHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-    marginBottom: 12,
+  cardUndisclosed: {
+    borderStyle: "dashed",
+    borderColor: "#D1D5DB",
+    backgroundColor: "#FAFAFB",
   },
-  trainingHeader: {
+  cardHeader: {
     flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flex: 1,
+    marginBottom: 8,
+  },
+  cardHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
     justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 10,
-    marginBottom: 4,
-  },
-  trainingTitle: {
-    flex: 1,
-    fontSize: 16,
-    fontFamily: fonts.bold,
-    color: "#111827",
-  },
-  progressTrack: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#EAF0FD",
-    marginTop: 14,
-    marginBottom: 10,
-  },
-  progressFill: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#2F6FE0",
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: "#EAF0FD",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  avatarText: {
-    fontSize: 14,
-    fontFamily: fonts.bold,
-    color: "#2F6FE0",
-  },
-  placedAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#EAF0FD",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  driveHeaderText: {
-    flex: 1,
-  },
-  placedMeta: {
-    alignItems: "flex-end",
-  },
-  placedPackage: {
-    fontSize: 15,
-    fontFamily: fonts.bold,
-    color: "#2F6FE0",
+    gap: 8,
+    marginBottom: 8,
   },
   company: {
     fontSize: 16,
     fontFamily: fonts.bold,
     color: "#111827",
   },
-  roleLine: {
+  companyUndisclosed: {
+    color: "#6B7280",
+    fontFamily: fonts.semibold,
+  },
+  metaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  metaText: {
     fontSize: 12,
     fontFamily: fonts.regular,
     color: "#8A93A3",
-    marginTop: 2,
+  },
+  profileInfo: {
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
+    marginTop: 8,
+    lineHeight: 18,
+  },
+  revealHint: {
+    fontSize: 12,
+    fontFamily: fonts.medium,
+    color: "#9AA6B2",
+    marginTop: 8,
   },
   statusBadge: {
-    backgroundColor: "#EAF0FD",
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -532,107 +543,63 @@ const styles = StyleSheet.create({
   statusBadgeText: {
     fontSize: 11,
     fontFamily: fonts.bold,
-    color: "#2F6FE0",
   },
-  statusBadgeNeutral: {
-    backgroundColor: "#F1F3F6",
-  },
-  statusBadgeTextNeutral: {
-    color: "#6B7280",
-  },
-  rateBadge: {
-    backgroundColor: "#2F6FE0",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  rateBadgeText: {
-    fontSize: 12,
-    fontFamily: fonts.bold,
-    color: "#fff",
-  },
-  chipRow: {
+  studentRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 12,
-  },
-  chip: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  chipText: {
-    fontSize: 11,
-    fontFamily: fonts.medium,
-    color: "#4B5563",
-  },
-  miniStatsRow: {
-    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
-    marginBottom: 12,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 8,
+    elevation: 1,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
   },
-  miniStat: {
-    flex: 1,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#EEF0F4",
-    paddingVertical: 12,
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#E4EBFB",
     alignItems: "center",
-    gap: 2,
+    justifyContent: "center",
   },
-  miniStatValue: {
-    fontSize: 15,
-    fontFamily: fonts.bold,
-    color: "#111827",
-  },
-  miniStatLabel: {
-    fontSize: 9,
-    fontFamily: fonts.bold,
-    color: "#9AA6B2",
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-  },
-  divider: {
-    height: 1,
-    backgroundColor: "#F1F3F6",
-    marginBottom: 10,
-  },
-  footerRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  roundsText: {
-    fontSize: 12,
-    fontFamily: fonts.regular,
-    color: "#8A93A3",
-    flex: 1,
-    marginRight: 8,
-  },
-  studentListLink: {
+  avatarText: {
     fontSize: 13,
     fontFamily: fonts.bold,
     color: "#2F6FE0",
   },
-  appliedOn: {
-    fontSize: 11,
+  studentTextWrap: {
+    flex: 1,
+  },
+  studentName: {
+    fontSize: 14,
+    fontFamily: fonts.bold,
+    color: "#111827",
+  },
+  studentSubtext: {
+    fontSize: 12,
     fontFamily: fonts.regular,
     color: "#9AA6B2",
     marginTop: 2,
-    marginBottom: 10,
   },
-  comingSoon: {
+  centerState: {
     alignItems: "center",
     paddingVertical: 60,
     gap: 8,
   },
-  comingSoonText: {
+  centerStateText: {
     fontSize: 13,
     fontFamily: fonts.medium,
     color: "#9AA6B2",
     textAlign: "center",
+  },
+  retryText: {
+    fontSize: 13,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+    marginTop: 4,
   },
 });

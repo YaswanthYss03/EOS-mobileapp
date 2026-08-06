@@ -14,7 +14,12 @@ export const studentSectionItems: QuickAccessItem[] = [
   },
   { id: "student-leave", label: "Student Leave", icon: "log-out-outline", route: "/(tabs)/erp/student-leave" },
   { id: "student-od", label: "Student OD", icon: "people-outline", route: "/(tabs)/erp/student-od" },
-  { id: "no-due", label: "No-Due", icon: "shield-checkmark-outline", route: "/(tabs)/erp/no-due" },
+  {
+    id: "assignment-status",
+    label: "Assignment Status",
+    icon: "checkmark-done-outline",
+    route: "/(tabs)/erp/assignment-status",
+  },
   {
     id: "subject-records",
     label: "Subject Records",

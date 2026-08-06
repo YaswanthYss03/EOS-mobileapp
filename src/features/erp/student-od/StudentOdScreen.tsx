@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -8,7 +8,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
-import { classInfo, mockStudentOdRequests, type StudentOdRequest, type StudentOdStatus } from "./data/mockStudentOd";
+import { getApiErrorMessage } from "@/services/api/client";
+import { formatDate } from "@/utils/calendar";
+import { getStudentOdRequests, facultyApproveOd, type StudentOdRequest } from "@/services/api/student-ods.api";
 
 type StatusFilter = "pending" | "approved" | "rejected" | "all";
 
@@ -23,17 +25,29 @@ function initialsFromName(name: string) {
     .join("");
 }
 
-// TODO: this is a view-only approve/reject UI over mockStudentOd - wire to a
-// real on-duty backend endpoint once one exists. Reachable from the Employee
-// dashboard's Student "Student OD" item (Class Advisor view of their own
-// section) - see erp/employee/data/mockDashboard.ts and the sibling
-// erp/student-leave/StudentLeaveScreen.tsx.
+const STATUS_META: Record<StudentOdRequest["mentor_approval_status"], { label: string; bg: string; text: string; icon: keyof typeof Ionicons.glyphMap }> = {
+  pending: { label: "Pending", bg: "#FEF3C7", text: "#D97706", icon: "time-outline" },
+  approved: { label: "Approved", bg: "#F0FDF4", text: "#16A34A", icon: "checkmark-circle" },
+  rejected: { label: "Rejected", bg: "#FEF2F2", text: "#DC2626", icon: "close-circle" },
+};
+
+// Wired to EOS-backend's student-ods module (see
+// @/services/api/student-ods.api.ts) - the caller's own Class Mentor review
+// queue (every OD request created by a student in a class they mentor, via
+// class_mentors). Reachable from the Employee dashboard's Student
+// "Student OD" item. This is the mentor stage only - each team member's own
+// department HoD approval happens separately and isn't shown here.
 export function StudentOdScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
-  const [requests, setRequests] = useState(mockStudentOdRequests);
+  const [requests, setRequests] = useState<StudentOdRequest[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [errored, setErrored] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [decidingId, setDecidingId] = useState<number | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -44,33 +58,66 @@ export function StudentOdScreen() {
     }, [navigation]),
   );
 
-  const counts = useMemo(
-    () => ({
-      pending: requests.filter((r) => r.status === "pending").length,
-      approved: requests.filter((r) => r.status === "approved").length,
-      rejected: requests.filter((r) => r.status === "rejected").length,
-      all: requests.length,
-    }),
-    [requests],
-  );
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setErrored(false);
+
+    getStudentOdRequests()
+      .then((data) => {
+        if (!cancelled) setRequests(data);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setErrored(true);
+        toast.error(getApiErrorMessage(error, "Couldn't load your review queue. Please try again."));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadToken]);
+
+  const counts = useMemo(() => {
+    const list = requests ?? [];
+    return {
+      pending: list.filter((r) => r.mentor_approval_status === "pending").length,
+      approved: list.filter((r) => r.mentor_approval_status === "approved").length,
+      rejected: list.filter((r) => r.mentor_approval_status === "rejected").length,
+      all: list.length,
+    };
+  }, [requests]);
 
   const filteredRequests = useMemo(
-    () => (statusFilter === "all" ? requests : requests.filter((r) => r.status === statusFilter)),
+    () => (requests ?? []).filter((r) => statusFilter === "all" || r.mentor_approval_status === statusFilter),
     [requests, statusFilter],
   );
 
-  function updateStatus(id: string, status: StudentOdStatus) {
-    setRequests((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
-  }
+  // The distinct sections this mentor covers - a Class Mentor can mentor
+  // more than one class, so this isn't always a single fixed section.
+  const sectionsCovered = useMemo(() => {
+    const labels = new Set<string>();
+    for (const r of requests ?? []) {
+      if (r.creator.section) labels.add(`${r.creator.department_name ?? "—"} - ${r.creator.section}`);
+    }
+    return Array.from(labels);
+  }, [requests]);
 
-  function handleApprove(id: string) {
-    updateStatus(id, "approved");
-    toast.success("On-duty request approved");
-  }
-
-  function handleReject(id: string) {
-    updateStatus(id, "rejected");
-    toast.info("On-duty request rejected");
+  function handleDecision(id: number, decision: "approved" | "rejected") {
+    setDecidingId(id);
+    facultyApproveOd(id, decision)
+      .then((updated) => {
+        setRequests((prev) => (prev ? prev.map((r) => (r.id === id ? updated : r)) : prev));
+        if (decision === "approved") toast.success("On-duty request approved - forwarded for HoD approval");
+        else toast.info("On-duty request rejected");
+      })
+      .catch((error) =>
+        toast.error(getApiErrorMessage(error, "Couldn't record your decision. Please try again.")),
+      )
+      .finally(() => setDecidingId(null));
   }
 
   return (
@@ -95,47 +142,67 @@ export function StudentOdScreen() {
       </LinearGradient>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.contextCard}>
-          <View style={styles.contextIconWrap}>
-            <Ionicons name="school-outline" size={16} color="#2F6FE0" />
+        {loading ? (
+          <View style={styles.centerState}>
+            <ActivityIndicator size="small" color="#2F6FE0" />
+            <Text style={styles.centerStateText}>Loading...</Text>
           </View>
-          <View style={styles.contextTextWrap}>
-            <Text style={styles.contextTitle}>{classInfo.section}</Text>
-            <Text style={styles.contextSubtitle}>{classInfo.studentCount} students · Class Advisor</Text>
-          </View>
-          <View style={styles.myClassBadge}>
-            <Text style={styles.myClassBadgeText}>MY CLASS</Text>
-          </View>
-        </View>
-
-        <View style={styles.statusRow}>
-          {STATUS_FILTERS.map((status) => (
-            <TouchableOpacity
-              key={status}
-              style={[styles.statusPill, statusFilter === status && styles.statusPillActive]}
-              onPress={() => setStatusFilter(status)}
-            >
-              <Text style={[styles.statusPillText, statusFilter === status && styles.statusPillTextActive]}>
-                {status.charAt(0).toUpperCase() + status.slice(1)} ({counts[status]})
-              </Text>
+        ) : errored ? (
+          <View style={styles.centerState}>
+            <Ionicons name="cloud-offline-outline" size={32} color="#B0B7C3" />
+            <Text style={styles.centerStateText}>Couldn't load your review queue.</Text>
+            <TouchableOpacity onPress={() => setReloadToken((n) => n + 1)} activeOpacity={0.8}>
+              <Text style={styles.retryText}>Tap to retry</Text>
             </TouchableOpacity>
-          ))}
-        </View>
-
-        {filteredRequests.map((request) => (
-          <StudentOdCard
-            key={request.id}
-            request={request}
-            onApprove={() => handleApprove(request.id)}
-            onReject={() => handleReject(request.id)}
-          />
-        ))}
-
-        {filteredRequests.length === 0 && (
-          <View style={styles.emptyState}>
-            <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
-            <Text style={styles.emptyStateText}>No requests here</Text>
           </View>
+        ) : (
+          <>
+            <View style={styles.contextCard}>
+              <View style={styles.contextIconWrap}>
+                <Ionicons name="school-outline" size={16} color="#2F6FE0" />
+              </View>
+              <View style={styles.contextTextWrap}>
+                <Text style={styles.contextTitle}>
+                  {sectionsCovered.length > 0 ? sectionsCovered.join(" · ") : "No mentored class yet"}
+                </Text>
+                <Text style={styles.contextSubtitle}>{counts.all} on-duty requests · Class Mentor</Text>
+              </View>
+              <View style={styles.myClassBadge}>
+                <Text style={styles.myClassBadgeText}>MY CLASS</Text>
+              </View>
+            </View>
+
+            <View style={styles.statusRow}>
+              {STATUS_FILTERS.map((status) => (
+                <TouchableOpacity
+                  key={status}
+                  style={[styles.statusPill, statusFilter === status && styles.statusPillActive]}
+                  onPress={() => setStatusFilter(status)}
+                >
+                  <Text style={[styles.statusPillText, statusFilter === status && styles.statusPillTextActive]}>
+                    {status.charAt(0).toUpperCase() + status.slice(1)} ({counts[status]})
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {filteredRequests.map((request) => (
+              <StudentOdCard
+                key={request.id}
+                request={request}
+                deciding={decidingId === request.id}
+                onApprove={() => handleDecision(request.id, "approved")}
+                onReject={() => handleDecision(request.id, "rejected")}
+              />
+            ))}
+
+            {filteredRequests.length === 0 && (
+              <View style={styles.emptyState}>
+                <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
+                <Text style={styles.emptyStateText}>No requests here</Text>
+              </View>
+            )}
+          </>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -144,29 +211,35 @@ export function StudentOdScreen() {
 
 function StudentOdCard({
   request,
+  deciding,
   onApprove,
   onReject,
 }: {
   request: StudentOdRequest;
+  deciding: boolean;
   onApprove: () => void;
   onReject: () => void;
 }) {
-  const { name, rollNo, section, category, dates, session, docs, reason, status } = request;
+  const { creator, unique_code, member_count, from_date, to_date, from_time, to_time, reason, faculty_guide_name, mentor_approval_status } =
+    request;
+  const meta = STATUS_META[mentor_approval_status];
+  const classLabel = creator.section ? `${creator.department_name ?? "—"} - ${creator.section}` : "No class assigned";
 
   return (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{initialsFromName(name)}</Text>
+          <Text style={styles.avatarText}>{initialsFromName(creator.name)}</Text>
         </View>
         <View style={styles.cardHeaderTextWrap}>
-          <Text style={styles.cardName}>{name}</Text>
+          <Text style={styles.cardName}>{creator.name}</Text>
           <Text style={styles.cardSubtitle}>
-            {rollNo} · {section}
+            {creator.student_id_no} · {classLabel}
           </Text>
         </View>
-        <View style={styles.categoryBadge}>
-          <Text style={styles.categoryBadgeText}>{category}</Text>
+        <View style={styles.teamBadge}>
+          <Ionicons name="people" size={12} color="#2F6FE0" />
+          <Text style={styles.teamBadgeText}>{member_count}</Text>
         </View>
       </View>
 
@@ -174,36 +247,58 @@ function StudentOdCard({
 
       <View style={styles.metaRow}>
         <View style={styles.metaCol}>
-          <Text style={styles.metaLabel}>DATES</Text>
-          <Text style={styles.metaValue}>{dates}</Text>
+          <Text style={styles.metaLabel}>FROM</Text>
+          <Text style={styles.metaValue}>{formatDate(new Date(from_date))}</Text>
+          {from_time && <Text style={styles.metaSubvalue}>{from_time}</Text>}
         </View>
         <View style={styles.metaCol}>
-          <Text style={styles.metaLabel}>SESSION</Text>
-          <Text style={styles.metaValue}>{session}</Text>
+          <Text style={styles.metaLabel}>TO</Text>
+          <Text style={styles.metaValue}>{formatDate(new Date(to_date))}</Text>
+          {to_time && <Text style={styles.metaSubvalue}>{to_time}</Text>}
         </View>
         <View style={styles.metaCol}>
-          <Text style={styles.metaLabel}>DOCS</Text>
-          <Text style={styles.metaValue}>{docs}</Text>
+          <Text style={styles.metaLabel}>CODE</Text>
+          <Text style={styles.metaValue}>{unique_code}</Text>
         </View>
       </View>
 
-      <Text style={styles.reasonLabel}>REASON</Text>
-      <Text style={styles.reasonText}>{reason}</Text>
+      <Text style={styles.reasonLabel}>EVENT</Text>
+      <Text style={styles.reasonText}>{reason ?? "—"}</Text>
 
-      {status === "pending" ? (
+      {faculty_guide_name && (
+        <View style={styles.guideRow}>
+          <Ionicons name="person-outline" size={13} color="#8A93A3" />
+          <Text style={styles.guideText}>Faculty guide: {faculty_guide_name}</Text>
+        </View>
+      )}
+
+      {mentor_approval_status === "pending" ? (
         <View style={styles.actionsRow}>
-          <TouchableOpacity style={styles.rejectButton} onPress={onReject} activeOpacity={0.85}>
+          <TouchableOpacity
+            style={[styles.rejectButton, deciding && styles.buttonDisabled]}
+            onPress={onReject}
+            activeOpacity={0.85}
+            disabled={deciding}
+          >
             <Text style={styles.rejectButtonText}>Reject</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.approveButton} onPress={onApprove} activeOpacity={0.85}>
-            <Text style={styles.approveButtonText}>Approve</Text>
+          <TouchableOpacity
+            style={[styles.approveButton, deciding && styles.buttonDisabled]}
+            onPress={onApprove}
+            activeOpacity={0.85}
+            disabled={deciding}
+          >
+            {deciding ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.approveButtonText}>Approve</Text>
+            )}
           </TouchableOpacity>
         </View>
       ) : (
-        <View style={[styles.statusBar, status === "rejected" && styles.statusBarRejected]}>
-          <Text style={[styles.statusBarText, status === "rejected" && styles.statusBarTextRejected]}>
-            {status === "approved" ? "Approved" : "Rejected"}
-          </Text>
+        <View style={[styles.statusBadge, { backgroundColor: meta.bg }]}>
+          <Ionicons name={meta.icon} size={14} color={meta.text} />
+          <Text style={[styles.statusBadgeText, { color: meta.text }]}>{meta.label}</Text>
         </View>
       )}
     </View>
@@ -367,13 +462,16 @@ const styles = StyleSheet.create({
     color: "#9AA6B2",
     marginTop: 1,
   },
-  categoryBadge: {
+  teamBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
     backgroundColor: "#E4EBFB",
     borderRadius: 999,
-    paddingHorizontal: 10,
+    paddingHorizontal: 9,
     paddingVertical: 5,
   },
-  categoryBadgeText: {
+  teamBadgeText: {
     fontSize: 11,
     fontFamily: fonts.bold,
     color: "#2F6FE0",
@@ -402,6 +500,12 @@ const styles = StyleSheet.create({
     color: "#111827",
     marginTop: 3,
   },
+  metaSubvalue: {
+    fontSize: 11,
+    fontFamily: fonts.medium,
+    color: "#8A93A3",
+    marginTop: 1,
+  },
   reasonLabel: {
     fontSize: 9,
     fontFamily: fonts.bold,
@@ -414,11 +518,22 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     color: "#374151",
     lineHeight: 18,
-    marginBottom: 12,
+  },
+  guideRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 10,
+  },
+  guideText: {
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    color: "#8A93A3",
   },
   actionsRow: {
     flexDirection: "row",
     gap: 10,
+    marginTop: 12,
   },
   rejectButton: {
     flex: 1,
@@ -447,23 +562,39 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     color: "#fff",
   },
-  statusBar: {
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+  statusBadge: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 12,
-    backgroundColor: "#EAF0FD",
-    paddingVertical: 12,
+    gap: 6,
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginTop: 12,
   },
-  statusBarRejected: {
-    backgroundColor: "#FEF2F2",
+  statusBadgeText: {
+    fontSize: 12,
+    fontFamily: fonts.semibold,
   },
-  statusBarText: {
-    fontSize: 14,
+  centerState: {
+    alignItems: "center",
+    paddingVertical: 60,
+    gap: 8,
+  },
+  centerStateText: {
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    color: "#9AA6B2",
+    textAlign: "center",
+  },
+  retryText: {
+    fontSize: 13,
     fontFamily: fonts.bold,
     color: "#2F6FE0",
-  },
-  statusBarTextRejected: {
-    color: "#DC2626",
+    marginTop: 4,
   },
   emptyState: {
     alignItems: "center",

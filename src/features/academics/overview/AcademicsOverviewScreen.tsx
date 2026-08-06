@@ -5,7 +5,6 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { QuickAccessGrid } from "@/features/erp/components/QuickAccessGrid";
 import { fonts } from "@/theme";
 
@@ -51,14 +50,14 @@ export function AcademicsOverviewScreen() {
 
   // Same header-swap pattern as AcademicsChooserScreen and the ERP role
   // dashboards - see src/features/academics/AcademicsChooserScreen.tsx.
+  // No blur-cleanup on purpose - see that screen's useFocusEffect comment;
+  // going back always lands on the Chooser, which re-applies its own
+  // header on refocus, and a cleanup here would race it.
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({
         header: () => <AcademicsHeader onBack={() => router.back()} />,
       });
-      return () => {
-        navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
-      };
     }, [navigation, router]),
   );
 
