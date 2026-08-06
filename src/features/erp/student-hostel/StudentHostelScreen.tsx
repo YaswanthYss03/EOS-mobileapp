@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -8,20 +8,20 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
-import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, formatDate } from "@/utils/calendar";
+import { getApiErrorMessage } from "@/services/api/client";
 import {
-  roomInfo,
-  outingTypes,
-  complaintCategories,
-  studentProfile,
-  meals,
-  grades,
-  timeSlots,
-  type Grade,
-} from "./data/mockStudentHostel";
+  getMyHostelRoom,
+  createMyHostelOuting,
+  createMyHostelComplaint,
+  createMyMessFeedback,
+  type HostelRoomInfo,
+  type HostelComplaintCategory,
+} from "@/services/api/hostel.api";
+import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, formatDate } from "@/utils/calendar";
 
 type Tab = "outing" | "complaints" | "feedback";
 type TimeField = "out" | "return" | null;
+type Grade = "A" | "B" | "C" | "D" | "E";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "outing", label: "Outing" },
@@ -29,15 +29,80 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "feedback", label: "Mess feedback" },
 ];
 
-// TODO: this is a request-only UI over mockStudentHostel - wire to a real
-// hostel backend endpoint once one exists. Reachable from the Student
-// dashboard's Campus "Hostel" item.
+const outingTypes = ["Home visit", "Medical visit", "Academic work", "Weekend outing"];
+const complaintCategories = ["Electrical", "Plumbing", "Furniture", "Internet/WiFi", "Housekeeping"];
+const meals = ["Breakfast", "Lunch", "Snacks", "Dinner"];
+
+const grades: { grade: Grade; label: string }[] = [
+  { grade: "A", label: "Excellent" },
+  { grade: "B", label: "Very good" },
+  { grade: "C", label: "Good" },
+  { grade: "D", label: "Average" },
+  { grade: "E", label: "Poor" },
+];
+
+// hostel_complaint_category_enum (see prisma/schema.prisma) has no exact
+// 1:1 match for these UI labels - mapped onto the closest real category.
+const CATEGORY_TO_ENUM: Record<string, HostelComplaintCategory> = {
+  Electrical: "electrical",
+  Plumbing: "plumbing",
+  Furniture: "carpentry",
+  "Internet/WiFi": "network",
+  Housekeeping: "facilities",
+};
+
+// hostel_mess_feedback only has one 1-5 `rating` column, not separate
+// food/hygiene/service dimensions - averaged into one number here.
+const GRADE_TO_RATING: Record<Grade, number> = { A: 5, B: 4, C: 3, D: 2, E: 1 };
+
+// 08:00 AM through 08:00 PM in 30-minute steps.
+function generateTimeSlots(): string[] {
+  const slots: string[] = [];
+  for (let hour = 8; hour <= 20; hour++) {
+    for (const minute of [0, 30]) {
+      if (hour === 20 && minute === 30) continue;
+      const period = hour < 12 ? "AM" : "PM";
+      const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+      slots.push(`${String(displayHour).padStart(2, "0")}:${String(minute).padStart(2, "0")} ${period}`);
+    }
+  }
+  return slots;
+}
+
+const timeSlots = generateTimeSlots();
+
+function to24Hour(slot: string): string {
+  const [time, period] = slot.split(" ");
+  const [hourStr, minute] = time.split(":");
+  let hour = parseInt(hourStr, 10);
+  if (period === "PM" && hour !== 12) hour += 12;
+  if (period === "AM" && hour === 12) hour = 0;
+  return `${String(hour).padStart(2, "0")}:${minute}`;
+}
+
+function toDateOnly(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+// Wired to the real hostel self-service endpoints (GET /me/hostel-room,
+// POST /me/hostel-outings, POST /me/hostel-complaints, POST
+// /me/mess-feedback). Reachable from the Student dashboard's Campus
+// "Hostel" item.
 export function StudentHostelScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
+  const today = useMemo(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  }, []);
+
   const [tab, setTab] = useState<Tab>("outing");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [roomStatus, setRoomStatus] = useState<"loading" | "success" | "error">("loading");
+  const [room, setRoom] = useState<HostelRoomInfo | null>(null);
 
   // Outing form
   const [outingType, setOutingType] = useState(outingTypes[0]);
@@ -48,14 +113,14 @@ export function StudentHostelScreen() {
   const [outingReason, setOutingReason] = useState("");
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [timePickerFor, setTimePickerFor] = useState<TimeField>(null);
-  const [pickerYear, setPickerYear] = useState(2026);
-  const [pickerMonth, setPickerMonth] = useState(7); // August (0-indexed)
+  const [pickerYear, setPickerYear] = useState(today.getFullYear());
+  const [pickerMonth, setPickerMonth] = useState(today.getMonth());
 
   // Complaints form
   const [complaintCategory, setComplaintCategory] = useState(complaintCategories[0]);
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
-  const [hostelBlock, setHostelBlock] = useState(roomInfo.block);
-  const [roomNo, setRoomNo] = useState(roomInfo.room);
+  const [hostelBlock, setHostelBlock] = useState("");
+  const [roomNo, setRoomNo] = useState("");
   const [contactNumber, setContactNumber] = useState("");
   const [complaintDescription, setComplaintDescription] = useState("");
 
@@ -66,6 +131,19 @@ export function StudentHostelScreen() {
   const [hygiene, setHygiene] = useState<Grade | null>(null);
   const [serviceTiming, setServiceTiming] = useState<Grade | null>(null);
   const [feedbackComments, setFeedbackComments] = useState("");
+
+  useEffect(() => {
+    getMyHostelRoom()
+      .then((response) => {
+        setRoom(response);
+        setRoomStatus("success");
+        if (response.is_hostel_resident) {
+          setHostelBlock(response.hostel_name ?? "");
+          setRoomNo(response.room_number ?? "");
+        }
+      })
+      .catch(() => setRoomStatus("error"));
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -97,7 +175,9 @@ export function StudentHostelScreen() {
   }
 
   function handlePickDate(day: number) {
-    setOutDateObj(new Date(pickerYear, pickerMonth, day));
+    const picked = new Date(pickerYear, pickerMonth, day);
+    if (picked < today) return;
+    setOutDateObj(picked);
     setDatePickerOpen(false);
   }
 
@@ -120,11 +200,25 @@ export function StudentHostelScreen() {
       toast.warning("Describe where you're going and why");
       return;
     }
-    toast.success("Outing request submitted");
-    setOutDateObj(null);
-    setOutTime(null);
-    setReturnTime(null);
-    setOutingReason("");
+
+    const dateOnly = toDateOnly(outDateObj);
+    setIsSubmitting(true);
+    createMyHostelOuting({
+      from_date: dateOnly,
+      to_date: dateOnly,
+      start_time: to24Hour(outTime),
+      return_time: to24Hour(returnTime),
+      reason: `${outingType} - ${outingReason.trim()}`,
+    })
+      .then(() => {
+        toast.success("Outing request submitted");
+        setOutDateObj(null);
+        setOutTime(null);
+        setReturnTime(null);
+        setOutingReason("");
+      })
+      .catch((err) => toast.error(getApiErrorMessage(err, "Couldn't submit the outing request.")))
+      .finally(() => setIsSubmitting(false));
   }
 
   function handleSubmitComplaint() {
@@ -140,9 +234,20 @@ export function StudentHostelScreen() {
       toast.warning("Describe the issue");
       return;
     }
-    toast.success("Complaint raised with the warden's office");
-    setContactNumber("");
-    setComplaintDescription("");
+
+    setIsSubmitting(true);
+    createMyHostelComplaint({
+      category: CATEGORY_TO_ENUM[complaintCategory] ?? "other",
+      title: `${complaintCategory} issue`.slice(0, 150),
+      description: complaintDescription.trim(),
+    })
+      .then(() => {
+        toast.success("Complaint raised with the warden's office");
+        setContactNumber("");
+        setComplaintDescription("");
+      })
+      .catch((err) => toast.error(getApiErrorMessage(err, "Couldn't raise the complaint.")))
+      .finally(() => setIsSubmitting(false));
   }
 
   function handleSubmitFeedback() {
@@ -150,11 +255,23 @@ export function StudentHostelScreen() {
       toast.warning("Rate food quality, hygiene, and service and timing");
       return;
     }
-    toast.success("Thanks for your feedback");
-    setFoodQuality(null);
-    setHygiene(null);
-    setServiceTiming(null);
-    setFeedbackComments("");
+
+    const rating = Math.round(
+      (GRADE_TO_RATING[foodQuality] + GRADE_TO_RATING[hygiene] + GRADE_TO_RATING[serviceTiming]) / 3,
+    );
+    const comment = feedbackComments.trim() ? `${meal} - ${feedbackComments.trim()}` : meal;
+
+    setIsSubmitting(true);
+    createMyMessFeedback({ rating, comment })
+      .then(() => {
+        toast.success("Thanks for your feedback");
+        setFoodQuality(null);
+        setHygiene(null);
+        setServiceTiming(null);
+        setFeedbackComments("");
+      })
+      .catch((err) => toast.error(getApiErrorMessage(err, "Couldn't submit your feedback.")))
+      .finally(() => setIsSubmitting(false));
   }
 
   return (
@@ -181,12 +298,26 @@ export function StudentHostelScreen() {
             <Ionicons name="bed-outline" size={20} color="#2F6FE0" />
           </View>
           <View style={styles.roomTextWrap}>
-            <Text style={styles.roomTitle}>
-              {roomInfo.block} · Room {roomInfo.room}
-            </Text>
-            <Text style={styles.roomSubtitle}>
-              Warden {roomInfo.warden} · {roomInfo.boardType}
-            </Text>
+            {roomStatus === "loading" ? (
+              <Text style={styles.roomTitle}>Loading room details…</Text>
+            ) : roomStatus === "error" ? (
+              <Text style={styles.roomTitle}>Couldn't load room details</Text>
+            ) : room?.is_hostel_resident ? (
+              <>
+                <Text style={styles.roomTitle}>
+                  {room.hostel_name} · Room {room.room_number}
+                </Text>
+                <Text style={styles.roomSubtitle}>
+                  {room.room_type_name}
+                  {room.mess_type ? ` · ${room.mess_type}` : ""}
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.roomTitle}>No hostel room assigned</Text>
+                <Text style={styles.roomSubtitle}>You're registered as a day scholar</Text>
+              </>
+            )}
           </View>
         </View>
 
@@ -268,7 +399,12 @@ export function StudentHostelScreen() {
               multiline
             />
 
-            <TouchableOpacity style={styles.submitButton} onPress={handleSubmitOuting} activeOpacity={0.85}>
+            <TouchableOpacity
+              style={styles.submitButton}
+              onPress={handleSubmitOuting}
+              activeOpacity={0.85}
+              disabled={isSubmitting}
+            >
               <Text style={styles.submitButtonText}>Submit outing request</Text>
             </TouchableOpacity>
           </View>
@@ -290,13 +426,13 @@ export function StudentHostelScreen() {
               <View style={styles.rowField}>
                 <Text style={styles.fieldLabel}>Student name</Text>
                 <View style={styles.readOnlyInput}>
-                  <Text style={styles.readOnlyInputText}>{studentProfile.name}</Text>
+                  <Text style={styles.readOnlyInputText}>{room?.student_name ?? "—"}</Text>
                 </View>
               </View>
               <View style={styles.rowField}>
                 <Text style={styles.fieldLabel}>Register no.</Text>
                 <View style={styles.readOnlyInput}>
-                  <Text style={styles.readOnlyInputText}>{studentProfile.registerNo}</Text>
+                  <Text style={styles.readOnlyInputText}>{room?.register_no ?? "—"}</Text>
                 </View>
               </View>
             </View>
@@ -347,6 +483,7 @@ export function StudentHostelScreen() {
               style={styles.submitButton}
               onPress={handleSubmitComplaint}
               activeOpacity={0.85}
+              disabled={isSubmitting}
             >
               <Text style={styles.submitButtonText}>Raise complaint</Text>
             </TouchableOpacity>
@@ -379,7 +516,12 @@ export function StudentHostelScreen() {
               multiline
             />
 
-            <TouchableOpacity style={styles.submitButton} onPress={handleSubmitFeedback} activeOpacity={0.85}>
+            <TouchableOpacity
+              style={styles.submitButton}
+              onPress={handleSubmitFeedback}
+              activeOpacity={0.85}
+              disabled={isSubmitting}
+            >
               <Text style={styles.submitButtonText}>Submit feedback</Text>
             </TouchableOpacity>
           </View>

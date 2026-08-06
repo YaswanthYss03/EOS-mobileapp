@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -7,20 +7,56 @@ import { useRouter } from "expo-router";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "@/theme";
-import { mockTimetable, monthLabel, type DaySchedule, type Period } from "./data/mockTimetable";
+import { getMyTimetable, type MyTimetableDay, type MyTimetableSlot } from "@/services/api/current-semester.api";
+
+const DAY_SHORT = ["", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+const DAY_FULL = ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+type LoadStatus = "loading" | "success" | "error";
+
+function getCurrentWeekDates(): Date[] {
+  const today = new Date();
+  const todayDow = today.getDay();
+  const diffToMonday = todayDow === 0 ? -6 : 1 - todayDow;
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + diffToMonday);
+  return Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    return d;
+  });
+}
+
+function formatTime(hhmm: string): string {
+  const [hourStr, minute] = hhmm.split(":");
+  const hour = parseInt(hourStr, 10);
+  const period = hour >= 12 ? "PM" : "AM";
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${hour12}:${minute} ${period}`;
+}
+
+function nowHHMM(): string {
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+}
 
 function TimetableHeader({
-  day,
+  weekDates,
   selectedIndex,
   onSelectDay,
   onBack,
 }: {
-  day: DaySchedule;
+  weekDates: Date[];
   selectedIndex: number;
   onSelectDay: (index: number) => void;
   onBack: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const selectedDate = weekDates[selectedIndex];
 
   return (
     <LinearGradient
@@ -40,22 +76,24 @@ function TimetableHeader({
         <View>
           <Text style={styles.headerTitle}>Timetable</Text>
           <Text style={styles.headerSubtitle}>
-            {day.dayFull}, {day.date} {monthLabel}
+            {DAY_FULL[selectedIndex + 1]}, {selectedDate.getDate()} {MONTH_NAMES[selectedDate.getMonth()]}
           </Text>
         </View>
       </View>
 
       <View style={styles.daySelector}>
-        {mockTimetable.map((d, index) => {
+        {weekDates.map((date, index) => {
           const selected = index === selectedIndex;
           return (
             <TouchableOpacity
-              key={d.dayShort}
+              key={index}
               style={[styles.dayPill, selected && styles.dayPillSelected]}
               onPress={() => onSelectDay(index)}
             >
-              <Text style={[styles.dayPillLabel, selected && styles.dayPillLabelSelected]}>{d.dayShort}</Text>
-              <Text style={[styles.dayPillDate, selected && styles.dayPillDateSelected]}>{d.date}</Text>
+              <Text style={[styles.dayPillLabel, selected && styles.dayPillLabelSelected]}>
+                {DAY_SHORT[index + 1]}
+              </Text>
+              <Text style={[styles.dayPillDate, selected && styles.dayPillDateSelected]}>{date.getDate()}</Text>
             </TouchableOpacity>
           );
         })}
@@ -64,21 +102,48 @@ function TimetableHeader({
   );
 }
 
-// TODO: replace mockTimetable with a real call once the timetable backend endpoint exists
+// Wired to GET /me/timetable (real weekly schedule for the student's own
+// class). timetable_slots has no room column and no way to distinguish a
+// "lab" period from a regular class, so only real scheduled periods are
+// shown - no fabricated "free period" gap-filling, no Labs count, no room
+// badge. The day strip now shows the actual current week's real dates
+// instead of a pinned mock week.
 export function TimetableScreen() {
   const router = useRouter();
   const navigation = useNavigation();
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const day = mockTimetable[selectedIndex];
+
+  const weekDates = useMemo(() => getCurrentWeekDates(), []);
+  const todayDow = useMemo(() => new Date().getDay(), []);
+  const defaultDayOfWeek = todayDow >= 1 && todayDow <= 6 ? todayDow : 1;
+  const [selectedDayOfWeek, setSelectedDayOfWeek] = useState(defaultDayOfWeek);
+
+  const [status, setStatus] = useState<LoadStatus>("loading");
+  const [days, setDays] = useState<MyTimetableDay[]>([]);
+
+  const load = useCallback(() => {
+    setStatus("loading");
+    getMyTimetable()
+      .then((response) => {
+        setDays(response);
+        setStatus("success");
+      })
+      .catch(() => setStatus("error"));
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const selectedIndex = selectedDayOfWeek - 1;
 
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({
         header: () => (
           <TimetableHeader
-            day={day}
+            weekDates={weekDates}
             selectedIndex={selectedIndex}
-            onSelectDay={setSelectedIndex}
+            onSelectDay={(index) => setSelectedDayOfWeek(index + 1)}
             onBack={() => router.back()}
           />
         ),
@@ -87,54 +152,84 @@ export function TimetableScreen() {
         navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [navigation, router, selectedIndex]),
+    }, [navigation, router, selectedIndex, weekDates]),
   );
 
-  const classes = day.periods.filter((p) => p.type === "class").length;
-  const free = day.periods.filter((p) => p.type === "free").length;
-  const labs = day.periods.filter((p) => p.type === "lab").length;
+  const slots = useMemo(
+    () => days.find((d) => d.day_of_week === selectedDayOfWeek)?.slots ?? [],
+    [days, selectedDayOfWeek],
+  );
 
-  const forenoon = day.periods.filter((p) => p.session === "forenoon");
-  const afternoon = day.periods.filter((p) => p.session === "afternoon");
+  const isToday = selectedDayOfWeek === todayDow;
+  const currentTime = nowHHMM();
+
+  const forenoon = slots.filter((s) => s.start_time < "13:00");
+  const afternoon = slots.filter((s) => s.start_time >= "13:00");
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.statsRow}>
-          <SummaryCard label="Classes" value={classes} />
-          <SummaryCard label="Free" value={free} />
-          <SummaryCard label="Labs" value={labs} />
+      {status === "loading" && (
+        <View style={styles.inlineLoading}>
+          <ActivityIndicator color="#2F6FE0" />
         </View>
+      )}
 
-        {forenoon.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Forenoon</Text>
-            {forenoon.map((period) => (
-              <PeriodCard key={period.periodLabel} period={period} />
-            ))}
+      {status === "error" && (
+        <View style={styles.errorNotice}>
+          <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+          <Text style={styles.errorNoticeText}>Couldn't load your timetable.</Text>
+          <TouchableOpacity onPress={load} style={styles.retryButton} activeOpacity={0.8}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {status === "success" && (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <View style={styles.statsRow}>
+            <SummaryCard label="Classes" value={String(slots.length)} />
+            <SummaryCard label="Free" value="—" />
+            <SummaryCard label="Labs" value="—" />
           </View>
-        )}
 
-        {afternoon.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sessionDividerRow}>
-              <View style={styles.sessionDivider} />
-              <View style={styles.sessionDivider} />
+          {forenoon.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Forenoon</Text>
+              {forenoon.map((period) => (
+                <PeriodCard
+                  key={period.period_number}
+                  period={period}
+                  isNow={isToday && currentTime >= period.start_time && currentTime < period.end_time}
+                />
+              ))}
             </View>
-            <Text style={styles.sectionTitle}>Afternoon</Text>
-            {afternoon.map((period) => (
-              <PeriodCard key={period.periodLabel} period={period} />
-            ))}
-          </View>
-        )}
+          )}
 
-        {day.periods.length === 0 && <Text style={styles.noClasses}>No classes scheduled today.</Text>}
-      </ScrollView>
+          {afternoon.length > 0 && (
+            <View style={styles.section}>
+              <View style={styles.sessionDividerRow}>
+                <View style={styles.sessionDivider} />
+                <View style={styles.sessionDivider} />
+              </View>
+              <Text style={styles.sectionTitle}>Afternoon</Text>
+              {afternoon.map((period) => (
+                <PeriodCard
+                  key={period.period_number}
+                  period={period}
+                  isNow={isToday && currentTime >= period.start_time && currentTime < period.end_time}
+                />
+              ))}
+            </View>
+          )}
+
+          {slots.length === 0 && <Text style={styles.noClasses}>No classes scheduled today.</Text>}
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
 
-function SummaryCard({ label, value }: { label: string; value: number }) {
+function SummaryCard({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.summaryCard}>
       <Text style={styles.summaryLabel}>{label.toUpperCase()}</Text>
@@ -143,36 +238,20 @@ function SummaryCard({ label, value }: { label: string; value: number }) {
   );
 }
 
-function PeriodCard({ period }: { period: Period }) {
-  if (period.isNow) {
+function PeriodCard({ period, isNow }: { period: MyTimetableSlot; isNow: boolean }) {
+  if (isNow) {
     return (
       <View style={[styles.periodCard, styles.periodCardNow]}>
         <View style={styles.periodTimeCol}>
-          <Text style={styles.periodTimeNow}>{period.time}</Text>
-          <Text style={styles.periodLabelNow}>{period.periodLabel}</Text>
+          <Text style={styles.periodTimeNow}>{formatTime(period.start_time)}</Text>
+          <Text style={styles.periodLabelNow}>P{period.period_number}</Text>
         </View>
         <View style={styles.periodInfo}>
-          <Text style={styles.periodSubjectNow}>{period.subject}</Text>
-          <Text style={styles.periodMetaNow}>{period.section}</Text>
+          <Text style={styles.periodSubjectNow}>{period.subject.name}</Text>
+          <Text style={styles.periodMetaNow}>{period.faculty.name}</Text>
         </View>
         <View style={styles.nowBadge}>
           <Text style={styles.nowBadgeText}>NOW</Text>
-        </View>
-      </View>
-    );
-  }
-
-  if (period.type === "free") {
-    return (
-      <View style={[styles.periodCard, styles.periodCardFree]}>
-        <View style={[styles.accentBar, styles.accentBarFree]} />
-        <View style={styles.periodTimeCol}>
-          <Text style={styles.periodTimeFree}>{period.time}</Text>
-          <Text style={styles.periodLabelFree}>{period.periodLabel}</Text>
-        </View>
-        <View style={styles.periodInfo}>
-          <Text style={styles.periodSubjectFree}>{period.subject}</Text>
-          <Text style={styles.periodMetaFree}>{period.section}</Text>
         </View>
       </View>
     );
@@ -182,18 +261,13 @@ function PeriodCard({ period }: { period: Period }) {
     <View style={styles.periodCard}>
       <View style={styles.accentBar} />
       <View style={styles.periodTimeCol}>
-        <Text style={styles.periodTime}>{period.time}</Text>
-        <Text style={styles.periodLabel}>{period.periodLabel}</Text>
+        <Text style={styles.periodTime}>{formatTime(period.start_time)}</Text>
+        <Text style={styles.periodLabel}>P{period.period_number}</Text>
       </View>
       <View style={styles.periodInfo}>
-        <Text style={styles.periodSubject}>{period.subject}</Text>
-        <Text style={styles.periodMeta}>{period.section}</Text>
+        <Text style={styles.periodSubject}>{period.subject.name}</Text>
+        <Text style={styles.periodMeta}>{period.faculty.name}</Text>
       </View>
-      {period.room && (
-        <View style={styles.roomBadge}>
-          <Text style={styles.roomBadgeText}>{period.room}</Text>
-        </View>
-      )}
     </View>
   );
 }
@@ -270,6 +344,35 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 32,
   },
+  inlineLoading: {
+    paddingVertical: 48,
+    alignItems: "center",
+  },
+  errorNotice: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 48,
+    paddingHorizontal: 16,
+  },
+  errorNoticeText: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
+    textAlign: "center",
+  },
+  retryButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+  },
   statsRow: {
     flexDirection: "row",
     gap: 10,
@@ -337,9 +440,6 @@ const styles = StyleSheet.create({
     width: 4,
     backgroundColor: "#2F6FE0",
   },
-  accentBarFree: {
-    backgroundColor: "#D5D9E0",
-  },
   periodTimeCol: {
     width: 52,
   },
@@ -366,42 +466,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: fonts.regular,
     color: "#8A93A3",
-    marginTop: 2,
-  },
-  roomBadge: {
-    backgroundColor: "#EAF0FD",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  roomBadgeText: {
-    fontSize: 12,
-    fontFamily: fonts.bold,
-    color: "#2F6FE0",
-  },
-  periodCardFree: {
-    backgroundColor: "#FAFBFC",
-  },
-  periodTimeFree: {
-    fontSize: 14,
-    fontFamily: fonts.bold,
-    color: "#B0B7C3",
-  },
-  periodLabelFree: {
-    fontSize: 11,
-    fontFamily: fonts.regular,
-    color: "#C4CAD3",
-    marginTop: 1,
-  },
-  periodSubjectFree: {
-    fontSize: 15,
-    fontFamily: fonts.bold,
-    color: "#B0B7C3",
-  },
-  periodMetaFree: {
-    fontSize: 12,
-    fontFamily: fonts.regular,
-    color: "#C4CAD3",
     marginTop: 2,
   },
   periodCardNow: {

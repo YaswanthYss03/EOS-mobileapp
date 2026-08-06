@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -8,29 +8,57 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
+import { getApiErrorMessage } from "@/services/api/client";
+import { createMyLeave, listMyLeaves, type LeaveStatus, type MyLeave } from "@/services/api/leaves.api";
 import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, formatDate } from "@/utils/calendar";
-import { mockLeaveHistory, type LeaveHistoryStatus, type LeaveHistoryItem } from "./data/mockStudentLeaveApply";
 
 type Tab = "apply" | "history";
 type DateField = "start" | "end" | null;
+type LoadStatus = "loading" | "success" | "error";
 
 const REASON_MAX = 200;
 
-const STATUS_LABEL: Record<LeaveHistoryStatus, string> = {
+const STATUS_LABEL: Record<LeaveStatus, string> = {
   pending: "Pending",
-  approved: "Approved",
+  faculty_approved: "Faculty approved",
+  hod_approved: "HOD approved",
   rejected: "Rejected",
 };
 
-// TODO: this is an apply+history UI over local state and mockStudentLeaveApply
-// - wire to a real leave backend endpoint once one exists. This is the
-// student's own self-service application, distinct from the Class Advisor's
-// review screen (see erp/student-leave) and the employee's own leave request
-// (see erp/leave-request, which has no hostel-leave option).
+const STATUS_STYLE: Record<LeaveStatus, { bg: string; text: string }> = {
+  pending: { bg: "#EAF0FD", text: "#2F6FE0" },
+  faculty_approved: { bg: "#EAF0FD", text: "#2F6FE0" },
+  hod_approved: { bg: "#F0FDF4", text: "#16A34A" },
+  rejected: { bg: "#FEF2F2", text: "#DC2626" },
+};
+
+function toDateOnly(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function isBeforeToday(date: Date, today: Date): boolean {
+  return (
+    date.getFullYear() < today.getFullYear() ||
+    (date.getFullYear() === today.getFullYear() && date.getMonth() < today.getMonth()) ||
+    (date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth() && date.getDate() < today.getDate())
+  );
+}
+
+// Wired to POST/GET /me/leaves (real student_leaves rows, two-stage
+// faculty-then-HOD approval). This is the student's own self-service
+// application, distinct from the Class Advisor's review screen (see
+// erp/student-leave) and the employee's own leave request (see
+// erp/leave-request). There is no attachment/hostel-leave column on
+// student_leaves, so those mockup fields aren't wired to anything real.
 export function StudentLeaveApplyScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+
+  const today = useMemo(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  }, []);
 
   const [tab, setTab] = useState<Tab>("apply");
   const [startDateObj, setStartDateObj] = useState<Date | null>(null);
@@ -38,12 +66,33 @@ export function StudentLeaveApplyScreen() {
   const [reason, setReason] = useState("");
   const [hostelLeave, setHostelLeave] = useState(false);
   const [attached, setAttached] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [datePickerFor, setDatePickerFor] = useState<DateField>(null);
-  const [pickerYear, setPickerYear] = useState(2026);
-  const [pickerMonth, setPickerMonth] = useState(7); // August (0-indexed)
+  const [pickerYear, setPickerYear] = useState(today.getFullYear());
+  const [pickerMonth, setPickerMonth] = useState(today.getMonth());
 
-  const [history, setHistory] = useState(mockLeaveHistory);
+  const [historyStatus, setHistoryStatus] = useState<LoadStatus>("loading");
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [history, setHistory] = useState<MyLeave[]>([]);
+
+  const loadHistory = useCallback(() => {
+    setHistoryStatus("loading");
+    setHistoryError(null);
+    listMyLeaves()
+      .then((response) => {
+        setHistory(response.data);
+        setHistoryStatus("success");
+      })
+      .catch((err) => {
+        setHistoryError(getApiErrorMessage(err, "Couldn't load your leave history."));
+        setHistoryStatus("error");
+      });
+  }, []);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
 
   useFocusEffect(
     useCallback(() => {
@@ -81,6 +130,7 @@ export function StudentLeaveApplyScreen() {
 
   function handlePickDate(day: number) {
     const picked = new Date(pickerYear, pickerMonth, day);
+    if (isBeforeToday(picked, today)) return;
     if (datePickerFor === "start") {
       setStartDateObj(picked);
       if (endDateObj && endDateObj < picked) setEndDateObj(picked);
@@ -111,17 +161,25 @@ export function StudentLeaveApplyScreen() {
       toast.warning("Describe the reason for leave");
       return;
     }
-    const newRequest: LeaveHistoryItem = {
-      id: `local-${history.length}-${Date.now()}`,
-      fromDate: formatDate(startDateObj),
-      toDate: formatDate(endDateObj),
-      days,
-      status: "pending",
-    };
-    setHistory((prev) => [newRequest, ...prev]);
-    toast.success("Leave request submitted");
-    resetForm();
-    setTab("history");
+
+    setIsSubmitting(true);
+    createMyLeave({
+      from_date: toDateOnly(startDateObj),
+      to_date: toDateOnly(endDateObj),
+      reason: reason.trim(),
+    })
+      .then(() => {
+        toast.success("Leave request submitted");
+        resetForm();
+        setTab("history");
+        loadHistory();
+      })
+      .catch((err) => {
+        toast.error(getApiErrorMessage(err, "Couldn't submit your leave request."));
+      })
+      .finally(() => {
+        setIsSubmitting(false);
+      });
   }
 
   return (
@@ -189,6 +247,12 @@ export function StudentLeaveApplyScreen() {
               </View>
             </View>
 
+            {days > 0 && (
+              <Text style={styles.daysHint}>
+                {days} day{days > 1 ? "s" : ""}
+              </Text>
+            )}
+
             <Text style={styles.fieldLabel}>
               Reason ({reason.length}/{REASON_MAX})
             </Text>
@@ -231,8 +295,29 @@ export function StudentLeaveApplyScreen() {
               </Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.submitButton} onPress={handleSubmit} activeOpacity={0.85}>
-              <Text style={styles.submitButtonText}>Submit request</Text>
+            <TouchableOpacity
+              style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
+              onPress={handleSubmit}
+              activeOpacity={0.85}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.submitButtonText}>Submit request</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        ) : historyStatus === "loading" ? (
+          <View style={styles.inlineLoading}>
+            <ActivityIndicator color="#2F6FE0" />
+          </View>
+        ) : historyStatus === "error" ? (
+          <View style={styles.errorNotice}>
+            <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+            <Text style={styles.errorNoticeText}>{historyError ?? "Something went wrong."}</Text>
+            <TouchableOpacity onPress={loadHistory} style={styles.retryButton} activeOpacity={0.8}>
+              <Text style={styles.retryButtonText}>Retry</Text>
             </TouchableOpacity>
           </View>
         ) : history.length === 0 ? (
@@ -283,9 +368,15 @@ export function StudentLeaveApplyScreen() {
                   if (day === null) {
                     return <View key={dayIndex} style={styles.dayCell} />;
                   }
+                  const disabled = isBeforeToday(new Date(pickerYear, pickerMonth, day), today);
                   return (
-                    <TouchableOpacity key={dayIndex} style={styles.dayCell} onPress={() => handlePickDate(day)}>
-                      <Text style={styles.dayCellText}>{day}</Text>
+                    <TouchableOpacity
+                      key={dayIndex}
+                      style={styles.dayCell}
+                      onPress={() => handlePickDate(day)}
+                      disabled={disabled}
+                    >
+                      <Text style={[styles.dayCellText, disabled && styles.dayCellTextDisabled]}>{day}</Text>
                     </TouchableOpacity>
                   );
                 })}
@@ -298,26 +389,25 @@ export function StudentLeaveApplyScreen() {
   );
 }
 
-function HistoryRow({ item, isLast }: { item: LeaveHistoryItem; isLast: boolean }) {
+function HistoryRow({ item, isLast }: { item: MyLeave; isLast: boolean }) {
+  const statusStyle = STATUS_STYLE[item.status];
+
   return (
     <View style={[styles.historyRow, isLast && styles.historyRowLast]}>
-      <View style={styles.historyCol}>
-        <Text style={styles.historyColLabel}>FROM</Text>
-        <Text style={styles.historyColValue}>{item.fromDate}</Text>
+      <View style={styles.historyTopRow}>
+        <View style={styles.historyCol}>
+          <Text style={styles.historyColLabel}>FROM</Text>
+          <Text style={styles.historyColValue}>{formatDate(new Date(item.from_date))}</Text>
+        </View>
+        <View style={styles.historyCol}>
+          <Text style={styles.historyColLabel}>TO</Text>
+          <Text style={styles.historyColValue}>{formatDate(new Date(item.to_date))}</Text>
+        </View>
+        <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
+          <Text style={[styles.statusBadgeText, { color: statusStyle.text }]}>{STATUS_LABEL[item.status]}</Text>
+        </View>
       </View>
-      <View style={styles.historyCol}>
-        <Text style={styles.historyColLabel}>DURATION</Text>
-        <Text style={styles.historyColValue}>
-          {item.days} day{item.days > 1 ? "s" : ""}
-        </Text>
-      </View>
-      <View style={styles.historyCol}>
-        <Text style={styles.historyColLabel}>TO</Text>
-        <Text style={styles.historyColValue}>{item.toDate}</Text>
-      </View>
-      <View style={styles.statusBadge}>
-        <Text style={styles.statusBadgeText}>{STATUS_LABEL[item.status]}</Text>
-      </View>
+      {item.reason && <Text style={styles.historyReason}>{item.reason}</Text>}
     </View>
   );
 }
@@ -352,6 +442,36 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
+  },
+  inlineLoading: {
+    paddingVertical: 48,
+    alignItems: "center",
+  },
+  errorNotice: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 48,
+    paddingHorizontal: 16,
+  },
+  errorNoticeText: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
+    textAlign: "center",
+    paddingHorizontal: 12,
+  },
+  retryButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
   },
   tabSwitch: {
     flexDirection: "row",
@@ -404,7 +524,7 @@ const styles = StyleSheet.create({
   rowFields: {
     flexDirection: "row",
     gap: 10,
-    marginBottom: 14,
+    marginBottom: 6,
   },
   rowField: {
     flex: 1,
@@ -428,6 +548,12 @@ const styles = StyleSheet.create({
   pickerButtonPlaceholder: {
     color: "#9AA6B2",
     fontFamily: fonts.regular,
+  },
+  daysHint: {
+    fontSize: 12,
+    fontFamily: fonts.semibold,
+    color: "#2F6FE0",
+    marginBottom: 14,
   },
   input: {
     borderWidth: 1,
@@ -513,6 +639,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
   },
+  submitButtonDisabled: {
+    backgroundColor: "#B7CBE6",
+  },
   submitButtonText: {
     fontSize: 14,
     fontFamily: fonts.bold,
@@ -529,14 +658,17 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
   },
   historyRow: {
-    flexDirection: "row",
-    alignItems: "center",
     paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: "#F1F3F6",
   },
   historyRowLast: {
     borderBottomWidth: 0,
+  },
+  historyTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   historyCol: {
     flex: 1,
@@ -554,15 +686,19 @@ const styles = StyleSheet.create({
     color: "#111827",
   },
   statusBadge: {
-    backgroundColor: "#EAF0FD",
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
   statusBadgeText: {
-    fontSize: 12,
+    fontSize: 11,
     fontFamily: fonts.bold,
-    color: "#2F6FE0",
+  },
+  historyReason: {
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
+    marginTop: 10,
   },
   emptyState: {
     alignItems: "center",
@@ -630,5 +766,8 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: fonts.semibold,
     color: "#111827",
+  },
+  dayCellTextDisabled: {
+    color: "#D1D5DB",
   },
 });

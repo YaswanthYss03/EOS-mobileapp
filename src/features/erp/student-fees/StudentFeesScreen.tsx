@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -8,23 +8,33 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
+import { getApiErrorMessage } from "@/services/api/client";
 import {
-  semesters,
-  defaultSemester,
-  mockFeesBySemester,
-  mockPaymentsBySemester,
-  type FeeItem,
+  getMyFees,
   type FeeStatus,
-  type PaymentRecord,
-} from "./data/mockStudentFees";
+  type MyFeeDemand,
+  type MyFeePayment,
+  type MyFeesResponse,
+  type PaymentMode,
+} from "@/services/api/fees.api";
 
 type Tab = "pay" | "history";
+type LoadStatus = "loading" | "success" | "error";
+const SEMESTERS = [1, 2, 3, 4, 5, 6, 7, 8];
 
 // All statuses share the same light-blue pill - only the label differs.
 const STATUS_LABEL: Record<FeeStatus, string> = {
   paid: "Paid",
   partial: "Partial",
   pending: "Pending",
+};
+
+const PAYMENT_MODE_LABEL: Record<PaymentMode, string> = {
+  cash: "Cash",
+  card: "Card",
+  upi: "UPI",
+  dd: "DD",
+  netbanking: "Net banking",
 };
 
 const AMOUNT_STEP = 100;
@@ -37,19 +47,56 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-// TODO: this is a view-only fees screen over mockStudentFees - wire to a real
-// payments backend/gateway once one exists. Reachable from the Student
-// dashboard's "Fees" quick-access item.
+function formatFeeDate(dateOnly: string): string {
+  return new Date(dateOnly).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function demandSubtitle(demand: MyFeeDemand): string {
+  return demand.semester !== null ? `Semester ${demand.semester} · ${demand.academic_year}` : demand.academic_year;
+}
+
+// Wired to GET /me/fees (real student_fee_demand_mapping + fee_payments
+// rows). Payment collection itself has no gateway wired up yet - "Pay now"
+// stays a stub. Reachable from the Student dashboard's "Fees" quick-access
+// item.
 export function StudentFeesScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [semester, setSemester] = useState(defaultSemester);
-  const [semesterPickerOpen, setSemesterPickerOpen] = useState(false);
+  const [status, setStatus] = useState<LoadStatus>("loading");
+  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<MyFeesResponse | null>(null);
+
   const [tab, setTab] = useState<Tab>("pay");
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [amountInputs, setAmountInputs] = useState<Record<string, string>>({});
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [amountInputs, setAmountInputs] = useState<Record<number, string>>({});
+  const [semester, setSemester] = useState(1);
+  const [semesterPickerOpen, setSemesterPickerOpen] = useState(false);
+
+  const load = useCallback(() => {
+    setStatus("loading");
+    setError(null);
+    getMyFees()
+      .then((response) => {
+        setData(response);
+        setStatus("success");
+        const realSemesters = response.demands
+          .map((fee) => fee.semester)
+          .filter((value): value is number => value !== null && SEMESTERS.includes(value));
+        if (realSemesters.length > 0) {
+          setSemester(Math.max(...realSemesters));
+        }
+      })
+      .catch((err) => {
+        setError(getApiErrorMessage(err, "Couldn't load your fees."));
+        setStatus("error");
+      });
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   useFocusEffect(
     useCallback(() => {
@@ -60,27 +107,42 @@ export function StudentFeesScreen() {
     }, [navigation]),
   );
 
-  const fees = mockFeesBySemester[semester] ?? [];
-  const payments = mockPaymentsBySemester[semester] ?? [];
+  const allDemands = useMemo(() => data?.demands ?? [], [data]);
+  const allPayments = useMemo(() => data?.payments ?? [], [data]);
+
+  const demandIdToSemester = useMemo(
+    () => new Map(allDemands.map((fee) => [fee.id, fee.semester])),
+    [allDemands],
+  );
+
+  const demands = useMemo(
+    () => allDemands.filter((fee) => fee.semester === semester),
+    [allDemands, semester],
+  );
+
+  const payments = useMemo(
+    () => allPayments.filter((payment) => demandIdToSemester.get(payment.demand_id) === semester),
+    [allPayments, semester, demandIdToSemester],
+  );
 
   const summary = useMemo(
     () => ({
-      totalPayable: fees.reduce((sum, fee) => sum + fee.total, 0),
-      paid: fees.reduce((sum, fee) => sum + fee.paid, 0),
-      outstanding: fees.reduce((sum, fee) => sum + fee.due, 0),
+      totalPayable: demands.reduce((sum, fee) => sum + fee.total, 0),
+      paid: demands.reduce((sum, fee) => sum + fee.paid, 0),
+      outstanding: demands.reduce((sum, fee) => sum + fee.due, 0),
     }),
-    [fees],
+    [demands],
   );
 
   const payingNowTotal = useMemo(
     () =>
-      fees
+      demands
         .filter((fee) => selectedIds.has(fee.id))
         .reduce((sum, fee) => sum + (parseInt(amountInputs[fee.id] ?? "", 10) || 0), 0),
-    [fees, selectedIds, amountInputs],
+    [demands, selectedIds, amountInputs],
   );
 
-  function toggleSelected(fee: FeeItem) {
+  function toggleSelected(fee: MyFeeDemand) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(fee.id)) {
@@ -93,18 +155,18 @@ export function StudentFeesScreen() {
     });
   }
 
-  function setAmountFor(feeId: string, value: string) {
+  function setAmountFor(feeId: number, value: string) {
     setAmountInputs((prev) => ({ ...prev, [feeId]: value }));
   }
 
-  function adjustAmountFor(feeId: string, due: number, delta: number) {
+  function adjustAmountFor(feeId: number, due: number, delta: number) {
     setAmountInputs((prev) => {
       const current = parseInt(prev[feeId] ?? "", 10) || 0;
       return { ...prev, [feeId]: String(clamp(current + delta, 0, due)) };
     });
   }
 
-  function setFullDueFor(feeId: string, due: number) {
+  function setFullDueFor(feeId: number, due: number) {
     setAmountInputs((prev) => ({ ...prev, [feeId]: String(due) }));
   }
 
@@ -116,15 +178,8 @@ export function StudentFeesScreen() {
     toast.info("Payment gateway integration is coming soon");
   }
 
-  function handleDownloadReceipt(payment: PaymentRecord) {
-    toast.info(`Downloading receipt ${payment.receiptNo} is coming soon`);
-  }
-
-  function switchSemester(option: string) {
-    setSemester(option);
-    setSemesterPickerOpen(false);
-    setSelectedIds(new Set());
-    setAmountInputs({});
+  function handleDownloadReceipt(payment: MyFeePayment) {
+    toast.info(`Downloading receipt ${payment.receipt_no} is coming soon`);
   }
 
   return (
@@ -145,94 +200,118 @@ export function StudentFeesScreen() {
         <Text style={styles.headerTitle}>Pay fees</Text>
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.card}>
-          <Text style={styles.fieldLabel}>Semester</Text>
-          <TouchableOpacity
-            style={styles.selectRow}
-            onPress={() => setSemesterPickerOpen(true)}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.selectValue}>{semester}</Text>
-            <Ionicons name="chevron-down" size={18} color="#B0B7C3" />
-          </TouchableOpacity>
-
-          <View style={styles.summaryDivider} />
-
-          <View style={styles.summaryRow}>
-            <View style={styles.summaryCol}>
-              <Text style={styles.summaryValue}>{formatRupees(summary.totalPayable)}</Text>
-              <Text style={styles.summaryLabel}>Total payable</Text>
-            </View>
-            <View style={styles.summaryCol}>
-              <Text style={[styles.summaryValue, styles.summaryValuePaid]}>{formatRupees(summary.paid)}</Text>
-              <Text style={styles.summaryLabel}>Paid</Text>
-            </View>
-            <View style={styles.summaryCol}>
-              <Text style={styles.summaryValue}>{formatRupees(summary.outstanding)}</Text>
-              <Text style={styles.summaryLabel}>Outstanding</Text>
-            </View>
-          </View>
+      {status === "loading" && (
+        <View style={styles.inlineLoading}>
+          <ActivityIndicator color="#2F6FE0" />
         </View>
+      )}
 
-        <View style={styles.tabSwitch}>
-          <TouchableOpacity
-            style={[styles.tabButton, tab === "pay" && styles.tabButtonActive]}
-            onPress={() => setTab("pay")}
-          >
-            <Text style={[styles.tabButtonText, tab === "pay" && styles.tabButtonTextActive]}>Pay fees</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabButton, tab === "history" && styles.tabButtonActive]}
-            onPress={() => setTab("history")}
-          >
-            <Text style={[styles.tabButtonText, tab === "history" && styles.tabButtonTextActive]}>
-              Payment history
-            </Text>
+      {status === "error" && (
+        <View style={styles.errorNotice}>
+          <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+          <Text style={styles.errorNoticeText}>{error ?? "Something went wrong."}</Text>
+          <TouchableOpacity onPress={load} style={styles.retryButton} activeOpacity={0.8}>
+            <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
         </View>
+      )}
 
-        {tab === "pay" ? (
-          <>
-            {fees.map((fee) => (
-              <FeeCard
-                key={fee.id}
-                fee={fee}
-                selected={selectedIds.has(fee.id)}
-                amount={amountInputs[fee.id] ?? String(fee.due)}
-                onToggle={() => toggleSelected(fee)}
-                onAmountChange={(value) => setAmountFor(fee.id, value)}
-                onIncrement={() => adjustAmountFor(fee.id, fee.due, AMOUNT_STEP)}
-                onDecrement={() => adjustAmountFor(fee.id, fee.due, -AMOUNT_STEP)}
-                onFullDue={() => setFullDueFor(fee.id, fee.due)}
-              />
-            ))}
+      {status === "success" && (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <View style={styles.card}>
+            <Text style={styles.fieldLabel}>Semester</Text>
+            <TouchableOpacity
+              style={styles.selectRow}
+              onPress={() => setSemesterPickerOpen(true)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.selectValue}>Semester {semester}</Text>
+              <Ionicons name="chevron-down" size={18} color="#B0B7C3" />
+            </TouchableOpacity>
+            <View style={styles.summaryDivider} />
 
-            <View style={styles.payFooter}>
-              <View>
-                <Text style={styles.payFooterLabel}>Paying now</Text>
-                <Text style={styles.payFooterValue}>{formatRupees(payingNowTotal)}</Text>
+            <View style={styles.summaryRow}>
+              <View style={styles.summaryCol}>
+                <Text style={styles.summaryValue}>{formatRupees(summary.totalPayable)}</Text>
+                <Text style={styles.summaryLabel}>Total payable</Text>
               </View>
-              <TouchableOpacity
-                style={[styles.payNowButton, payingNowTotal === 0 && styles.payNowButtonDisabled]}
-                onPress={handlePay}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.payNowButtonText}>Pay now</Text>
-              </TouchableOpacity>
+              <View style={styles.summaryCol}>
+                <Text style={[styles.summaryValue, styles.summaryValuePaid]}>{formatRupees(summary.paid)}</Text>
+                <Text style={styles.summaryLabel}>Paid</Text>
+              </View>
+              <View style={styles.summaryCol}>
+                <Text style={styles.summaryValue}>{formatRupees(summary.outstanding)}</Text>
+                <Text style={styles.summaryLabel}>Outstanding</Text>
+              </View>
             </View>
-          </>
-        ) : payments.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="receipt-outline" size={32} color="#B0B7C3" />
-            <Text style={styles.emptyStateText}>No payments yet</Text>
           </View>
-        ) : (
-          payments.map((payment) => (
-            <PaymentCard key={payment.id} payment={payment} onDownload={() => handleDownloadReceipt(payment)} />
-          ))
-        )}
-      </ScrollView>
+
+          <View style={styles.tabSwitch}>
+            <TouchableOpacity
+              style={[styles.tabButton, tab === "pay" && styles.tabButtonActive]}
+              onPress={() => setTab("pay")}
+            >
+              <Text style={[styles.tabButtonText, tab === "pay" && styles.tabButtonTextActive]}>Pay fees</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tabButton, tab === "history" && styles.tabButtonActive]}
+              onPress={() => setTab("history")}
+            >
+              <Text style={[styles.tabButtonText, tab === "history" && styles.tabButtonTextActive]}>
+                Payment history
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {tab === "pay" ? (
+            demands.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="cash-outline" size={32} color="#B0B7C3" />
+                <Text style={styles.emptyStateText}>No fees have been raised for you yet</Text>
+              </View>
+            ) : (
+              <>
+                {demands.map((fee) => (
+                  <FeeCard
+                    key={fee.id}
+                    fee={fee}
+                    selected={selectedIds.has(fee.id)}
+                    amount={amountInputs[fee.id] ?? String(fee.due)}
+                    onToggle={() => toggleSelected(fee)}
+                    onAmountChange={(value) => setAmountFor(fee.id, value)}
+                    onIncrement={() => adjustAmountFor(fee.id, fee.due, AMOUNT_STEP)}
+                    onDecrement={() => adjustAmountFor(fee.id, fee.due, -AMOUNT_STEP)}
+                    onFullDue={() => setFullDueFor(fee.id, fee.due)}
+                  />
+                ))}
+
+                <View style={styles.payFooter}>
+                  <View>
+                    <Text style={styles.payFooterLabel}>Paying now</Text>
+                    <Text style={styles.payFooterValue}>{formatRupees(payingNowTotal)}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.payNowButton, payingNowTotal === 0 && styles.payNowButtonDisabled]}
+                    onPress={handlePay}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.payNowButtonText}>Pay now</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )
+          ) : payments.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="receipt-outline" size={32} color="#B0B7C3" />
+              <Text style={styles.emptyStateText}>No payments yet</Text>
+            </View>
+          ) : (
+            payments.map((payment) => (
+              <PaymentCard key={payment.id} payment={payment} onDownload={() => handleDownloadReceipt(payment)} />
+            ))
+          )}
+        </ScrollView>
+      )}
 
       <Modal
         visible={semesterPickerOpen}
@@ -248,14 +327,17 @@ export function StudentFeesScreen() {
           <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
             <Text style={styles.modalTitle}>Semester</Text>
             <ScrollView style={styles.modalList}>
-              {semesters.map((option) => (
+              {SEMESTERS.map((option) => (
                 <TouchableOpacity
                   key={option}
                   style={styles.modalOptionRow}
-                  onPress={() => switchSemester(option)}
+                  onPress={() => {
+                    setSemester(option);
+                    setSemesterPickerOpen(false);
+                  }}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.modalOptionName}>{option}</Text>
+                  <Text style={styles.modalOptionName}>Semester {option}</Text>
                   {semester === option && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
                 </TouchableOpacity>
               ))}
@@ -277,7 +359,7 @@ function FeeCard({
   onDecrement,
   onFullDue,
 }: {
-  fee: FeeItem;
+  fee: MyFeeDemand;
   selected: boolean;
   amount: string;
   onToggle: () => void;
@@ -302,7 +384,10 @@ function FeeCard({
             <Ionicons name="checkmark" size={14} color={isFullyPaid ? "#16A34A" : "#fff"} />
           )}
         </TouchableOpacity>
-        <Text style={styles.feeLabel}>{fee.label}</Text>
+        <View style={styles.feeLabelWrap}>
+          <Text style={styles.feeLabel}>{fee.fee_structure_name}</Text>
+          <Text style={styles.feeSubtitle}>{demandSubtitle(fee)}</Text>
+        </View>
         <View style={styles.statusBadge}>
           <Text style={styles.statusBadgeText}>{STATUS_LABEL[fee.status]}</Text>
         </View>
@@ -355,21 +440,23 @@ function FeeCard({
   );
 }
 
-function PaymentCard({ payment, onDownload }: { payment: PaymentRecord; onDownload: () => void }) {
+function PaymentCard({ payment, onDownload }: { payment: MyFeePayment; onDownload: () => void }) {
   return (
     <View style={styles.paymentCard}>
       <View style={styles.paymentIconWrap}>
         <Text style={styles.paymentIconText}>₹</Text>
       </View>
       <View style={styles.paymentTextWrap}>
-        <Text style={styles.paymentTitle}>{payment.title}</Text>
+        <Text style={styles.paymentTitle}>{payment.fee_structure_name}</Text>
         <Text style={styles.paymentSubtitle}>
-          {payment.date} · {payment.method}
+          {formatFeeDate(payment.payment_date)}
+          {payment.payment_mode ? ` · ${PAYMENT_MODE_LABEL[payment.payment_mode]}` : ""}
+          {payment.is_partial ? " · Partial" : ""}
         </Text>
-        <Text style={styles.paymentReceiptNo}>Receipt {payment.receiptNo}</Text>
+        <Text style={styles.paymentReceiptNo}>Receipt {payment.receipt_no}</Text>
       </View>
       <View style={styles.paymentRight}>
-        <Text style={styles.paymentAmount}>{formatRupees(payment.amount)}</Text>
+        <Text style={styles.paymentAmount}>{formatRupees(payment.amount_paid)}</Text>
         <TouchableOpacity style={styles.receiptButton} onPress={onDownload} activeOpacity={0.85}>
           <Ionicons name="download-outline" size={14} color="#2F6FE0" />
           <Text style={styles.receiptButtonText}>Receipt</Text>
@@ -409,6 +496,36 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
+  },
+  inlineLoading: {
+    paddingVertical: 48,
+    alignItems: "center",
+  },
+  errorNotice: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 48,
+    paddingHorizontal: 16,
+  },
+  errorNoticeText: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
+    textAlign: "center",
+    paddingHorizontal: 12,
+  },
+  retryButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
   },
   card: {
     backgroundColor: "#fff",
@@ -529,11 +646,19 @@ const styles = StyleSheet.create({
     backgroundColor: "#F0FDF4",
     borderColor: "#BBF7D0",
   },
-  feeLabel: {
+  feeLabelWrap: {
     flex: 1,
+  },
+  feeLabel: {
     fontSize: 17,
     fontFamily: fonts.bold,
     color: "#111827",
+  },
+  feeSubtitle: {
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    color: "#9AA6B2",
+    marginTop: 2,
   },
   statusBadge: {
     backgroundColor: "#EAF0FD",

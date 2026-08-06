@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -8,21 +8,67 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
-import { courses, grades, ratingCategories, type Grade } from "./data/mockStudentFeedback";
+import { getApiErrorMessage } from "@/services/api/client";
+import {
+  listMyFeedbackForms,
+  getMyFeedbackForm,
+  submitMyFeedbackResponses,
+  type FeedbackFormSummary,
+  type FeedbackFormDetail,
+} from "@/services/api/feedback.api";
 
-// TODO: this is a submit-only UI over mockStudentFeedback - wire to a real
-// academics/feedback backend endpoint once one exists. Reachable from the
-// Student dashboard's Campus "Feedback" item.
+type Grade = "A" | "B" | "C" | "D" | "E";
+
+const grades: { grade: Grade; label: string }[] = [
+  { grade: "A", label: "Excellent" },
+  { grade: "B", label: "Very good" },
+  { grade: "C", label: "Good" },
+  { grade: "D", label: "Average" },
+  { grade: "E", label: "Poor" },
+];
+
+// hostel_mess_feedback/feedback_responses both store a 1-5 rating_value,
+// not a letter grade - this UI's A-E boxes are just a nicer picker.
+const GRADE_TO_RATING: Record<Grade, number> = { A: 5, B: 4, C: 3, D: 2, E: 1 };
+
+type LoadStatus = "loading" | "success" | "error";
+
+// Wired to GET /feedback/student/forms + GET .../forms/:id + POST
+// .../forms/:id/responses. Feedback is form-based with a dynamic list of
+// questions (each "rating" 1-5 or free-text "text"), not one fixed shape -
+// the "Course" list is now the list of forms actually targeting this
+// student, and the rating/comment rows below are generated from whichever
+// form is selected. Reachable from the Student dashboard's Campus
+// "Feedback" item.
 export function StudentFeedbackScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [course, setCourse] = useState<string | null>(null);
-  const [ratings, setRatings] = useState<Record<string, Grade | null>>(() =>
-    Object.fromEntries(ratingCategories.map((category) => [category, null])),
-  );
-  const [comments, setComments] = useState("");
+  const [formsStatus, setFormsStatus] = useState<LoadStatus>("loading");
+  const [forms, setForms] = useState<FeedbackFormSummary[]>([]);
+
+  const [selectedFormId, setSelectedFormId] = useState<number | null>(null);
+  const [detailStatus, setDetailStatus] = useState<LoadStatus | null>(null);
+  const [formDetail, setFormDetail] = useState<FeedbackFormDetail | null>(null);
+
+  const [ratings, setRatings] = useState<Record<number, Grade | null>>({});
+  const [texts, setTexts] = useState<Record<number, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const loadForms = useCallback(() => {
+    setFormsStatus("loading");
+    listMyFeedbackForms()
+      .then((response) => {
+        setForms(response);
+        setFormsStatus("success");
+      })
+      .catch(() => setFormsStatus("error"));
+  }, []);
+
+  useEffect(() => {
+    loadForms();
+  }, [loadForms]);
 
   useFocusEffect(
     useCallback(() => {
@@ -33,27 +79,85 @@ export function StudentFeedbackScreen() {
     }, [navigation]),
   );
 
-  function setRatingFor(category: string, grade: Grade) {
-    setRatings((prev) => ({ ...prev, [category]: grade }));
+  const ratingQuestions = useMemo(
+    () => formDetail?.questions.filter((q) => q.question_type === "rating") ?? [],
+    [formDetail],
+  );
+  const textQuestions = useMemo(
+    () => formDetail?.questions.filter((q) => q.question_type === "text") ?? [],
+    [formDetail],
+  );
+
+  function selectForm(form: FeedbackFormSummary) {
+    setSelectedFormId(form.id);
+    setDetailStatus("loading");
+    setFormDetail(null);
+    getMyFeedbackForm(form.id)
+      .then((detail) => {
+        setFormDetail(detail);
+        setDetailStatus("success");
+        const initialRatings: Record<number, Grade | null> = {};
+        const initialTexts: Record<number, string> = {};
+        for (const q of detail.questions) {
+          if (q.question_type === "rating") {
+            const grade = (Object.keys(GRADE_TO_RATING) as Grade[]).find(
+              (g) => GRADE_TO_RATING[g] === q.rating_value,
+            );
+            initialRatings[q.id] = grade ?? null;
+          } else {
+            initialTexts[q.id] = q.response_text ?? "";
+          }
+        }
+        setRatings(initialRatings);
+        setTexts(initialTexts);
+      })
+      .catch(() => setDetailStatus("error"));
+  }
+
+  function setRatingFor(questionId: number, grade: Grade) {
+    setRatings((prev) => ({ ...prev, [questionId]: grade }));
+  }
+
+  function setTextFor(questionId: number, value: string) {
+    setTexts((prev) => ({ ...prev, [questionId]: value }));
   }
 
   function resetForm() {
-    setCourse(null);
-    setRatings(Object.fromEntries(ratingCategories.map((category) => [category, null])));
-    setComments("");
+    setSelectedFormId(null);
+    setDetailStatus(null);
+    setFormDetail(null);
+    setRatings({});
+    setTexts({});
   }
 
   function handleSubmit() {
-    if (!course) {
-      toast.warning("Select a course");
+    if (!formDetail) {
+      toast.warning("Select a form");
       return;
     }
-    if (ratingCategories.some((category) => !ratings[category])) {
+    if (ratingQuestions.some((q) => !ratings[q.id])) {
       toast.warning("Rate every category");
       return;
     }
-    toast.success(`Feedback submitted for ${course}`);
-    resetForm();
+    if (textQuestions.some((q) => !texts[q.id]?.trim())) {
+      toast.warning("Answer every question");
+      return;
+    }
+
+    const responses = [
+      ...ratingQuestions.map((q) => ({ question_id: q.id, rating_value: GRADE_TO_RATING[ratings[q.id]!] })),
+      ...textQuestions.map((q) => ({ question_id: q.id, response_text: texts[q.id].trim() })),
+    ];
+
+    setIsSubmitting(true);
+    submitMyFeedbackResponses(formDetail.id, responses)
+      .then(() => {
+        toast.success(`Feedback submitted for ${formDetail.title}`);
+        resetForm();
+        loadForms();
+      })
+      .catch((err) => toast.error(getApiErrorMessage(err, "Couldn't submit feedback.")))
+      .finally(() => setIsSubmitting(false));
   }
 
   return (
@@ -76,22 +180,41 @@ export function StudentFeedbackScreen() {
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.fieldLabel}>Course</Text>
-        {courses.map((option) => {
-          const selected = course === option;
-          return (
-            <TouchableOpacity
-              key={option}
-              style={[styles.courseRow, selected && styles.courseRowSelected]}
-              onPress={() => setCourse(option)}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.radio, selected && styles.radioSelected]}>
-                {selected && <View style={styles.radioDot} />}
-              </View>
-              <Text style={[styles.courseLabel, selected && styles.courseLabelSelected]}>{option}</Text>
+        {formsStatus === "loading" ? (
+          <View style={styles.inlineLoading}>
+            <ActivityIndicator color="#2F6FE0" />
+          </View>
+        ) : formsStatus === "error" ? (
+          <View style={styles.errorNotice}>
+            <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+            <Text style={styles.errorNoticeText}>Couldn't load feedback forms.</Text>
+            <TouchableOpacity onPress={loadForms} style={styles.retryButton} activeOpacity={0.8}>
+              <Text style={styles.retryButtonText}>Retry</Text>
             </TouchableOpacity>
-          );
-        })}
+          </View>
+        ) : forms.length === 0 ? (
+          <Text style={styles.emptyText}>No feedback forms available right now.</Text>
+        ) : (
+          forms.map((form) => {
+            const selected = selectedFormId === form.id;
+            return (
+              <TouchableOpacity
+                key={form.id}
+                style={[styles.courseRow, selected && styles.courseRowSelected]}
+                onPress={() => selectForm(form)}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.radio, selected && styles.radioSelected]}>
+                  {selected && <View style={styles.radioDot} />}
+                </View>
+                <Text style={[styles.courseLabel, selected && styles.courseLabelSelected]}>
+                  {form.title}
+                  {form.completed ? " (submitted)" : ""}
+                </Text>
+              </TouchableOpacity>
+            );
+          })
+        )}
 
         <View style={styles.legendCard}>
           <View style={styles.legendRow}>
@@ -106,28 +229,56 @@ export function StudentFeedbackScreen() {
           </View>
         </View>
 
-        {ratingCategories.map((category) => (
-          <GradeRow
-            key={category}
-            label={category}
-            value={ratings[category]}
-            onChange={(grade) => setRatingFor(category, grade)}
-          />
-        ))}
+        {detailStatus === "loading" && (
+          <View style={styles.inlineLoading}>
+            <ActivityIndicator color="#2F6FE0" />
+          </View>
+        )}
 
-        <Text style={styles.fieldLabel}>Comments (optional)</Text>
-        <TextInput
-          style={[styles.input, styles.inputLast]}
-          placeholder="Anything the faculty should know"
-          placeholderTextColor="#9AA6B2"
-          value={comments}
-          onChangeText={setComments}
-          multiline
-        />
+        {detailStatus === "error" && (
+          <View style={styles.errorNotice}>
+            <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+            <Text style={styles.errorNoticeText}>Couldn't load this form.</Text>
+          </View>
+        )}
 
-        <TouchableOpacity style={styles.submitButton} onPress={handleSubmit} activeOpacity={0.85}>
-          <Text style={styles.submitButtonText}>Submit feedback</Text>
-        </TouchableOpacity>
+        {detailStatus === "success" && formDetail && (
+          <>
+            {ratingQuestions.map((question) => (
+              <GradeRow
+                key={question.id}
+                label={question.question_text}
+                value={ratings[question.id] ?? null}
+                onChange={(grade) => setRatingFor(question.id, grade)}
+              />
+            ))}
+
+            {textQuestions.map((question) => (
+              <View key={question.id}>
+                <Text style={styles.fieldLabel}>{question.question_text}</Text>
+                <TextInput
+                  style={[styles.input, styles.inputLast]}
+                  placeholder="Your answer"
+                  placeholderTextColor="#9AA6B2"
+                  value={texts[question.id] ?? ""}
+                  onChangeText={(value) => setTextFor(question.id, value)}
+                  multiline
+                />
+              </View>
+            ))}
+
+            <TouchableOpacity
+              style={styles.submitButton}
+              onPress={handleSubmit}
+              activeOpacity={0.85}
+              disabled={isSubmitting || formDetail.completed}
+            >
+              <Text style={styles.submitButtonText}>
+                {formDetail.completed ? "Already submitted" : "Submit feedback"}
+              </Text>
+            </TouchableOpacity>
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -211,6 +362,40 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     color: "#6B7280",
     marginBottom: 8,
+  },
+  inlineLoading: {
+    paddingVertical: 24,
+    alignItems: "center",
+  },
+  errorNotice: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 24,
+  },
+  errorNoticeText: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
+    textAlign: "center",
+  },
+  retryButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+  },
+  emptyText: {
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    color: "#9AA6B2",
+    marginBottom: 16,
   },
   courseRow: {
     flexDirection: "row",

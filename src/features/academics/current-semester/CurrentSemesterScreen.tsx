@@ -1,5 +1,5 @@
-import { useCallback } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -7,7 +7,22 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
-import { mockSubjects, type Subject } from "./data/mockSubjects";
+import { getMyTimetable, getLmsNoteCountForSubject, getMyClassSection } from "@/services/api/current-semester.api";
+import { listMyAssignmentStatuses } from "@/services/api/no-due.api";
+
+type Subject = {
+  id: number;
+  code: string;
+  name: string;
+  section: string | null;
+  materials: number | null;
+  tasks: number;
+  hoursPerWeek: number;
+};
+
+type LoadStatus = "loading" | "success" | "error";
+
+const SEMESTER_NUMERALS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"];
 
 function initialsFromSubject(name: string) {
   return name
@@ -17,7 +32,7 @@ function initialsFromSubject(name: string) {
     .toUpperCase();
 }
 
-function CurrentSemesterHeader({ onBack }: { onBack: () => void }) {
+function CurrentSemesterHeader({ onBack, semester, subjectCount }: { onBack: () => void; semester: number | null; subjectCount: number }) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -36,35 +51,139 @@ function CurrentSemesterHeader({ onBack }: { onBack: () => void }) {
       </TouchableOpacity>
       <View>
         <Text style={styles.headerTitle}>Current Semester</Text>
-        <Text style={styles.headerSubtitle}>Semester VI · {mockSubjects.length} subjects</Text>
+        <Text style={styles.headerSubtitle}>
+          {semester !== null ? `Semester ${SEMESTER_NUMERALS[semester - 1] ?? semester}` : "Semester"} · {subjectCount} subjects
+        </Text>
       </View>
     </LinearGradient>
   );
 }
 
-// TODO: view-only - replace mockSubjects with a real call once the academics backend endpoint exists
+// Wired to GET /me/timetable (real per-subject weekly period counts) +
+// GET /student-assignment-status (real per-subject assignment counts) + GET
+// /lms-notes?subject_id= (real per-subject material counts) + GET /me/profile
+// (class_section). timetable_slots has no "room" column at all, so room is
+// dropped rather than fabricated.
 export function CurrentSemesterScreen() {
   const router = useRouter();
   const navigation = useNavigation();
 
+  const [status, setStatus] = useState<LoadStatus>("loading");
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [semester, setSemester] = useState<number | null>(null);
+
+  const load = useCallback(() => {
+    setStatus("loading");
+    Promise.all([getMyTimetable(), listMyAssignmentStatuses(), getMyClassSection().catch(() => null)])
+      .then(async ([days, statusRows, section]) => {
+        const bySubject = new Map<number, Subject>();
+
+        for (const day of days) {
+          for (const slot of day.slots) {
+            const entry =
+              bySubject.get(slot.subject.id) ??
+              ({
+                id: slot.subject.id,
+                code: slot.subject.subject_code,
+                name: slot.subject.name,
+                section,
+                materials: null,
+                tasks: 0,
+                hoursPerWeek: 0,
+              } as Subject);
+            entry.hoursPerWeek += 1;
+            bySubject.set(slot.subject.id, entry);
+          }
+        }
+
+        let resolvedSemester: number | null = null;
+        const taskIdsBySubject = new Map<number, Set<number>>();
+        for (const row of statusRows) {
+          const subjectId = row.assignment.subject.id;
+          if (resolvedSemester === null) resolvedSemester = row.assignment.semester;
+          const entry =
+            bySubject.get(subjectId) ??
+            ({
+              id: subjectId,
+              code: row.assignment.subject.subject_code,
+              name: row.assignment.subject.name,
+              section,
+              materials: null,
+              tasks: 0,
+              hoursPerWeek: 0,
+            } as Subject);
+          bySubject.set(subjectId, entry);
+
+          const ids = taskIdsBySubject.get(subjectId) ?? new Set<number>();
+          ids.add(row.assignment.id);
+          taskIdsBySubject.set(subjectId, ids);
+        }
+        for (const [subjectId, ids] of taskIdsBySubject) {
+          bySubject.get(subjectId)!.tasks = ids.size;
+        }
+
+        const sorted = Array.from(bySubject.values()).sort((a, b) => a.code.localeCompare(b.code));
+
+        const withMaterials = await Promise.all(
+          sorted.map(async (subject) => {
+            const materials = await getLmsNoteCountForSubject(subject.id).catch(() => null);
+            return { ...subject, materials };
+          }),
+        );
+
+        setSubjects(withMaterials);
+        setSemester(resolvedSemester);
+        setStatus("success");
+      })
+      .catch(() => setStatus("error"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({
-        header: () => <CurrentSemesterHeader onBack={() => router.back()} />,
+        header: () => (
+          <CurrentSemesterHeader onBack={() => router.back()} semester={semester} subjectCount={subjects.length} />
+        ),
       });
       return () => {
         navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
       };
-    }, [navigation, router]),
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [navigation, router, semester, subjects.length]),
   );
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {mockSubjects.map((subject) => (
-          <SubjectCard key={subject.id} subject={subject} />
-        ))}
-      </ScrollView>
+      {status === "loading" && (
+        <View style={styles.inlineLoading}>
+          <ActivityIndicator color="#2F6FE0" />
+        </View>
+      )}
+
+      {status === "error" && (
+        <View style={styles.errorNotice}>
+          <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+          <Text style={styles.errorNoticeText}>Couldn't load your current semester.</Text>
+          <TouchableOpacity onPress={load} style={styles.retryButton} activeOpacity={0.8}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {status === "success" && (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          {subjects.length === 0 ? (
+            <Text style={styles.emptyText}>No subjects scheduled yet.</Text>
+          ) : (
+            subjects.map((subject) => <SubjectCard key={subject.id} subject={subject} />)
+          )}
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
@@ -78,13 +197,13 @@ function SubjectCard({ subject }: { subject: Subject }) {
         </View>
         <View style={styles.cardHeaderText}>
           <Text style={styles.subjectName}>{subject.name}</Text>
-          <Text style={styles.subjectMeta}>
-            {subject.code} · {subject.room}
-          </Text>
+          <Text style={styles.subjectMeta}>{subject.code}</Text>
         </View>
-        <View style={styles.sectionBadge}>
-          <Text style={styles.sectionBadgeText}>{subject.section}</Text>
-        </View>
+        {subject.section && (
+          <View style={styles.sectionBadge}>
+            <Text style={styles.sectionBadgeText}>{subject.section}</Text>
+          </View>
+        )}
       </View>
 
       <View style={styles.divider} />
@@ -93,7 +212,9 @@ function SubjectCard({ subject }: { subject: Subject }) {
         <View style={styles.footerLeft}>
           <View style={styles.footerItem}>
             <Ionicons name="document-text-outline" size={14} color="#8A93A3" />
-            <Text style={styles.footerText}>{subject.materials} materials</Text>
+            <Text style={styles.footerText}>
+              {subject.materials === null ? "—" : subject.materials} materials
+            </Text>
           </View>
           <View style={styles.footerItem}>
             <Ionicons name="checkbox-outline" size={14} color="#8A93A3" />
@@ -142,6 +263,42 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
+  },
+  inlineLoading: {
+    paddingVertical: 48,
+    alignItems: "center",
+  },
+  errorNotice: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 48,
+    paddingHorizontal: 16,
+  },
+  errorNoticeText: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
+    textAlign: "center",
+  },
+  retryButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+  },
+  emptyText: {
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    color: "#9AA6B2",
+    textAlign: "center",
+    marginTop: 32,
   },
   card: {
     backgroundColor: "#fff",

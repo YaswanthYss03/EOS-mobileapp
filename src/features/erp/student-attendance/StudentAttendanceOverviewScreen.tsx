@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -7,21 +7,87 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
+import { getApiErrorMessage } from "@/services/api/client";
+import { getMyAttendance, type MyAttendanceRecord, type MyAttendanceResponse } from "@/services/api/attendance.api";
 import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES } from "@/utils/calendar";
-import { attendanceSummary, mockDayMarks, defaultViewMonth, type DayMark } from "./data/mockStudentAttendance";
 
-type ResolvedMark = DayMark | "present";
+const ELIGIBILITY_THRESHOLD_PERCENT = 75;
+const OVERALL_WINDOW_DAYS = 180;
 
-// TODO: this is a view-only calendar over mockStudentAttendance - wire to a
-// real attendance backend endpoint once one exists. This is the logged-in
-// student's OWN attendance %/eligibility, not the Class Advisor's "Student
-// Attendance" marking screen for their section (see erp/attendance).
+type LoadStatus = "loading" | "success" | "error";
+
+function toDateOnly(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function formatShortDate(date: Date): string {
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
+// TODO: this is the logged-in student's OWN attendance %/eligibility (GET
+// /me/attendance), not the Class Advisor's "Student Attendance" marking
+// screen for their section (see erp/attendance).
 export function StudentAttendanceOverviewScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [viewYear, setViewYear] = useState(defaultViewMonth.year);
-  const [viewMonth, setViewMonth] = useState(defaultViewMonth.month);
+
+  const today = useMemo(() => new Date(), []);
+  const [viewYear, setViewYear] = useState(today.getFullYear());
+  const [viewMonth, setViewMonth] = useState(today.getMonth());
+
+  const [overallStatus, setOverallStatus] = useState<LoadStatus>("loading");
+  const [overallError, setOverallError] = useState<string | null>(null);
+  const [overall, setOverall] = useState<MyAttendanceResponse["overall"] | null>(null);
+  const [overallRange, setOverallRange] = useState<{ from: Date; to: Date } | null>(null);
+
+  const [monthStatus, setMonthStatus] = useState<LoadStatus>("loading");
+  const [monthError, setMonthError] = useState<string | null>(null);
+  const [monthRecords, setMonthRecords] = useState<MyAttendanceRecord[]>([]);
+
+  const loadOverall = useCallback(() => {
+    const to = new Date();
+    const from = new Date();
+    from.setDate(from.getDate() - OVERALL_WINDOW_DAYS);
+
+    setOverallStatus("loading");
+    setOverallError(null);
+    getMyAttendance(toDateOnly(from), toDateOnly(to))
+      .then((response) => {
+        setOverall(response.overall);
+        setOverallRange({ from, to });
+        setOverallStatus("success");
+      })
+      .catch((err) => {
+        setOverallError(getApiErrorMessage(err, "Couldn't load your attendance summary."));
+        setOverallStatus("error");
+      });
+  }, []);
+
+  const loadMonth = useCallback((year: number, month: number) => {
+    const from = new Date(year, month, 1);
+    const to = new Date(year, month + 1, 0);
+
+    setMonthStatus("loading");
+    setMonthError(null);
+    getMyAttendance(toDateOnly(from), toDateOnly(to))
+      .then((response) => {
+        setMonthRecords(response.records);
+        setMonthStatus("success");
+      })
+      .catch((err) => {
+        setMonthError(getApiErrorMessage(err, "Couldn't load this month's attendance."));
+        setMonthStatus("error");
+      });
+  }, []);
+
+  useEffect(() => {
+    loadOverall();
+  }, [loadOverall]);
+
+  useEffect(() => {
+    loadMonth(viewYear, viewMonth);
+  }, [viewYear, viewMonth, loadMonth]);
 
   useFocusEffect(
     useCallback(() => {
@@ -33,7 +99,20 @@ export function StudentAttendanceOverviewScreen() {
   );
 
   const weeks = useMemo(() => getCalendarWeeks(viewYear, viewMonth), [viewYear, viewMonth]);
-  const isEligible = attendanceSummary.overallPercent >= attendanceSummary.eligibilityThresholdPercent;
+  const isEligible = overall !== null && overall.percentage >= ELIGIBILITY_THRESHOLD_PERCENT;
+
+  const recordByDate = useMemo(() => {
+    const map = new Map<string, AttendanceStatusPerDay>();
+    for (const record of monthRecords) {
+      const existing = map.get(record.attendance_date);
+      // A day can have multiple subject-level rows; treat the day as
+      // "absent" if any row that day was marked absent, else "present".
+      if (record.status === "absent" || existing === undefined) {
+        map.set(record.attendance_date, record.status);
+      }
+    }
+    return map;
+  }, [monthRecords]);
 
   function goToPreviousMonth() {
     if (viewMonth === 0) {
@@ -53,10 +132,9 @@ export function StudentAttendanceOverviewScreen() {
     }
   }
 
-  function markFor(day: number): ResolvedMark {
-    const explicit = mockDayMarks[`${viewYear}-${viewMonth}-${day}`];
-    if (explicit) return explicit;
-    return new Date(viewYear, viewMonth, day).getDay() === 0 ? "holiday" : "present";
+  function markFor(day: number): AttendanceStatusPerDay | "no-record" {
+    const key = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    return recordByDate.get(key) ?? "no-record";
   }
 
   return (
@@ -79,34 +157,60 @@ export function StudentAttendanceOverviewScreen() {
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.summaryCard}>
-          <View style={styles.summaryTopRow}>
-            <View style={styles.percentRow}>
-              <Text style={styles.percentValue}>{attendanceSummary.overallPercent}%</Text>
-              <View style={[styles.eligibleBadge, !isEligible && styles.eligibleBadgeAtRisk]}>
-                <Text style={[styles.eligibleBadgeText, !isEligible && styles.eligibleBadgeTextAtRisk]}>
-                  {isEligible ? "Eligible" : "At risk"}
-                </Text>
-              </View>
+          {overallStatus === "loading" && (
+            <View style={styles.inlineLoading}>
+              <ActivityIndicator color="#2F6FE0" />
             </View>
-            <View style={styles.hoursCol}>
-              <Text style={styles.hoursValue}>
-                {attendanceSummary.hoursAttended}
-                <Text style={styles.hoursValueTotal}> / {attendanceSummary.totalHours}</Text>
-              </Text>
-              <Text style={styles.hoursLabel}>hours attended</Text>
-            </View>
-          </View>
-          <Text style={styles.summarySubtitle}>Overall attendance · {attendanceSummary.semesterLabel}</Text>
+          )}
 
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${attendanceSummary.overallPercent}%` }]} />
-            <View
-              style={[styles.progressMarker, { left: `${attendanceSummary.eligibilityThresholdPercent}%` }]}
-            />
-          </View>
-          <Text style={styles.markerHint}>
-            Marker shows the {attendanceSummary.eligibilityThresholdPercent}% requirement
-          </Text>
+          {overallStatus === "error" && (
+            <ErrorNotice message={overallError ?? "Something went wrong."} onRetry={loadOverall} />
+          )}
+
+          {overallStatus === "success" && overall && overall.total_days === 0 && (
+            <View style={styles.emptyOverall}>
+              <Ionicons name="calendar-outline" size={28} color="#B0B7C3" />
+              <Text style={styles.emptyOverallText}>No attendance records yet</Text>
+              <Text style={styles.emptyOverallSubtext}>
+                Nothing has been marked for you
+                {overallRange ? ` between ${formatShortDate(overallRange.from)} and ${formatShortDate(overallRange.to)}` : ""}.
+              </Text>
+            </View>
+          )}
+
+          {overallStatus === "success" && overall && overall.total_days > 0 && (
+            <>
+              <View style={styles.summaryTopRow}>
+                <View style={styles.percentRow}>
+                  <Text style={styles.percentValue}>{overall.percentage}%</Text>
+                  <View style={[styles.eligibleBadge, !isEligible && styles.eligibleBadgeAtRisk]}>
+                    <Text style={[styles.eligibleBadgeText, !isEligible && styles.eligibleBadgeTextAtRisk]}>
+                      {isEligible ? "Eligible" : "At risk"}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.hoursCol}>
+                  <Text style={styles.hoursValue}>
+                    {overall.present}
+                    <Text style={styles.hoursValueTotal}> / {overall.total_days}</Text>
+                  </Text>
+                  <Text style={styles.hoursLabel}>days present</Text>
+                </View>
+              </View>
+              <Text style={styles.summarySubtitle}>
+                Overall attendance
+                {overallRange
+                  ? ` · ${formatShortDate(overallRange.from)} – ${formatShortDate(overallRange.to)}`
+                  : ""}
+              </Text>
+
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: `${Math.min(100, overall.percentage)}%` }]} />
+                <View style={[styles.progressMarker, { left: `${ELIGIBILITY_THRESHOLD_PERCENT}%` }]} />
+              </View>
+              <Text style={styles.markerHint}>Marker shows the {ELIGIBILITY_THRESHOLD_PERCENT}% requirement</Text>
+            </>
+          )}
         </View>
 
         <View style={styles.calendarCard}>
@@ -122,61 +226,86 @@ export function StudentAttendanceOverviewScreen() {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.weekdayRow}>
-            {WEEKDAY_LABELS.map((label, index) => (
-              <Text key={index} style={styles.weekdayLabel}>
-                {label}
-              </Text>
-            ))}
-          </View>
-
-          {weeks.map((week, weekIndex) => (
-            <View key={weekIndex} style={styles.weekRow}>
-              {week.map((day, dayIndex) => {
-                if (day === null) {
-                  return <View key={dayIndex} style={styles.dayCell} />;
-                }
-                const mark = markFor(day);
-                return (
-                  <View key={dayIndex} style={styles.dayCell}>
-                    <View
-                      style={[
-                        styles.dayCellInner,
-                        mark === "absent" && styles.dayCellAbsent,
-                        mark === "onDuty" && styles.dayCellOnDuty,
-                        mark === "holiday" && styles.dayCellHoliday,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.dayCellText,
-                          mark === "absent" && styles.dayCellTextAbsent,
-                          mark === "onDuty" && styles.dayCellTextOnDuty,
-                          mark === "holiday" && styles.dayCellTextHoliday,
-                        ]}
-                      >
-                        {day}
-                      </Text>
-                    </View>
-                  </View>
-                );
-              })}
+          {monthStatus === "loading" && (
+            <View style={styles.inlineLoading}>
+              <ActivityIndicator color="#2F6FE0" />
             </View>
-          ))}
+          )}
 
-          <View style={styles.legendRow}>
-            <LegendItem swatchStyle={styles.legendSwatchPresent} label="Present" />
-            <LegendItem swatchStyle={styles.legendSwatchAbsent} label="Absent" />
-            <LegendItem swatchStyle={styles.legendSwatchOnDuty} label="On Duty" />
-            <LegendItem swatchStyle={styles.legendSwatchHoliday} label="Holiday" />
-          </View>
+          {monthStatus === "error" && (
+            <ErrorNotice message={monthError ?? "Something went wrong."} onRetry={() => loadMonth(viewYear, viewMonth)} />
+          )}
+
+          {monthStatus === "success" && (
+            <>
+              <View style={styles.weekdayRow}>
+                {WEEKDAY_LABELS.map((label, index) => (
+                  <Text key={index} style={styles.weekdayLabel}>
+                    {label}
+                  </Text>
+                ))}
+              </View>
+
+              {weeks.map((week, weekIndex) => (
+                <View key={weekIndex} style={styles.weekRow}>
+                  {week.map((day, dayIndex) => {
+                    if (day === null) {
+                      return <View key={dayIndex} style={styles.dayCell} />;
+                    }
+                    const mark = markFor(day);
+                    return (
+                      <View key={dayIndex} style={styles.dayCell}>
+                        <View
+                          style={[
+                            styles.dayCellInner,
+                            mark === "absent" && styles.dayCellAbsent,
+                            mark === "no-record" && styles.dayCellNoRecord,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.dayCellText,
+                              mark === "absent" && styles.dayCellTextAbsent,
+                              mark === "no-record" && styles.dayCellTextNoRecord,
+                            ]}
+                          >
+                            {day}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              ))}
+
+              <View style={styles.legendRow}>
+                <LegendItem swatchStyle={styles.legendSwatchPresent} label="Present" />
+                <LegendItem swatchStyle={styles.legendSwatchAbsent} label="Absent" />
+                <LegendItem swatchStyle={styles.legendSwatchNoRecord} label="No record" />
+              </View>
+            </>
+          )}
         </View>
 
         <Text style={styles.footerNote}>
-          {attendanceSummary.eligibilityThresholdPercent}% attendance is required to sit the end-semester exams.
+          {ELIGIBILITY_THRESHOLD_PERCENT}% attendance is required to sit the end-semester exams.
         </Text>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+type AttendanceStatusPerDay = "present" | "absent";
+
+function ErrorNotice({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <View style={styles.errorNotice}>
+      <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+      <Text style={styles.errorNoticeText}>{message}</Text>
+      <TouchableOpacity onPress={onRetry} style={styles.retryButton} activeOpacity={0.8}>
+        <Text style={styles.retryButtonText}>Retry</Text>
+      </TouchableOpacity>
+    </View>
   );
 }
 
@@ -219,6 +348,52 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
+  },
+  inlineLoading: {
+    paddingVertical: 24,
+    alignItems: "center",
+  },
+  errorNotice: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 20,
+  },
+  emptyOverall: {
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 20,
+  },
+  emptyOverallText: {
+    fontSize: 15,
+    fontFamily: fonts.bold,
+    color: "#4B5563",
+  },
+  emptyOverallSubtext: {
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    color: "#9AA6B2",
+    textAlign: "center",
+    paddingHorizontal: 12,
+  },
+  errorNoticeText: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
+    textAlign: "center",
+    paddingHorizontal: 12,
+  },
+  retryButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
   },
   summaryCard: {
     backgroundColor: "#fff",
@@ -377,11 +552,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#2F6FE0",
     borderColor: "#2F6FE0",
   },
-  dayCellOnDuty: {
-    backgroundColor: "#EAF0FD",
-    borderColor: "#C7D8FA",
-  },
-  dayCellHoliday: {
+  dayCellNoRecord: {
     backgroundColor: "#F7F8FA",
     borderColor: "#F7F8FA",
   },
@@ -394,11 +565,7 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontFamily: fonts.bold,
   },
-  dayCellTextOnDuty: {
-    color: "#2F6FE0",
-    fontFamily: fonts.bold,
-  },
-  dayCellTextHoliday: {
+  dayCellTextNoRecord: {
     color: "#C4CAD3",
   },
   legendRow: {
@@ -430,11 +597,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#2F6FE0",
     borderColor: "#2F6FE0",
   },
-  legendSwatchOnDuty: {
-    backgroundColor: "#EAF0FD",
-    borderColor: "#C7D8FA",
-  },
-  legendSwatchHoliday: {
+  legendSwatchNoRecord: {
     backgroundColor: "#F7F8FA",
   },
   legendLabel: {

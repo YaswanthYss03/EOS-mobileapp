@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Modal, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity, Modal, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -7,31 +7,83 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
-import {
-  semesters,
-  defaultSemester,
-  mockExamSchedule,
-  type ExamType,
-  type ExamScheduleItem,
-} from "./data/mockStudentExamSchedule";
+import { getApiErrorMessage } from "@/services/api/client";
+import { getMyExamSchedule, type MyExamScheduleRow } from "@/services/api/exam-schedule.api";
 
-const EXAM_TYPES: { id: ExamType; label: string }[] = [
+type LoadStatus = "loading" | "success" | "error";
+
+const SEMESTERS = [1, 2, 3, 4, 5, 6, 7, 8];
+
+type ExamTypeFilter = "internal1" | "internal2" | "semester";
+
+const EXAM_TYPE_FILTERS: { id: ExamTypeFilter; label: string }[] = [
   { id: "internal1", label: "Internal 1" },
   { id: "internal2", label: "Internal 2" },
   { id: "semester", label: "Semester" },
 ];
 
-// TODO: this is a view-only exam schedule over mockStudentExamSchedule - wire
-// to a real academics/exams backend endpoint once one exists. Reachable from
-// the Student dashboard's Campus "Exam schedule" item.
+// Real exam_types in the DB are free-text (e.g. "Internal Assessment 1",
+// "Model Examination", "End Semester Examination") - not this fixed 3-way
+// split. Bucket them into it: anything naming "internal ... 1"/"... 2" maps
+// to that internal, everything else (model exams, end-semester exams, ...)
+// counts as "Semester".
+function bucketForExamType(examType: string): ExamTypeFilter {
+  const normalized = examType.toLowerCase();
+  if (normalized.includes("internal") && normalized.includes("1")) return "internal1";
+  if (normalized.includes("internal") && normalized.includes("2")) return "internal2";
+  return "semester";
+}
+
+function formatExamDate(dateOnly: string): string {
+  return new Date(dateOnly).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+}
+
+function formatTime(hhmm: string): string {
+  const [hourStr, minute] = hhmm.split(":");
+  const hour = parseInt(hourStr, 10);
+  const period = hour >= 12 ? "PM" : "AM";
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${hour12}:${minute} ${period}`;
+}
+
+// Wired to GET /me/exam-schedule (real, published exam_timetable rows for
+// the student's own class). Semester (1-8) and exam type (Internal
+// 1/Internal 2/Semester) are fixed UI filters - see bucketForExamType() for
+// how real exam_types map onto that 3-way split. Reachable from the
+// Student dashboard's Campus "Exam schedule" item.
 export function StudentExamScheduleScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [semester, setSemester] = useState(defaultSemester);
+  const [status, setStatus] = useState<LoadStatus>("loading");
+  const [error, setError] = useState<string | null>(null);
+  const [rows, setRows] = useState<MyExamScheduleRow[]>([]);
+  const [examType, setExamType] = useState<ExamTypeFilter>("internal1");
+  const [semester, setSemester] = useState(5);
   const [semesterPickerOpen, setSemesterPickerOpen] = useState(false);
-  const [examType, setExamType] = useState<ExamType>("internal1");
+
+  const load = useCallback(() => {
+    setStatus("loading");
+    setError(null);
+    getMyExamSchedule()
+      .then((response) => {
+        setRows(response);
+        setStatus("success");
+        const realSemesters = response.map((row) => row.semester).filter((value) => SEMESTERS.includes(value));
+        if (realSemesters.length > 0) {
+          setSemester(Math.max(...realSemesters));
+        }
+      })
+      .catch((err) => {
+        setError(getApiErrorMessage(err, "Couldn't load your exam schedule."));
+        setStatus("error");
+      });
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   useFocusEffect(
     useCallback(() => {
@@ -42,7 +94,16 @@ export function StudentExamScheduleScreen() {
     }, [navigation]),
   );
 
-  const rows = mockExamSchedule[semester]?.[examType] ?? [];
+  const filteredRows = useMemo(
+    () =>
+      rows.filter((row) => row.semester === semester && bucketForExamType(row.exam_type) === examType),
+    [rows, semester, examType],
+  );
+
+  function selectSemester(value: number) {
+    setSemester(value);
+    setSemesterPickerOpen(false);
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
@@ -62,57 +123,72 @@ export function StudentExamScheduleScreen() {
         <Text style={styles.headerTitle}>Exam schedule</Text>
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.card}>
-          <Text style={styles.fieldLabel}>Semester</Text>
-          <TouchableOpacity
-            style={styles.selectRow}
-            onPress={() => setSemesterPickerOpen(true)}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.selectValue}>{semester}</Text>
-            <Ionicons name="chevron-down" size={18} color="#B0B7C3" />
-          </TouchableOpacity>
-
-          <View style={styles.examTypeRow}>
-            {EXAM_TYPES.map((type) => (
-              <TouchableOpacity
-                key={type.id}
-                style={[styles.examTypePill, examType === type.id && styles.examTypePillActive]}
-                onPress={() => setExamType(type.id)}
-              >
-                <Text
-                  style={[styles.examTypePillText, examType === type.id && styles.examTypePillTextActive]}
-                >
-                  {type.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+      {status === "loading" && (
+        <View style={styles.inlineLoading}>
+          <ActivityIndicator color="#2F6FE0" />
         </View>
+      )}
 
-        {rows.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="calendar-outline" size={32} color="#B0B7C3" />
-            <Text style={styles.emptyStateText}>Schedule not published yet</Text>
-          </View>
-        ) : (
-          <View style={styles.tableCard}>
-            <View style={styles.tableHeaderRow}>
-              <Text style={[styles.tableHeaderText, styles.dateCol]}>DATE</Text>
-              <Text style={[styles.tableHeaderText, styles.courseCol]}>COURSE</Text>
-              <Text style={[styles.tableHeaderText, styles.sessionCol]}>SESSION</Text>
+      {status === "error" && (
+        <View style={styles.errorNotice}>
+          <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+          <Text style={styles.errorNoticeText}>{error ?? "Something went wrong."}</Text>
+          <TouchableOpacity onPress={load} style={styles.retryButton} activeOpacity={0.8}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {status === "success" && (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <View style={styles.card}>
+            <Text style={styles.fieldLabel}>Semester</Text>
+            <TouchableOpacity
+              style={styles.selectRow}
+              onPress={() => setSemesterPickerOpen(true)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.selectValue}>Semester {semester}</Text>
+              <Ionicons name="chevron-down" size={18} color="#B0B7C3" />
+            </TouchableOpacity>
+
+            <View style={styles.examTypeRow}>
+              {EXAM_TYPE_FILTERS.map((type) => (
+                <TouchableOpacity
+                  key={type.id}
+                  style={[styles.examTypePill, examType === type.id && styles.examTypePillActive]}
+                  onPress={() => setExamType(type.id)}
+                >
+                  <Text style={[styles.examTypePillText, examType === type.id && styles.examTypePillTextActive]}>
+                    {type.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
-            {rows.map((row, index) => (
-              <ExamRow key={row.id} row={row} isLast={index === rows.length - 1} />
-            ))}
-            <Text style={styles.footerNote}>
-              Forenoon 09:30–12:30 · Afternoon 01:30–04:30. Report 30 minutes before each session with your
-              hall ticket and ID card.
-            </Text>
           </View>
-        )}
-      </ScrollView>
+
+          {filteredRows.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="calendar-outline" size={32} color="#B0B7C3" />
+              <Text style={styles.emptyStateText}>Schedule not published yet</Text>
+            </View>
+          ) : (
+            <View style={styles.tableCard}>
+              <View style={styles.tableHeaderRow}>
+                <Text style={[styles.tableHeaderText, styles.dateCol]}>DATE</Text>
+                <Text style={[styles.tableHeaderText, styles.courseCol]}>COURSE</Text>
+                <Text style={[styles.tableHeaderText, styles.sessionCol]}>TIME</Text>
+              </View>
+              {filteredRows.map((row, index) => (
+                <ExamRow key={row.id} row={row} isLast={index === filteredRows.length - 1} />
+              ))}
+              <Text style={styles.footerNote}>
+                Report 30 minutes before each session with your hall ticket and ID card.
+              </Text>
+            </View>
+          )}
+        </ScrollView>
+      )}
 
       <Modal
         visible={semesterPickerOpen}
@@ -128,17 +204,14 @@ export function StudentExamScheduleScreen() {
           <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
             <Text style={styles.modalTitle}>Semester</Text>
             <ScrollView style={styles.modalList}>
-              {semesters.map((option) => (
+              {SEMESTERS.map((option) => (
                 <TouchableOpacity
                   key={option}
                   style={styles.modalOptionRow}
-                  onPress={() => {
-                    setSemester(option);
-                    setSemesterPickerOpen(false);
-                  }}
+                  onPress={() => selectSemester(option)}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.modalOptionName}>{option}</Text>
+                  <Text style={styles.modalOptionName}>Semester {option}</Text>
                   {semester === option && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
                 </TouchableOpacity>
               ))}
@@ -150,17 +223,19 @@ export function StudentExamScheduleScreen() {
   );
 }
 
-function ExamRow({ row, isLast }: { row: ExamScheduleItem; isLast: boolean }) {
+function ExamRow({ row, isLast }: { row: MyExamScheduleRow; isLast: boolean }) {
   return (
     <View style={[styles.tableRow, isLast && styles.tableRowLast]}>
-      <Text style={[styles.dateText, styles.dateCol]}>{row.date}</Text>
+      <Text style={[styles.dateText, styles.dateCol]}>{formatExamDate(row.exam_date)}</Text>
       <View style={styles.courseCol}>
-        <Text style={styles.courseName}>{row.course}</Text>
-        <Text style={styles.courseCode}>{row.code}</Text>
+        <Text style={styles.courseName}>{row.subject_name}</Text>
+        <Text style={styles.courseCode}>
+          {row.subject_code} · {row.exam_type}
+        </Text>
       </View>
       <View style={styles.sessionCol}>
         <View style={styles.sessionBadge}>
-          <Text style={styles.sessionBadgeText}>{row.session}</Text>
+          <Text style={styles.sessionBadgeText}>{formatTime(row.start_time)}</Text>
         </View>
       </View>
     </View>
@@ -197,6 +272,36 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
+  },
+  inlineLoading: {
+    paddingVertical: 48,
+    alignItems: "center",
+  },
+  errorNotice: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 48,
+    paddingHorizontal: 16,
+  },
+  errorNoticeText: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
+    textAlign: "center",
+    paddingHorizontal: 12,
+  },
+  retryButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
   },
   card: {
     backgroundColor: "#fff",

@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -7,13 +7,27 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
-import { mockEvents, categoryStyle, type CalendarEvent } from "./data/mockEvents";
+import {
+  getMyAcademicCalendar,
+  type CalendarEventType,
+  type MyAcademicCalendar,
+  type MyCalendarEvent,
+} from "@/services/api/academic-calendar.api";
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
 const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
+const WEEKDAY_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+// calendar_event_type_enum only has these two real values - no "review"/"exam".
+const categoryStyle: Record<CalendarEventType, { bg: string; text: string; label: string }> = {
+  holiday: { bg: "#E7F7EF", text: "#1E8A5A", label: "Holiday" },
+  event: { bg: "#EAF0FD", text: "#2F6FE0", label: "Event" },
+};
+
+type LoadStatus = "loading" | "success" | "error";
 
 function buildMonthGrid(year: number, month: number) {
   const firstWeekday = new Date(year, month, 1).getDay();
@@ -29,8 +43,21 @@ function buildMonthGrid(year: number, month: number) {
   return weeks;
 }
 
-function AcademicCalendarHeader({ onBack }: { onBack: () => void }) {
+function formatShortMonthYear(dateOnly: string): string {
+  const date = new Date(dateOnly);
+  return `${MONTH_NAMES[date.getMonth()].slice(0, 3)} ${date.getFullYear()}`;
+}
+
+function AcademicCalendarHeader({ onBack, calendar }: { onBack: () => void; calendar: MyAcademicCalendar | null }) {
   const insets = useSafeAreaInsets();
+  const subtitle =
+    calendar?.semester !== null && calendar?.semester !== undefined
+      ? `Semester ${calendar.semester}${
+          calendar.start_date && calendar.end_date
+            ? ` · ${formatShortMonthYear(calendar.start_date)} – ${formatShortMonthYear(calendar.end_date)}`
+            : ""
+        }`
+      : "Academic calendar";
 
   return (
     <LinearGradient
@@ -48,40 +75,68 @@ function AcademicCalendarHeader({ onBack }: { onBack: () => void }) {
       </TouchableOpacity>
       <View>
         <Text style={styles.headerTitle}>Academic Calendar</Text>
-        <Text style={styles.headerSubtitle}>Semester VI · Jun – Nov 2026</Text>
+        <Text style={styles.headerSubtitle}>{subtitle}</Text>
       </View>
     </LinearGradient>
   );
 }
 
-// TODO: view-only - replace mockEvents with a real call once the academics backend endpoint exists
+// Wired to GET /me/academic-calendar (real calendar_events for the
+// student's own batch + current semester). Only "holiday"/"event" types
+// exist in the schema - there is no "review"/"exam" category to show.
 export function AcademicCalendarScreen() {
   const router = useRouter();
   const navigation = useNavigation();
-  const [viewYear, setViewYear] = useState(2026);
-  const [viewMonth, setViewMonth] = useState(7);
+
+  const today = useMemo(() => new Date(), []);
+  const [viewYear, setViewYear] = useState(today.getFullYear());
+  const [viewMonth, setViewMonth] = useState(today.getMonth());
+
+  const [status, setStatus] = useState<LoadStatus>("loading");
+  const [calendar, setCalendar] = useState<MyAcademicCalendar | null>(null);
+
+  const load = useCallback(() => {
+    setStatus("loading");
+    getMyAcademicCalendar()
+      .then((response) => {
+        setCalendar(response);
+        setStatus("success");
+      })
+      .catch(() => setStatus("error"));
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({
-        header: () => <AcademicCalendarHeader onBack={() => router.back()} />,
+        header: () => <AcademicCalendarHeader onBack={() => router.back()} calendar={calendar} />,
       });
       return () => {
         navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
       };
-    }, [navigation, router]),
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [navigation, router, calendar]),
   );
 
   const weeks = useMemo(() => buildMonthGrid(viewYear, viewMonth), [viewYear, viewMonth]);
 
-  const eventsThisMonth = useMemo(
-    () =>
-      mockEvents
-        .filter((e) => e.month === viewMonth && e.year === viewYear)
-        .sort((a, b) => a.day - b.day),
-    [viewMonth, viewYear],
+  const eventsThisMonth = useMemo(() => {
+    if (!calendar) return [];
+    return calendar.events
+      .filter((e) => {
+        const d = new Date(e.event_date);
+        return d.getMonth() === viewMonth && d.getFullYear() === viewYear;
+      })
+      .sort((a, b) => a.event_date.localeCompare(b.event_date));
+  }, [calendar, viewMonth, viewYear]);
+
+  const eventDays = useMemo(
+    () => new Set(eventsThisMonth.map((e) => new Date(e.event_date).getDate())),
+    [eventsThisMonth],
   );
-  const eventDays = useMemo(() => new Set(eventsThisMonth.map((e) => e.day)), [eventsThisMonth]);
 
   function goToMonth(delta: number) {
     let month = viewMonth + delta;
@@ -99,74 +154,93 @@ export function AcademicCalendarScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.calendarCard}>
-          <View style={styles.monthNavRow}>
-            <TouchableOpacity style={styles.navButton} onPress={() => goToMonth(-1)}>
-              <Ionicons name="chevron-back" size={18} color="#2F6FE0" />
-            </TouchableOpacity>
-            <View style={styles.monthNavCenter}>
-              <Text style={styles.monthTitle}>
-                {MONTH_NAMES[viewMonth]} {viewYear}
-              </Text>
-              <Text style={styles.eventCount}>{eventsThisMonth.length} EVENTS</Text>
-            </View>
-            <TouchableOpacity style={styles.navButton} onPress={() => goToMonth(1)}>
-              <Ionicons name="chevron-forward" size={18} color="#2F6FE0" />
-            </TouchableOpacity>
-          </View>
+      {status === "loading" && (
+        <View style={styles.inlineLoading}>
+          <ActivityIndicator color="#2F6FE0" />
+        </View>
+      )}
 
-          <View style={styles.weekdayRow}>
-            {WEEKDAY_LABELS.map((label, i) => (
-              <Text key={`${label}-${i}`} style={styles.weekdayLabel}>
-                {label}
-              </Text>
+      {status === "error" && (
+        <View style={styles.errorNotice}>
+          <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+          <Text style={styles.errorNoticeText}>Couldn't load the academic calendar.</Text>
+          <TouchableOpacity onPress={load} style={styles.retryButton} activeOpacity={0.8}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {status === "success" && (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <View style={styles.calendarCard}>
+            <View style={styles.monthNavRow}>
+              <TouchableOpacity style={styles.navButton} onPress={() => goToMonth(-1)}>
+                <Ionicons name="chevron-back" size={18} color="#2F6FE0" />
+              </TouchableOpacity>
+              <View style={styles.monthNavCenter}>
+                <Text style={styles.monthTitle}>
+                  {MONTH_NAMES[viewMonth]} {viewYear}
+                </Text>
+                <Text style={styles.eventCount}>{eventsThisMonth.length} EVENTS</Text>
+              </View>
+              <TouchableOpacity style={styles.navButton} onPress={() => goToMonth(1)}>
+                <Ionicons name="chevron-forward" size={18} color="#2F6FE0" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.weekdayRow}>
+              {WEEKDAY_LABELS.map((label, i) => (
+                <Text key={`${label}-${i}`} style={styles.weekdayLabel}>
+                  {label}
+                </Text>
+              ))}
+            </View>
+
+            {weeks.map((week, i) => (
+              <View key={i} style={styles.weekRow}>
+                {week.map((day, j) => (
+                  <View key={j} style={styles.dayCell}>
+                    {day !== null && (
+                      <View style={[styles.dayCellInner, eventDays.has(day) && styles.dayCellHighlighted]}>
+                        <Text style={[styles.dayNumber, eventDays.has(day) && styles.dayNumberHighlighted]}>
+                          {day}
+                        </Text>
+                        {eventDays.has(day) && <View style={styles.dayDot} />}
+                      </View>
+                    )}
+                  </View>
+                ))}
+              </View>
             ))}
           </View>
 
-          {weeks.map((week, i) => (
-            <View key={i} style={styles.weekRow}>
-              {week.map((day, j) => (
-                <View key={j} style={styles.dayCell}>
-                  {day !== null && (
-                    <View style={[styles.dayCellInner, eventDays.has(day) && styles.dayCellHighlighted]}>
-                      <Text style={[styles.dayNumber, eventDays.has(day) && styles.dayNumberHighlighted]}>
-                        {day}
-                      </Text>
-                      {eventDays.has(day) && <View style={styles.dayDot} />}
-                    </View>
-                  )}
-                </View>
-              ))}
-            </View>
+          <Text style={styles.sectionTitle}>This month</Text>
+          {eventsThisMonth.map((event) => (
+            <EventCard key={event.id} event={event} />
           ))}
-        </View>
-
-        <Text style={styles.sectionTitle}>This month</Text>
-        {eventsThisMonth.map((event) => (
-          <EventCard key={event.id} event={event} monthShort={MONTH_NAMES[event.month].slice(0, 3).toUpperCase()} />
-        ))}
-        {eventsThisMonth.length === 0 && <Text style={styles.noEvents}>No events this month.</Text>}
-      </ScrollView>
+          {eventsThisMonth.length === 0 && <Text style={styles.noEvents}>No events this month.</Text>}
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
 
-function EventCard({ event, monthShort }: { event: CalendarEvent; monthShort: string }) {
-  const { bg, text } = categoryStyle[event.category];
+function EventCard({ event }: { event: MyCalendarEvent }) {
+  const { bg, text, label } = categoryStyle[event.event_type];
+  const date = new Date(event.event_date);
 
   return (
     <View style={styles.eventCard}>
       <View style={styles.eventDateCol}>
-        <Text style={styles.eventDay}>{event.day}</Text>
-        <Text style={styles.eventMonth}>{monthShort}</Text>
+        <Text style={styles.eventDay}>{date.getDate()}</Text>
+        <Text style={styles.eventMonth}>{MONTH_NAMES[date.getMonth()].slice(0, 3).toUpperCase()}</Text>
       </View>
       <View style={styles.eventInfo}>
         <Text style={styles.eventTitle}>{event.title}</Text>
-        <Text style={styles.eventWeekday}>{event.weekday}</Text>
+        <Text style={styles.eventWeekday}>{WEEKDAY_FULL[date.getDay()]}</Text>
       </View>
       <View style={[styles.eventBadge, { backgroundColor: bg }]}>
-        <Text style={[styles.eventBadgeText, { color: text }]}>{event.label}</Text>
+        <Text style={[styles.eventBadgeText, { color: text }]}>{label}</Text>
       </View>
     </View>
   );
@@ -208,6 +282,35 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
+  },
+  inlineLoading: {
+    paddingVertical: 48,
+    alignItems: "center",
+  },
+  errorNotice: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 48,
+    paddingHorizontal: 16,
+  },
+  errorNoticeText: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
+    textAlign: "center",
+  },
+  retryButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
   },
   calendarCard: {
     backgroundColor: "#fff",

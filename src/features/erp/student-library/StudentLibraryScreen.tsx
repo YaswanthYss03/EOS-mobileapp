@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Linking, View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -7,19 +7,18 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
+import { getApiErrorMessage } from "@/services/api/client";
 import {
-  maxBooksAllowed,
-  mockBorrowedBooks,
-  mockEbooks,
-  mockCatalogue,
-  mockHistory,
-  type BorrowedBook,
-  type Ebook,
-  type CatalogueItem,
-  type HistoryItem,
-} from "./data/mockStudentLibrary";
+  getMyBorrowRecords,
+  searchBooks,
+  searchEResources,
+  type EResource,
+  type LibraryBook,
+  type MyBorrowRecord,
+} from "@/services/api/library.api";
 
 type Tab = "borrowed" | "ebooks" | "search" | "history";
+type LoadStatus = "loading" | "success" | "error";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "borrowed", label: "Borrowed" },
@@ -28,23 +27,100 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "history", label: "History" },
 ];
 
-function matches(query: string, ...fields: string[]) {
-  if (!query.trim()) return true;
-  const q = query.trim().toLowerCase();
-  return fields.some((field) => field.toLowerCase().includes(q));
+function daysUntil(dateOnly: string): number {
+  const ms = new Date(dateOnly).getTime() - new Date().setHours(0, 0, 0, 0);
+  return Math.round(ms / 86400000);
 }
 
-// TODO: this is a view-only library screen over mockStudentLibrary - wire to
-// a real library backend endpoint once one exists. Reachable from the
-// Student dashboard's Campus "Library" item.
+function formatShortDate(dateOnly: string): string {
+  return new Date(dateOnly).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function formatFileSize(bytes: number | null): string | null {
+  if (!bytes) return null;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Wired to EOS-backend's library module: GET /me/library/borrow-records
+// (student-only, self-scoped) for Borrowed/History, GET /library/books and
+// GET /library/e-resources (shared catalogue reads) for Search/E-books.
+// Reachable from the Student dashboard's Campus "Library" item.
 export function StudentLibraryScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
   const [tab, setTab] = useState<Tab>("borrowed");
+
+  const [borrowedStatus, setBorrowedStatus] = useState<LoadStatus>("loading");
+  const [borrowed, setBorrowed] = useState<MyBorrowRecord[]>([]);
+
+  const [historyStatus, setHistoryStatus] = useState<LoadStatus>("loading");
+  const [history, setHistory] = useState<MyBorrowRecord[]>([]);
+
   const [ebookQuery, setEbookQuery] = useState("");
+  const [ebookStatus, setEbookStatus] = useState<LoadStatus>("loading");
+  const [ebooks, setEbooks] = useState<EResource[]>([]);
+
   const [catalogueQuery, setCatalogueQuery] = useState("");
+  const [catalogueStatus, setCatalogueStatus] = useState<LoadStatus>("loading");
+  const [catalogue, setCatalogue] = useState<LibraryBook[]>([]);
+
+  const loadBorrowed = useCallback(() => {
+    setBorrowedStatus("loading");
+    getMyBorrowRecords("borrowed")
+      .then((rows) => {
+        setBorrowed(rows);
+        setBorrowedStatus("success");
+      })
+      .catch(() => setBorrowedStatus("error"));
+  }, []);
+
+  const loadHistory = useCallback(() => {
+    setHistoryStatus("loading");
+    getMyBorrowRecords("returned")
+      .then((rows) => {
+        setHistory(rows);
+        setHistoryStatus("success");
+      })
+      .catch(() => setHistoryStatus("error"));
+  }, []);
+
+  useEffect(() => {
+    loadBorrowed();
+  }, [loadBorrowed]);
+
+  useEffect(() => {
+    if (tab === "history" && historyStatus === "loading" && history.length === 0) {
+      loadHistory();
+    }
+  }, [tab, historyStatus, history.length, loadHistory]);
+
+  useEffect(() => {
+    setEbookStatus("loading");
+    const handle = setTimeout(() => {
+      searchEResources(ebookQuery)
+        .then((rows) => {
+          setEbooks(rows);
+          setEbookStatus("success");
+        })
+        .catch(() => setEbookStatus("error"));
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [ebookQuery]);
+
+  useEffect(() => {
+    setCatalogueStatus("loading");
+    const handle = setTimeout(() => {
+      searchBooks(catalogueQuery)
+        .then((rows) => {
+          setCatalogue(rows);
+          setCatalogueStatus("success");
+        })
+        .catch(() => setCatalogueStatus("error"));
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [catalogueQuery]);
 
   useFocusEffect(
     useCallback(() => {
@@ -55,29 +131,16 @@ export function StudentLibraryScreen() {
     }, [navigation]),
   );
 
-  const overdueCount = useMemo(
-    () => mockBorrowedBooks.filter((b) => b.status === "overdue").length,
-    [],
-  );
+  const overdueCount = useMemo(() => borrowed.filter((b) => daysUntil(b.due_date) < 0).length, [borrowed]);
 
   const nextDueShort = useMemo(() => {
-    const upcoming = mockBorrowedBooks.filter((b) => b.status !== "overdue");
+    const upcoming = borrowed.filter((b) => daysUntil(b.due_date) >= 0);
     if (upcoming.length === 0) return "—";
     const earliest = upcoming.reduce((soonest, book) =>
-      new Date(book.dueDate).getTime() < new Date(soonest.dueDate).getTime() ? book : soonest,
+      new Date(book.due_date).getTime() < new Date(soonest.due_date).getTime() ? book : soonest,
     );
-    return earliest.dueDate.split(" ").slice(0, 2).join(" ");
-  }, []);
-
-  const filteredEbooks = useMemo(
-    () => mockEbooks.filter((book) => matches(ebookQuery, book.title, book.author)),
-    [ebookQuery],
-  );
-
-  const filteredCatalogue = useMemo(
-    () => mockCatalogue.filter((item) => matches(catalogueQuery, item.title, item.author)),
-    [catalogueQuery],
-  );
+    return formatShortDate(earliest.due_date);
+  }, [borrowed]);
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
@@ -100,17 +163,15 @@ export function StudentLibraryScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.statsCard}>
           <View style={styles.statsCol}>
-            <Text style={styles.statsValue}>
-              {mockBorrowedBooks.length} of {maxBooksAllowed}
-            </Text>
+            <Text style={styles.statsValue}>{borrowedStatus === "success" ? borrowed.length : "—"}</Text>
             <Text style={styles.statsLabel}>Books issued</Text>
           </View>
           <View style={styles.statsCol}>
-            <Text style={styles.statsValue}>{nextDueShort}</Text>
+            <Text style={styles.statsValue}>{borrowedStatus === "success" ? nextDueShort : "—"}</Text>
             <Text style={styles.statsLabel}>Next due</Text>
           </View>
           <View style={styles.statsCol}>
-            <Text style={styles.statsValue}>{overdueCount}</Text>
+            <Text style={styles.statsValue}>{borrowedStatus === "success" ? overdueCount : "—"}</Text>
             <Text style={styles.statsLabel}>Overdue</Text>
           </View>
         </View>
@@ -129,19 +190,36 @@ export function StudentLibraryScreen() {
           ))}
         </View>
 
-        {tab === "borrowed" &&
-          mockBorrowedBooks.map((book) => <BorrowedCard key={book.id} book={book} />)}
+        {tab === "borrowed" && (
+          <AsyncSection
+            status={borrowedStatus}
+            onRetry={loadBorrowed}
+            emptyText="You have no books borrowed right now."
+            isEmpty={borrowed.length === 0}
+          >
+            {borrowed.map((book) => (
+              <BorrowedCard key={book.id} book={book} />
+            ))}
+          </AsyncSection>
+        )}
 
         {tab === "ebooks" && (
           <>
             <SearchBar
-              placeholder="Search e-books by title or author"
+              placeholder="Search e-books by title"
               value={ebookQuery}
               onChangeText={setEbookQuery}
             />
-            {filteredEbooks.map((book) => (
-              <EbookCard key={book.id} book={book} />
-            ))}
+            <AsyncSection
+              status={ebookStatus}
+              onRetry={() => searchEResources(ebookQuery).then(setEbooks).catch(() => setEbookStatus("error"))}
+              emptyText="No e-books found."
+              isEmpty={ebooks.length === 0}
+            >
+              {ebooks.map((book) => (
+                <EbookCard key={book.id} book={book} />
+              ))}
+            </AsyncSection>
           </>
         )}
 
@@ -152,16 +230,71 @@ export function StudentLibraryScreen() {
               value={catalogueQuery}
               onChangeText={setCatalogueQuery}
             />
-            {filteredCatalogue.map((item) => (
-              <CatalogueCard key={item.id} item={item} />
-            ))}
+            <AsyncSection
+              status={catalogueStatus}
+              onRetry={() => searchBooks(catalogueQuery).then(setCatalogue).catch(() => setCatalogueStatus("error"))}
+              emptyText="No books found."
+              isEmpty={catalogue.length === 0}
+            >
+              {catalogue.map((item) => (
+                <CatalogueCard key={item.id} item={item} />
+              ))}
+            </AsyncSection>
           </>
         )}
 
-        {tab === "history" && mockHistory.map((item) => <HistoryCard key={item.id} item={item} />)}
+        {tab === "history" && (
+          <AsyncSection
+            status={historyStatus}
+            onRetry={loadHistory}
+            emptyText="No return history yet."
+            isEmpty={history.length === 0}
+          >
+            {history.map((item) => (
+              <HistoryCard key={item.id} item={item} />
+            ))}
+          </AsyncSection>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+function AsyncSection({
+  status,
+  onRetry,
+  emptyText,
+  isEmpty,
+  children,
+}: {
+  status: LoadStatus;
+  onRetry: () => void;
+  emptyText: string;
+  isEmpty: boolean;
+  children: React.ReactNode;
+}) {
+  if (status === "loading") {
+    return (
+      <View style={styles.inlineLoading}>
+        <ActivityIndicator color="#2F6FE0" />
+      </View>
+    );
+  }
+  if (status === "error") {
+    return (
+      <View style={styles.errorNotice}>
+        <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+        <Text style={styles.errorNoticeText}>Something went wrong.</Text>
+        <TouchableOpacity onPress={onRetry} style={styles.retryButton} activeOpacity={0.8}>
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+  if (isEmpty) {
+    return <Text style={styles.emptyText}>{emptyText}</Text>;
+  }
+  return <>{children}</>;
 }
 
 function SearchBar({
@@ -187,60 +320,59 @@ function SearchBar({
   );
 }
 
-function BorrowedCard({ book }: { book: BorrowedBook }) {
-  const badgeLabel =
-    book.status === "overdue" ? "Overdue" : book.status === "on-time" ? "On time" : `Due in ${book.dueInDays} days`;
+function BorrowedCard({ book }: { book: MyBorrowRecord }) {
+  const days = daysUntil(book.due_date);
+  const isOverdue = days < 0;
+  const badgeLabel = isOverdue ? "Overdue" : `Due in ${days} day${days === 1 ? "" : "s"}`;
 
   return (
     <View style={styles.card}>
       <View style={styles.borrowedHeaderRow}>
         <Text style={styles.borrowedTitle}>{book.title}</Text>
-        <View style={[styles.statusBadge, book.status === "overdue" && styles.statusBadgeOverdue]}>
-          <Text style={[styles.statusBadgeText, book.status === "overdue" && styles.statusBadgeTextOverdue]}>
-            {badgeLabel}
-          </Text>
+        <View style={[styles.statusBadge, isOverdue && styles.statusBadgeOverdue]}>
+          <Text style={[styles.statusBadgeText, isOverdue && styles.statusBadgeTextOverdue]}>{badgeLabel}</Text>
         </View>
       </View>
-      <Text style={styles.borrowedSubtitle}>
-        {book.author} · {book.code} · {book.accNo}
-      </Text>
+      <Text style={styles.borrowedSubtitle}>{book.author ?? "Author not listed"}</Text>
       <View style={styles.divider} />
-      <Text style={styles.borrowedDueDate}>Due {book.dueDate}</Text>
+      <Text style={styles.borrowedDueDate}>Due {formatShortDate(book.due_date)}</Text>
     </View>
   );
 }
 
-function EbookCard({ book }: { book: Ebook }) {
+function EbookCard({ book }: { book: EResource }) {
+  const sizeLabel = formatFileSize(book.file_size_bytes);
+  const subtitleParts = [book.format, sizeLabel, book.license_type].filter(Boolean);
+
   return (
-    <View style={styles.listCard}>
+    <TouchableOpacity style={styles.listCard} onPress={() => Linking.openURL(book.url)} activeOpacity={0.8}>
       <View style={styles.listIconWrap}>
         <Ionicons name="book-outline" size={18} color="#2F6FE0" />
       </View>
       <View style={styles.listTextWrap}>
         <Text style={styles.listTitle}>{book.title}</Text>
-        <Text style={styles.listSubtitle}>
-          {book.author} · {book.format}
-          {book.sizeMb > 0 ? ` · ${book.sizeMb} MB` : ""} · {book.publisher}
-        </Text>
+        <Text style={styles.listSubtitle}>{subtitleParts.join(" · ") || "E-resource"}</Text>
       </View>
-      <Text style={styles.listAction}>{book.actionLabel}</Text>
-    </View>
+      <Text style={styles.listAction}>Open</Text>
+    </TouchableOpacity>
   );
 }
 
-function CatalogueCard({ item }: { item: CatalogueItem }) {
+function CatalogueCard({ item }: { item: LibraryBook }) {
   return (
     <View style={styles.card}>
       <Text style={styles.borrowedTitle}>{item.title}</Text>
       <Text style={styles.borrowedSubtitle}>
-        {item.author} · {item.shelf} · {item.code}
+        {item.author ?? "Author not listed"} · {item.rack?.rack_code ?? "Not shelved"} · {item.qr_code}
       </Text>
-      <Text style={styles.availabilityText}>{item.availability}</Text>
+      <Text style={styles.availabilityText}>
+        {item.available_copies} of {item.total_copies} available
+      </Text>
     </View>
   );
 }
 
-function HistoryCard({ item }: { item: HistoryItem }) {
+function HistoryCard({ item }: { item: MyBorrowRecord }) {
   return (
     <View style={styles.listCard}>
       <View style={styles.listIconWrap}>
@@ -249,11 +381,12 @@ function HistoryCard({ item }: { item: HistoryItem }) {
       <View style={styles.listTextWrap}>
         <Text style={styles.listTitle}>{item.title}</Text>
         <Text style={styles.listSubtitle}>
-          {item.author} · Issued {item.issuedOn} · returned {item.returnedOn}
+          {item.author ?? "Author not listed"} · Issued {formatShortDate(item.borrowed_date)}
+          {item.returned_date ? ` · returned ${formatShortDate(item.returned_date)}` : ""}
         </Text>
       </View>
       <View style={styles.statusBadge}>
-        <Text style={styles.statusBadgeText}>{item.fine ? `Returned · ₹${item.fine} fine` : "Returned"}</Text>
+        <Text style={styles.statusBadgeText}>Returned</Text>
       </View>
     </View>
   );
@@ -289,6 +422,40 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
+  },
+  inlineLoading: {
+    paddingVertical: 32,
+    alignItems: "center",
+  },
+  errorNotice: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 32,
+  },
+  errorNoticeText: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
+  },
+  retryButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+  },
+  emptyText: {
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    color: "#9AA6B2",
+    textAlign: "center",
+    marginTop: 16,
   },
   statsCard: {
     flexDirection: "row",

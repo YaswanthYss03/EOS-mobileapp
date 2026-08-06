@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { View, Text, ScrollView, TouchableOpacity, Modal, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -8,19 +8,56 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
-import { purposes, copyTypeInfo, type CopyType } from "./data/mockStudentBonafide";
+import { getApiErrorMessage } from "@/services/api/client";
+import {
+  listBonafideReasons,
+  createMyBonafideRequest,
+  type BonafideReason,
+} from "@/services/api/bonafide.api";
 
-// TODO: this is a request-only UI over mockStudentBonafide - wire to a real
-// certificates backend endpoint once one exists. Reachable from the Student
-// dashboard's Campus "Bonafide" item.
+type CopyType = "signed" | "unsigned";
+
+const copyTypeInfo: Record<CopyType, { label: string; description: string }> = {
+  signed: {
+    label: "Signed copy",
+    description: "Digitally signed by the HoD and the principal · issued as a verified PDF",
+  },
+  unsigned: {
+    label: "Unsigned copy",
+    description: "Plain draft for your review · collect the signed copy from the office",
+  },
+};
+
+// Wired to GET /bonafide-reasons + POST /me/bonafide-requests. "Copy type"
+// has no backing column anywhere in the schema (bonafide_requests only has
+// reason_id/status/issued_at/file_url), so it stays a client-only choice,
+// not sent with the request. Reachable from the Student dashboard's Campus
+// "Bonafide" item.
 export function StudentBonafideScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [purpose, setPurpose] = useState<string | null>(null);
+  const [reasonsStatus, setReasonsStatus] = useState<"loading" | "success" | "error">("loading");
+  const [reasons, setReasons] = useState<BonafideReason[]>([]);
+  const [purpose, setPurpose] = useState<BonafideReason | null>(null);
   const [purposePickerOpen, setPurposePickerOpen] = useState(false);
   const [copyType, setCopyType] = useState<CopyType>("signed");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const loadReasons = useCallback(() => {
+    setReasonsStatus("loading");
+    listBonafideReasons()
+      .then((response) => {
+        setReasons(response);
+        setReasonsStatus("success");
+      })
+      .catch(() => setReasonsStatus("error"));
+  }, []);
+
+  useEffect(() => {
+    loadReasons();
+  }, [loadReasons]);
 
   useFocusEffect(
     useCallback(() => {
@@ -31,14 +68,30 @@ export function StudentBonafideScreen() {
     }, [navigation]),
   );
 
+  function openPurposePicker() {
+    if (reasonsStatus === "error") {
+      toast.info("Retrying...");
+      loadReasons();
+      return;
+    }
+    setPurposePickerOpen(true);
+  }
+
   function handleRequest() {
     if (!purpose) {
       toast.warning("Select a purpose");
       return;
     }
-    toast.success(`${copyTypeInfo[copyType].label} requested for ${purpose.toLowerCase()}`);
-    setPurpose(null);
-    setCopyType("signed");
+
+    setIsSubmitting(true);
+    createMyBonafideRequest(purpose.id)
+      .then((request) => {
+        toast.success(`${copyTypeInfo[copyType].label} requested for ${request.reason_text.toLowerCase()}`);
+        setPurpose(null);
+        setCopyType("signed");
+      })
+      .catch((err) => toast.error(getApiErrorMessage(err, "Couldn't submit the request.")))
+      .finally(() => setIsSubmitting(false));
   }
 
   return (
@@ -63,10 +116,12 @@ export function StudentBonafideScreen() {
         <Text style={styles.fieldLabel}>Purpose</Text>
         <TouchableOpacity
           style={styles.purposeSelectRow}
-          onPress={() => setPurposePickerOpen(true)}
+          onPress={openPurposePicker}
           activeOpacity={0.8}
         >
-          <Text style={styles.purposeSelectValue}>{purpose ?? "Select a purpose"}</Text>
+          <Text style={styles.purposeSelectValue}>
+            {purpose?.reason_text ?? (reasonsStatus === "loading" ? "Loading purposes…" : "Select a purpose")}
+          </Text>
           <Ionicons name="chevron-down" size={18} color="#2F6FE0" />
         </TouchableOpacity>
 
@@ -92,7 +147,12 @@ export function StudentBonafideScreen() {
           );
         })}
 
-        <TouchableOpacity style={styles.submitButton} onPress={handleRequest} activeOpacity={0.85}>
+        <TouchableOpacity
+          style={styles.submitButton}
+          onPress={handleRequest}
+          activeOpacity={0.85}
+          disabled={isSubmitting}
+        >
           <Text style={styles.submitButtonText}>Request certificate</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -119,11 +179,11 @@ export function StudentBonafideScreen() {
                   setPurposePickerOpen(false);
                 }}
               />
-              {purposes.map((option) => (
+              {reasons.map((option) => (
                 <SheetOptionRow
-                  key={option}
-                  label={option}
-                  selected={purpose === option}
+                  key={option.id}
+                  label={option.reason_text}
+                  selected={purpose?.id === option.id}
                   onPress={() => {
                     setPurpose(option);
                     setPurposePickerOpen(false);
