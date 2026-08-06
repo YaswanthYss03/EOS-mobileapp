@@ -23,6 +23,17 @@ export async function getMyTimetable(): Promise<MyTimetableDay[]> {
   return data.data.days;
 }
 
+// GET /me/faculty-timetable (Faculty/HoD) - see
+// EOS-backend/src/modules/faculty/timetable/timetable.service.ts
+// findFullWeekForFaculty(). GET /me/timetable above is student-only
+// (@Roles(ROLES.STUDENT)); this is the separate faculty/HoD self-scoped
+// equivalent, returning the exact same MyTimetableDay[] shape so it's a
+// drop-in for the shared TimetableScreen.
+export async function getMyTimetableAsFaculty(): Promise<MyTimetableDay[]> {
+  const { data } = await apiClient.get<{ data: { days: MyTimetableDay[] } }>("/me/faculty-timetable");
+  return data.data.days;
+}
+
 // GET /me/lms-notes?subject_id= is a shared Faculty/Student read (see
 // EOS-backend/src/modules/faculty/lms-notes/lms-notes.controller.ts - the
 // controller's own doc comments say "/lms-notes" but it's actually
@@ -41,4 +52,32 @@ export async function getLmsNoteCountForSubject(subjectId: number): Promise<numb
 export async function getMyClassSection(): Promise<string | null> {
   const { data } = await apiClient.get<{ data: { class_section: string | null } }>("/me/profile");
   return data.data.class_section;
+}
+
+// GET /me/current-semester (Faculty/HoD) - see
+// EOS-backend/src/modules/faculty/timetable/timetable.service.ts
+// getCurrentSemesterForFaculty(). One row per (subject, class) combo the
+// faculty teaches for their most recent academic_year - unlike a student, a
+// faculty member can teach the same subject to several sections at once, so
+// this is intentionally NOT deduplicated by subject_id.
+export type MyFacultySubject = {
+  subject_id: number;
+  subject_code: string;
+  subject_name: string;
+  class_id: number;
+  section: string;
+  semester: number | null;
+  hours_per_week: number;
+  tasks: number;
+  materials: number;
+};
+
+export type MyFacultyCurrentSemester = {
+  academic_year: string | null;
+  subjects: MyFacultySubject[];
+};
+
+export async function getMyCurrentSemesterAsFaculty(): Promise<MyFacultyCurrentSemester> {
+  const { data } = await apiClient.get<{ data: MyFacultyCurrentSemester }>("/me/current-semester");
+  return data.data;
 }

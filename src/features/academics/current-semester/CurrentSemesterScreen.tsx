@@ -7,11 +7,18 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
-import { getMyTimetable, getLmsNoteCountForSubject, getMyClassSection } from "@/services/api/current-semester.api";
+import { useRole } from "@/hooks/useRole";
+import {
+  getMyTimetable,
+  getLmsNoteCountForSubject,
+  getMyClassSection,
+  getMyCurrentSemesterAsFaculty,
+} from "@/services/api/current-semester.api";
 import { listMyAssignmentStatuses } from "@/services/api/no-due.api";
 
 type Subject = {
   id: number;
+  classId: number | null;
   code: string;
   name: string;
   section: string | null;
@@ -62,20 +69,26 @@ function CurrentSemesterHeader({ onBack, semester, subjectCount }: { onBack: () 
 // Wired to GET /me/timetable (real per-subject weekly period counts) +
 // GET /student-assignment-status (real per-subject assignment counts) + GET
 // /lms-notes?subject_id= (real per-subject material counts) + GET /me/profile
-// (class_section). timetable_slots has no "room" column at all, so room is
-// dropped rather than fabricated.
+// (class_section) for STUDENTS. Faculty/HoD app users reach this exact same
+// screen (see AcademicsChooserScreen - "same for hod, faculty and student")
+// but have no linked student record at all, so they're wired to a separate
+// self-scoped GET /me/current-semester instead, which returns one row per
+// (subject, class) combo the faculty teaches - a faculty member can teach
+// the same subject to several sections, so section now varies per row
+// instead of being one fixed value repeated on every card. timetable_slots
+// has no "room" column at all, so room is dropped rather than fabricated.
 export function CurrentSemesterScreen() {
   const router = useRouter();
   const navigation = useNavigation();
+  const role = useRole();
 
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [semester, setSemester] = useState<number | null>(null);
 
-  const load = useCallback(() => {
-    setStatus("loading");
-    Promise.all([getMyTimetable(), listMyAssignmentStatuses(), getMyClassSection().catch(() => null)])
-      .then(async ([days, statusRows, section]) => {
+  const loadForStudent = useCallback(() => {
+    return Promise.all([getMyTimetable(), listMyAssignmentStatuses(), getMyClassSection().catch(() => null)]).then(
+      async ([days, statusRows, section]) => {
         const bySubject = new Map<number, Subject>();
 
         for (const day of days) {
@@ -84,6 +97,7 @@ export function CurrentSemesterScreen() {
               bySubject.get(slot.subject.id) ??
               ({
                 id: slot.subject.id,
+                classId: null,
                 code: slot.subject.subject_code,
                 name: slot.subject.name,
                 section,
@@ -105,6 +119,7 @@ export function CurrentSemesterScreen() {
             bySubject.get(subjectId) ??
             ({
               id: subjectId,
+              classId: null,
               code: row.assignment.subject.subject_code,
               name: row.assignment.subject.name,
               section,
@@ -133,11 +148,32 @@ export function CurrentSemesterScreen() {
 
         setSubjects(withMaterials);
         setSemester(resolvedSemester);
-        setStatus("success");
-      })
-      .catch(() => setStatus("error"));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      },
+    );
   }, []);
+
+  const loadForFaculty = useCallback(() => {
+    return getMyCurrentSemesterAsFaculty().then((response) => {
+      const mapped: Subject[] = response.subjects.map((subject) => ({
+        id: subject.subject_id,
+        classId: subject.class_id,
+        code: subject.subject_code,
+        name: subject.subject_name,
+        section: subject.section,
+        materials: subject.materials,
+        tasks: subject.tasks,
+        hoursPerWeek: subject.hours_per_week,
+      }));
+      setSubjects(mapped);
+      setSemester(response.subjects[0]?.semester ?? null);
+    });
+  }, []);
+
+  const load = useCallback(() => {
+    setStatus("loading");
+    const request = role === "student" ? loadForStudent() : loadForFaculty();
+    request.then(() => setStatus("success")).catch(() => setStatus("error"));
+  }, [role, loadForStudent, loadForFaculty]);
 
   useEffect(() => {
     load();
@@ -180,7 +216,9 @@ export function CurrentSemesterScreen() {
           {subjects.length === 0 ? (
             <Text style={styles.emptyText}>No subjects scheduled yet.</Text>
           ) : (
-            subjects.map((subject) => <SubjectCard key={subject.id} subject={subject} />)
+            subjects.map((subject) => (
+              <SubjectCard key={`${subject.id}-${subject.classId ?? ""}`} subject={subject} />
+            ))
           )}
         </ScrollView>
       )}

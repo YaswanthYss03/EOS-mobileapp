@@ -7,7 +7,13 @@ import { useRouter } from "expo-router";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "@/theme";
-import { getMyTimetable, type MyTimetableDay, type MyTimetableSlot } from "@/services/api/current-semester.api";
+import { useRole } from "@/hooks/useRole";
+import {
+  getMyTimetable,
+  getMyTimetableAsFaculty,
+  type MyTimetableDay,
+  type MyTimetableSlot,
+} from "@/services/api/current-semester.api";
 
 const DAY_SHORT = ["", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const DAY_FULL = ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -102,15 +108,18 @@ function TimetableHeader({
   );
 }
 
-// Wired to GET /me/timetable (real weekly schedule for the student's own
-// class). timetable_slots has no room column and no way to distinguish a
-// "lab" period from a regular class, so only real scheduled periods are
-// shown - no fabricated "free period" gap-filling, no Labs count, no room
-// badge. The day strip now shows the actual current week's real dates
-// instead of a pinned mock week.
+// Wired to GET /me/timetable for STUDENTS (real weekly schedule for the
+// student's own class) and GET /me/faculty-timetable for Faculty/HoD app
+// users, who reach this exact same screen (see AcademicsChooserScreen -
+// "same for hod, faculty and student"). timetable_slots has no room column
+// and no way to distinguish a "lab" period from a regular class, so only
+// real scheduled periods are shown - no fabricated "free period" gap-filling,
+// no Labs count, no room badge. The day strip shows the actual current
+// week's real dates instead of a pinned mock week.
 export function TimetableScreen() {
   const router = useRouter();
   const navigation = useNavigation();
+  const role = useRole();
 
   const weekDates = useMemo(() => getCurrentWeekDates(), []);
   const todayDow = useMemo(() => new Date().getDay(), []);
@@ -122,13 +131,14 @@ export function TimetableScreen() {
 
   const load = useCallback(() => {
     setStatus("loading");
-    getMyTimetable()
+    const request = role === "student" ? getMyTimetable() : getMyTimetableAsFaculty();
+    request
       .then((response) => {
         setDays(response);
         setStatus("success");
       })
       .catch(() => setStatus("error"));
-  }, []);
+  }, [role]);
 
   useEffect(() => {
     load();

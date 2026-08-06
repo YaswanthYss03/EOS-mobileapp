@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -10,30 +10,41 @@ import { fonts } from "@/theme";
 import { mockProfile } from "@/features/profile/data/mockProfile";
 import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES } from "@/utils/calendar";
 import {
-  attendanceStats,
-  mockAttendanceMarks,
-  defaultViewMonth,
-  type AttendanceDayStatus,
-} from "./data/mockMyAttendance";
+  getMyStaffAttendance,
+  type MyStaffAttendanceResponse,
+  type StaffAttendanceDayStatus,
+} from "@/services/api/staff-attendance.api";
 
-const STATUS_STYLES: Record<AttendanceDayStatus, { bg: string; text: string }> = {
+type LoadStatus = "loading" | "success" | "error";
+
+const STATUS_STYLES: Record<StaffAttendanceDayStatus, { bg: string; text: string }> = {
   present: { bg: "#fff", text: "#111827" },
   absent: { bg: "#FEE2E2", text: "#DC2626" },
   onDuty: { bg: "#E4EBFB", text: "#2F6FE0" },
   holiday: { bg: "#F1F0FB", text: "#8B85C4" },
 };
 
-// TODO: this is a view-only calendar over mockMyAttendance - wire to a real
-// attendance backend endpoint once one exists. This is the logged-in
-// employee's OWN attendance (Employee section), not the "Student Attendance"
-// marking screen an employee/HoD uses for their class (see erp/attendance).
-// Reachable from both the Employee/Faculty and HoD dashboards.
+function pad2(value: number): string {
+  return value < 10 ? `0${value}` : `${value}`;
+}
+
+// Wired to GET /me/staff-attendance. This is the logged-in employee's OWN
+// attendance (Employee section), not the "Student Attendance" marking screen
+// an employee/HoD uses for their class (see erp/attendance). Reachable from
+// both the Employee/Faculty and HoD dashboards. Each day reads the real
+// faculty_daily_attendance record when one exists, falling back to a
+// best-effort derivation from approved leaves and opted-in holiday slots
+// otherwise - see staff-attendance.api.ts for details.
 export function MyAttendanceScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [viewYear, setViewYear] = useState(defaultViewMonth.year);
-  const [viewMonth, setViewMonth] = useState(defaultViewMonth.month);
+  const today = useMemo(() => new Date(), []);
+  const [viewYear, setViewYear] = useState(today.getFullYear());
+  const [viewMonth, setViewMonth] = useState(today.getMonth());
+
+  const [status, setStatus] = useState<LoadStatus>("loading");
+  const [attendance, setAttendance] = useState<MyStaffAttendanceResponse | null>(null);
 
   // This screen renders its own full header below, so hide the shared
   // CollegeHeader while it's focused - same pattern as the other ERP
@@ -46,6 +57,20 @@ export function MyAttendanceScreen() {
       };
     }, [navigation]),
   );
+
+  const load = useCallback(() => {
+    setStatus("loading");
+    getMyStaffAttendance(viewYear, viewMonth + 1)
+      .then((response) => {
+        setAttendance(response);
+        setStatus("success");
+      })
+      .catch(() => setStatus("error"));
+  }, [viewYear, viewMonth]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const weeks = useMemo(() => getCalendarWeeks(viewYear, viewMonth), [viewYear, viewMonth]);
 
@@ -67,8 +92,9 @@ export function MyAttendanceScreen() {
     }
   }
 
-  function statusFor(day: number): AttendanceDayStatus {
-    return mockAttendanceMarks[`${viewYear}-${viewMonth}-${day}`] ?? "present";
+  function statusFor(day: number): StaffAttendanceDayStatus {
+    const key = `${viewYear}-${pad2(viewMonth + 1)}-${pad2(day)}`;
+    return attendance?.marks[key] ?? "present";
   }
 
   return (
@@ -94,71 +120,89 @@ export function MyAttendanceScreen() {
         </View>
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.statsRow}>
-          <View style={styles.statBox}>
-            <Text style={styles.statValue}>{attendanceStats.present}</Text>
-            <Text style={styles.statLabel}>PRESENT</Text>
-          </View>
-          <View style={styles.statBox}>
-            <Text style={[styles.statValue, styles.statValueAbsent]}>{attendanceStats.absent}</Text>
-            <Text style={styles.statLabel}>ABSENT</Text>
-          </View>
-          <View style={styles.statBox}>
-            <Text style={[styles.statValue, styles.statValueOnDuty]}>{attendanceStats.onDuty}</Text>
-            <Text style={styles.statLabel}>ON DUTY</Text>
-          </View>
-          <View style={styles.statBox}>
-            <Text style={styles.statValue}>{attendanceStats.overallPercent}%</Text>
-            <Text style={styles.statLabel}>OVERALL</Text>
-          </View>
+      {status === "loading" && (
+        <View style={styles.inlineLoading}>
+          <ActivityIndicator color="#2F6FE0" />
         </View>
+      )}
 
-        <View style={styles.calendarCard}>
-          <View style={styles.calendarNav}>
-            <TouchableOpacity onPress={goToPreviousMonth} style={styles.navButton} hitSlop={8}>
-              <Ionicons name="chevron-back" size={18} color="#2F6FE0" />
-            </TouchableOpacity>
-            <Text style={styles.calendarMonthLabel}>
-              {MONTH_NAMES[viewMonth]} {viewYear}
-            </Text>
-            <TouchableOpacity onPress={goToNextMonth} style={styles.navButton} hitSlop={8}>
-              <Ionicons name="chevron-forward" size={18} color="#2F6FE0" />
-            </TouchableOpacity>
-          </View>
+      {status === "error" && (
+        <View style={styles.errorNotice}>
+          <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+          <Text style={styles.errorNoticeText}>Couldn't load your attendance.</Text>
+          <TouchableOpacity onPress={load} style={styles.retryButton} activeOpacity={0.8}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
-          <View style={styles.weekdayRow}>
-            {WEEKDAY_LABELS.map((label, index) => (
-              <Text key={index} style={styles.weekdayLabel}>
-                {label}
-              </Text>
-            ))}
-          </View>
-
-          {weeks.map((week, weekIndex) => (
-            <View key={weekIndex} style={styles.weekRow}>
-              {week.map((day, dayIndex) => {
-                if (day === null) {
-                  return <View key={dayIndex} style={styles.dayCell} />;
-                }
-                const { bg, text } = STATUS_STYLES[statusFor(day)];
-                return (
-                  <View key={dayIndex} style={[styles.dayCell, styles.dayCellBox, { backgroundColor: bg }]}>
-                    <Text style={[styles.dayCellText, { color: text }]}>{day}</Text>
-                  </View>
-                );
-              })}
+      {status === "success" && attendance && (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <View style={styles.statsRow}>
+            <View style={styles.statBox}>
+              <Text style={styles.statValue}>{attendance.stats.present}</Text>
+              <Text style={styles.statLabel}>PRESENT</Text>
             </View>
-          ))}
-
-          <View style={styles.legendRow}>
-            <LegendItem color="#fff" borderColor="#E5E7EB" label="Present" />
-            <LegendItem color="#FEE2E2" label="Absent" />
-            <LegendItem color="#E4EBFB" label="On Duty" />
-            <LegendItem color="#F1F0FB" label="Holiday" />
+            <View style={styles.statBox}>
+              <Text style={[styles.statValue, styles.statValueAbsent]}>{attendance.stats.absent}</Text>
+              <Text style={styles.statLabel}>ABSENT</Text>
+            </View>
+            <View style={styles.statBox}>
+              <Text style={[styles.statValue, styles.statValueOnDuty]}>{attendance.stats.onDuty}</Text>
+              <Text style={styles.statLabel}>ON DUTY</Text>
+            </View>
+            <View style={styles.statBox}>
+              <Text style={styles.statValue}>{attendance.stats.overallPercent}%</Text>
+              <Text style={styles.statLabel}>OVERALL</Text>
+            </View>
           </View>
-        </View>
-      </ScrollView>
+
+          <View style={styles.calendarCard}>
+            <View style={styles.calendarNav}>
+              <TouchableOpacity onPress={goToPreviousMonth} style={styles.navButton} hitSlop={8}>
+                <Ionicons name="chevron-back" size={18} color="#2F6FE0" />
+              </TouchableOpacity>
+              <Text style={styles.calendarMonthLabel}>
+                {MONTH_NAMES[viewMonth]} {viewYear}
+              </Text>
+              <TouchableOpacity onPress={goToNextMonth} style={styles.navButton} hitSlop={8}>
+                <Ionicons name="chevron-forward" size={18} color="#2F6FE0" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.weekdayRow}>
+              {WEEKDAY_LABELS.map((label, index) => (
+                <Text key={index} style={styles.weekdayLabel}>
+                  {label}
+                </Text>
+              ))}
+            </View>
+
+            {weeks.map((week, weekIndex) => (
+              <View key={weekIndex} style={styles.weekRow}>
+                {week.map((day, dayIndex) => {
+                  if (day === null) {
+                    return <View key={dayIndex} style={styles.dayCell} />;
+                  }
+                  const { bg, text } = STATUS_STYLES[statusFor(day)];
+                  return (
+                    <View key={dayIndex} style={[styles.dayCell, styles.dayCellBox, { backgroundColor: bg }]}>
+                      <Text style={[styles.dayCellText, { color: text }]}>{day}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            ))}
+
+            <View style={styles.legendRow}>
+              <LegendItem color="#fff" borderColor="#E5E7EB" label="Present" />
+              <LegendItem color="#FEE2E2" label="Absent" />
+              <LegendItem color="#E4EBFB" label="On Duty" />
+              <LegendItem color="#F1F0FB" label="Holiday" />
+            </View>
+          </View>
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
@@ -208,6 +252,35 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
+  },
+  inlineLoading: {
+    paddingVertical: 48,
+    alignItems: "center",
+  },
+  errorNotice: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 48,
+    paddingHorizontal: 16,
+  },
+  errorNoticeText: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
+    textAlign: "center",
+  },
+  retryButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
   },
   statsRow: {
     flexDirection: "row",

@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -8,32 +8,74 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
+import { getApiErrorMessage } from "@/services/api/client";
+import {
+  createFacultyLeave,
+  listFacultyLeaves,
+  type MyFacultyLeave,
+} from "@/services/api/faculty-leaves.api";
 import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, formatDate } from "@/utils/calendar";
-import { leaveBalance, leaveTypes, mockLeaveHistory, type MyLeaveRequest } from "./data/mockLeaveRequest";
+import { leaveBalance } from "./data/mockLeaveRequest";
 
 type Tab = "apply" | "history";
 type DateField = "start" | "end" | null;
+type LoadStatus = "loading" | "success" | "error";
 
-// TODO: this is an apply+history UI over mockLeaveRequest - wire to a real
-// leave-management backend endpoint once one exists. This is the logged-in
-// employee's OWN leave application (Employee section), not the HoD's
-// approval view of student/faculty leave (see erp/leave). Reachable from
-// both the Employee/Faculty and HoD dashboards.
+const REASON_MAX = 255;
+
+function toDateOnly(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+// Wired to POST /me/create-leaves and GET /me/faculty-leaves (real
+// faculty_leaves rows, two-stage HoD-then-HR approval collapsed into a
+// single overall_status). This is the logged-in employee's OWN leave
+// application (Employee section), not the HoD's approval view of
+// student/faculty leave (see erp/leave). Reachable from both the
+// Employee/Faculty and HoD dashboards. There is no leave_type column and no
+// leave-balance/quota concept in the schema - the balance cards below stay
+// static UI only, and the Leave Type picker was removed since it has nothing
+// real to submit.
 export function LeaveRequestScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
+  const today = useMemo(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  }, []);
+
   const [tab, setTab] = useState<Tab>("apply");
-  const [leaveType, setLeaveType] = useState(leaveTypes[0]);
-  const [typePickerOpen, setTypePickerOpen] = useState(false);
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
   const [reason, setReason] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [datePickerFor, setDatePickerFor] = useState<DateField>(null);
-  const [pickerYear, setPickerYear] = useState(2026);
-  const [pickerMonth, setPickerMonth] = useState(7); // August (0-indexed)
-  const [history, setHistory] = useState(mockLeaveHistory);
+  const [pickerYear, setPickerYear] = useState(today.getFullYear());
+  const [pickerMonth, setPickerMonth] = useState(today.getMonth());
+
+  const [historyStatus, setHistoryStatus] = useState<LoadStatus>("loading");
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [history, setHistory] = useState<MyFacultyLeave[]>([]);
+
+  const loadHistory = useCallback(() => {
+    setHistoryStatus("loading");
+    setHistoryError(null);
+    listFacultyLeaves()
+      .then((response) => {
+        setHistory(response);
+        setHistoryStatus("success");
+      })
+      .catch((err) => {
+        setHistoryError(getApiErrorMessage(err, "Couldn't load your leave history."));
+        setHistoryStatus("error");
+      });
+  }, []);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
 
   // This screen renders its own full header below, so hide the shared
   // CollegeHeader while it's focused - same pattern as the other ERP
@@ -72,8 +114,13 @@ export function LeaveRequestScreen() {
     }
   }
 
+  function isBeforeToday(date: Date): boolean {
+    return date < today;
+  }
+
   function handlePickDate(day: number) {
     const picked = new Date(pickerYear, pickerMonth, day);
+    if (isBeforeToday(picked)) return;
     if (datePickerFor === "start") {
       setStartDate(picked);
       if (endDate && endDate < picked) setEndDate(picked);
@@ -88,7 +135,6 @@ export function LeaveRequestScreen() {
   }
 
   function resetForm() {
-    setLeaveType(leaveTypes[0]);
     setStartDate(null);
     setEndDate(null);
     setReason("");
@@ -103,20 +149,25 @@ export function LeaveRequestScreen() {
       toast.warning("Add a reason for your leave");
       return;
     }
-    const newRequest: MyLeaveRequest = {
-      id: `local-${history.length}-${Date.now()}`,
-      leaveType,
-      fromDate: formatDate(startDate),
-      toDate: formatDate(endDate),
-      days,
+
+    setIsSubmitting(true);
+    createFacultyLeave({
+      from_date: toDateOnly(startDate),
+      to_date: toDateOnly(endDate),
       reason: reason.trim(),
-      status: "pending",
-      appliedOn: formatDate(new Date()),
-    };
-    setHistory((prev) => [newRequest, ...prev]);
-    toast.success("Leave application submitted");
-    resetForm();
-    setTab("history");
+    })
+      .then(() => {
+        toast.success("Leave application submitted");
+        resetForm();
+        setTab("history");
+        loadHistory();
+      })
+      .catch((err) => {
+        toast.error(getApiErrorMessage(err, "Couldn't submit your leave application."));
+      })
+      .finally(() => {
+        setIsSubmitting(false);
+      });
   }
 
   return (
@@ -168,16 +219,6 @@ export function LeaveRequestScreen() {
           <>
             <Text style={styles.sectionTitle}>Apply Leave</Text>
             <View style={styles.card}>
-              <Text style={styles.fieldLabel}>Leave Type</Text>
-              <TouchableOpacity
-                style={styles.selectRow}
-                onPress={() => setTypePickerOpen(true)}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.selectValue}>{leaveType}</Text>
-                <Ionicons name="chevron-down" size={18} color="#B0B7C3" />
-              </TouchableOpacity>
-
               <View style={styles.dateRow}>
                 <View style={styles.dateCol}>
                   <Text style={styles.fieldLabel}>Start Date</Text>
@@ -213,13 +254,16 @@ export function LeaveRequestScreen() {
                 </Text>
               )}
 
-              <Text style={styles.fieldLabel}>Reason</Text>
+              <Text style={styles.fieldLabel}>
+                Reason ({reason.length}/{REASON_MAX})
+              </Text>
               <TextInput
                 style={[styles.input, styles.textArea]}
                 placeholder="Reason for leave"
                 placeholderTextColor="#9AA6B2"
                 value={reason}
-                onChangeText={setReason}
+                onChangeText={(text) => setReason(text.slice(0, REASON_MAX))}
+                maxLength={REASON_MAX}
                 multiline
               />
 
@@ -228,11 +272,32 @@ export function LeaveRequestScreen() {
                 <Text style={styles.attachButtonText}>Attachment (optional)</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.submitButton} onPress={handleSubmit} activeOpacity={0.85}>
-                <Text style={styles.submitButtonText}>Submit Application</Text>
+              <TouchableOpacity
+                style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
+                onPress={handleSubmit}
+                activeOpacity={0.85}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.submitButtonText}>Submit Application</Text>
+                )}
               </TouchableOpacity>
             </View>
           </>
+        ) : historyStatus === "loading" ? (
+          <View style={styles.inlineLoading}>
+            <ActivityIndicator color="#2F6FE0" />
+          </View>
+        ) : historyStatus === "error" ? (
+          <View style={styles.errorNotice}>
+            <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+            <Text style={styles.errorNoticeText}>{historyError ?? "Something went wrong."}</Text>
+            <TouchableOpacity onPress={loadHistory} style={styles.retryButton} activeOpacity={0.8}>
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
         ) : history.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
@@ -242,33 +307,6 @@ export function LeaveRequestScreen() {
           history.map((item) => <HistoryCard key={item.id} item={item} />)
         )}
       </ScrollView>
-
-      <Modal
-        visible={typePickerOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setTypePickerOpen(false)}
-      >
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setTypePickerOpen(false)}>
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>Leave Type</Text>
-            {leaveTypes.map((type) => (
-              <TouchableOpacity
-                key={type}
-                style={styles.modalOptionRow}
-                onPress={() => {
-                  setLeaveType(type);
-                  setTypePickerOpen(false);
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.modalOptionName}>{type}</Text>
-                {leaveType === type && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
-              </TouchableOpacity>
-            ))}
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
 
       <Modal
         visible={datePickerFor !== null}
@@ -304,9 +342,15 @@ export function LeaveRequestScreen() {
                   if (day === null) {
                     return <View key={dayIndex} style={styles.dayCell} />;
                   }
+                  const disabled = isBeforeToday(new Date(pickerYear, pickerMonth, day));
                   return (
-                    <TouchableOpacity key={dayIndex} style={styles.dayCell} onPress={() => handlePickDate(day)}>
-                      <Text style={styles.dayCellText}>{day}</Text>
+                    <TouchableOpacity
+                      key={dayIndex}
+                      style={styles.dayCell}
+                      onPress={() => handlePickDate(day)}
+                      disabled={disabled}
+                    >
+                      <Text style={[styles.dayCellText, disabled && styles.dayCellTextDisabled]}>{day}</Text>
                     </TouchableOpacity>
                   );
                 })}
@@ -319,34 +363,35 @@ export function LeaveRequestScreen() {
   );
 }
 
-function HistoryCard({ item }: { item: MyLeaveRequest }) {
+function HistoryCard({ item }: { item: MyFacultyLeave }) {
+  const status = item.overall_status;
   return (
     <View style={styles.historyCard}>
       <View style={styles.historyHeader}>
-        <Text style={styles.historyType}>{item.leaveType}</Text>
+        <Text style={styles.historyType}>Leave Request</Text>
         <View
           style={[
             styles.statusBadge,
-            item.status === "approved" && styles.statusBadgeApproved,
-            item.status === "rejected" && styles.statusBadgeRejected,
+            status === "approved" && styles.statusBadgeApproved,
+            status === "rejected" && styles.statusBadgeRejected,
           ]}
         >
           <Text
             style={[
               styles.statusBadgeText,
-              item.status === "approved" && styles.statusBadgeTextApproved,
-              item.status === "rejected" && styles.statusBadgeTextRejected,
+              status === "approved" && styles.statusBadgeTextApproved,
+              status === "rejected" && styles.statusBadgeTextRejected,
             ]}
           >
-            {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+            {status.charAt(0).toUpperCase() + status.slice(1)}
           </Text>
         </View>
       </View>
       <Text style={styles.historyDates}>
-        {item.fromDate} → {item.toDate} · {item.days} day{item.days > 1 ? "s" : ""}
+        {formatDate(new Date(item.from_date))} → {formatDate(new Date(item.to_date))}
       </Text>
-      <Text style={styles.historyReason}>{item.reason}</Text>
-      <Text style={styles.historyAppliedOn}>Applied on {item.appliedOn}</Text>
+      {item.reason && <Text style={styles.historyReason}>{item.reason}</Text>}
+      <Text style={styles.historyAppliedOn}>Applied on {formatDate(new Date(item.created_at))}</Text>
     </View>
   );
 }
@@ -732,5 +777,41 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: fonts.semibold,
     color: "#111827",
+  },
+  dayCellTextDisabled: {
+    color: "#D1D5DB",
+  },
+  inlineLoading: {
+    paddingVertical: 48,
+    alignItems: "center",
+  },
+  errorNotice: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 48,
+    paddingHorizontal: 16,
+  },
+  errorNoticeText: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
+    textAlign: "center",
+    paddingHorizontal: 12,
+  },
+  retryButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+  },
+  submitButtonDisabled: {
+    backgroundColor: "#B7CBE6",
   },
 });

@@ -7,8 +7,10 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
+import { useRole } from "@/hooks/useRole";
 import {
   getMyAcademicCalendar,
+  getMyAcademicCalendarAsFaculty,
   type CalendarEventType,
   type MyAcademicCalendar,
   type MyCalendarEvent,
@@ -50,14 +52,18 @@ function formatShortMonthYear(dateOnly: string): string {
 
 function AcademicCalendarHeader({ onBack, calendar }: { onBack: () => void; calendar: MyAcademicCalendar | null }) {
   const insets = useSafeAreaInsets();
+  const range =
+    calendar?.start_date && calendar?.end_date
+      ? `${formatShortMonthYear(calendar.start_date)} – ${formatShortMonthYear(calendar.end_date)}`
+      : null;
+  // A faculty member teaching into several semesters at once has no single
+  // semester number to show (see getMergedAcademicCalendarForFaculty) - the
+  // real merged date range is still shown on its own rather than a
+  // fabricated "Semester N".
   const subtitle =
     calendar?.semester !== null && calendar?.semester !== undefined
-      ? `Semester ${calendar.semester}${
-          calendar.start_date && calendar.end_date
-            ? ` · ${formatShortMonthYear(calendar.start_date)} – ${formatShortMonthYear(calendar.end_date)}`
-            : ""
-        }`
-      : "Academic calendar";
+      ? `Semester ${calendar.semester}${range ? ` · ${range}` : ""}`
+      : range ?? "Academic calendar";
 
   return (
     <LinearGradient
@@ -81,12 +87,18 @@ function AcademicCalendarHeader({ onBack, calendar }: { onBack: () => void; cale
   );
 }
 
-// Wired to GET /me/academic-calendar (real calendar_events for the
-// student's own batch + current semester). Only "holiday"/"event" types
-// exist in the schema - there is no "review"/"exam" category to show.
+// Wired to GET /me/academic-calendar for STUDENTS (real calendar_events for
+// the student's own batch + current semester) and GET
+// /me/faculty-academic-calendar for Faculty/HoD app users, who reach this
+// exact same screen (see AcademicsChooserScreen - "same for hod, faculty and
+// student"). A faculty member can teach into several distinct batch+semester
+// calendars at once, so their events are merged/deduped server-side - see
+// getMergedAcademicCalendarForFaculty. Only "holiday"/"event" types exist in
+// the schema - there is no "review"/"exam" category to show.
 export function AcademicCalendarScreen() {
   const router = useRouter();
   const navigation = useNavigation();
+  const role = useRole();
 
   const today = useMemo(() => new Date(), []);
   const [viewYear, setViewYear] = useState(today.getFullYear());
@@ -97,13 +109,14 @@ export function AcademicCalendarScreen() {
 
   const load = useCallback(() => {
     setStatus("loading");
-    getMyAcademicCalendar()
+    const request = role === "student" ? getMyAcademicCalendar() : getMyAcademicCalendarAsFaculty();
+    request
       .then((response) => {
         setCalendar(response);
         setStatus("success");
       })
       .catch(() => setStatus("error"));
-  }, []);
+  }, [role]);
 
   useEffect(() => {
     load();

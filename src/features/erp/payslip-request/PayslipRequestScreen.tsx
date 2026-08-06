@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, Linking, View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -9,15 +9,41 @@ import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { formatDate } from "@/utils/calendar";
-import { months, years, mockPayslipHistory, type PayslipRequest } from "./data/mockPayslipRequest";
+import { getApiErrorMessage } from "@/services/api/client";
+import {
+  createPayslipRequest,
+  listMyPayslipRequests,
+  type MyPayslipRequest,
+} from "@/services/api/payslip-requests.api";
+import { months, years } from "./data/mockPayslipRequest";
 
 type Tab = "apply" | "history";
 type PickerField = "month" | "year" | null;
+type LoadStatus = "loading" | "success" | "error";
 
-// TODO: this is an apply+history UI over mockPayslipRequest - wire to a real
-// payroll backend endpoint once one exists. Reachable from the
-// Employee-section "Payslip" item on both the Employee/Faculty and HoD
-// dashboards.
+const STATUS_LABEL: Record<MyPayslipRequest["status"], string> = {
+  pending: "Pending",
+  processed: "Approved",
+  rejected: "Rejected",
+};
+
+function monthLabelFor(monthString: string): string {
+  const [yearStr, monthStr] = monthString.split("-");
+  const monthName = months[Number(monthStr) - 1] ?? monthStr;
+  return `${monthName} ${yearStr}`;
+}
+
+const PURPOSE_MAX = 255;
+
+// Wired to POST /me/payslip-requests and GET /me/payslip-requests (real
+// payslip_requests rows). Reachable from the Employee-section "Payslip" item
+// on both the Employee/Faculty and HoD dashboards. There is no "remarks"
+// column or any financial figures on this entity - only month, an optional
+// purpose, status, and (once processed) a file_url. The real status enum is
+// pending/processed/rejected ("processed" is shown as "Approved" to match
+// this screen's existing badge). The download button opens the real
+// file_url once HR has processed the request; there is no download for a
+// request that hasn't been processed.
 export function PayslipRequestScreen() {
   const navigation = useNavigation();
   const router = useRouter();
@@ -28,8 +54,29 @@ export function PayslipRequestScreen() {
   const [year, setYear] = useState("2026");
   const [pickerFor, setPickerFor] = useState<PickerField>(null);
   const [purpose, setPurpose] = useState("");
-  const [remarks, setRemarks] = useState("");
-  const [history, setHistory] = useState(mockPayslipHistory);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [historyStatus, setHistoryStatus] = useState<LoadStatus>("loading");
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [history, setHistory] = useState<MyPayslipRequest[]>([]);
+
+  const loadHistory = useCallback(() => {
+    setHistoryStatus("loading");
+    setHistoryError(null);
+    listMyPayslipRequests()
+      .then((response) => {
+        setHistory(response);
+        setHistoryStatus("success");
+      })
+      .catch((err) => {
+        setHistoryError(getApiErrorMessage(err, "Couldn't load your payslip requests."));
+        setHistoryStatus("error");
+      });
+  }, []);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
 
   // This screen renders its own full header below, so hide the shared
   // CollegeHeader while it's focused - same pattern as the other ERP
@@ -43,14 +90,15 @@ export function PayslipRequestScreen() {
     }, [navigation]),
   );
 
-  function handleDownload(item: PayslipRequest) {
-    toast.info(`Downloading ${item.monthLabel} payslip is coming soon`);
+  function handleDownload(item: MyPayslipRequest) {
+    if (item.file_url) {
+      Linking.openURL(item.file_url);
+    }
   }
 
   function resetForm() {
     setMonth(null);
     setPurpose("");
-    setRemarks("");
   }
 
   function handleSubmit() {
@@ -58,22 +106,24 @@ export function PayslipRequestScreen() {
       toast.warning("Select a month");
       return;
     }
-    if (!purpose.trim()) {
-      toast.warning("Add a purpose for this request");
-      return;
-    }
-    const newRequest: PayslipRequest = {
-      id: `local-${history.length}-${Date.now()}`,
-      monthLabel: `${month} ${year}`,
-      requestedOn: formatDate(new Date()),
-      status: "pending",
-      purpose: purpose.trim(),
-      remarks: remarks.trim() || undefined,
-    };
-    setHistory((prev) => [newRequest, ...prev]);
-    toast.success("Payslip request submitted");
-    resetForm();
-    setTab("history");
+
+    const monthNumber = months.indexOf(month) + 1;
+    const monthString = `${year}-${String(monthNumber).padStart(2, "0")}`;
+
+    setIsSubmitting(true);
+    createPayslipRequest({ month: monthString, purpose: purpose.trim() || undefined })
+      .then(() => {
+        toast.success("Payslip request submitted");
+        resetForm();
+        setTab("history");
+        loadHistory();
+      })
+      .catch((err) => {
+        toast.error(getApiErrorMessage(err, "Couldn't submit your payslip request."));
+      })
+      .finally(() => {
+        setIsSubmitting(false);
+      });
   }
 
   return (
@@ -153,28 +203,40 @@ export function PayslipRequestScreen() {
                 placeholder="e.g. Home loan documentation"
                 placeholderTextColor="#9AA6B2"
                 value={purpose}
-                onChangeText={setPurpose}
+                onChangeText={(text) => setPurpose(text.slice(0, PURPOSE_MAX))}
+                maxLength={PURPOSE_MAX}
               />
 
-              <Text style={styles.fieldLabel}>Remarks</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                placeholder="Anything the accounts team should know"
-                placeholderTextColor="#9AA6B2"
-                value={remarks}
-                onChangeText={setRemarks}
-                multiline
-              />
-
-              <TouchableOpacity style={styles.submitButton} onPress={handleSubmit} activeOpacity={0.85}>
-                <Text style={styles.submitButtonText}>Submit Request</Text>
+              <TouchableOpacity
+                style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
+                onPress={handleSubmit}
+                activeOpacity={0.85}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.submitButtonText}>Submit Request</Text>
+                )}
               </TouchableOpacity>
             </View>
           </>
         ) : (
           <>
             <Text style={styles.sectionTitle}>Request History</Text>
-            {history.length === 0 ? (
+            {historyStatus === "loading" ? (
+              <View style={styles.inlineLoading}>
+                <ActivityIndicator color="#2F6FE0" />
+              </View>
+            ) : historyStatus === "error" ? (
+              <View style={styles.errorNotice}>
+                <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+                <Text style={styles.errorNoticeText}>{historyError ?? "Something went wrong."}</Text>
+                <TouchableOpacity onPress={loadHistory} style={styles.retryButton} activeOpacity={0.8}>
+                  <Text style={styles.retryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : history.length === 0 ? (
               <View style={styles.emptyState}>
                 <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
                 <Text style={styles.emptyStateText}>No payslip requests yet</Text>
@@ -224,33 +286,33 @@ export function PayslipRequestScreen() {
   );
 }
 
-function HistoryCard({ item, onDownload }: { item: PayslipRequest; onDownload: () => void }) {
+function HistoryCard({ item, onDownload }: { item: MyPayslipRequest; onDownload: () => void }) {
   return (
     <View style={styles.historyCard}>
       <View style={styles.historyTextWrap}>
-        <Text style={styles.historyMonth}>{item.monthLabel}</Text>
-        <Text style={styles.historyRequestedOn}>Requested {item.requestedOn}</Text>
+        <Text style={styles.historyMonth}>{monthLabelFor(item.month)}</Text>
+        <Text style={styles.historyRequestedOn}>Requested {formatDate(new Date(item.requested_at))}</Text>
       </View>
 
       <View
         style={[
           styles.statusBadge,
-          item.status === "approved" && styles.statusBadgeApproved,
+          item.status === "processed" && styles.statusBadgeApproved,
           item.status === "rejected" && styles.statusBadgeRejected,
         ]}
       >
         <Text
           style={[
             styles.statusBadgeText,
-            item.status === "approved" && styles.statusBadgeTextApproved,
+            item.status === "processed" && styles.statusBadgeTextApproved,
             item.status === "rejected" && styles.statusBadgeTextRejected,
           ]}
         >
-          {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+          {STATUS_LABEL[item.status]}
         </Text>
       </View>
 
-      {item.status === "approved" && (
+      {item.file_url && (
         <TouchableOpacity style={styles.downloadButton} onPress={onDownload} hitSlop={8}>
           <Ionicons name="download-outline" size={16} color="#2F6FE0" />
         </TouchableOpacity>
@@ -392,10 +454,6 @@ const styles = StyleSheet.create({
     color: "#111827",
     marginBottom: 16,
   },
-  textArea: {
-    height: 90,
-    textAlignVertical: "top",
-  },
   submitButton: {
     alignItems: "center",
     justifyContent: "center",
@@ -408,10 +466,43 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
   },
+  submitButtonDisabled: {
+    backgroundColor: "#B7CBE6",
+  },
   submitButtonText: {
     fontSize: 14,
     fontFamily: fonts.bold,
     color: "#fff",
+  },
+  inlineLoading: {
+    paddingVertical: 48,
+    alignItems: "center",
+  },
+  errorNotice: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 48,
+    paddingHorizontal: 16,
+  },
+  errorNoticeText: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
+    textAlign: "center",
+    paddingHorizontal: 12,
+  },
+  retryButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
   },
   historyCard: {
     flexDirection: "row",

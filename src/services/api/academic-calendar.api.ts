@@ -27,3 +27,16 @@ export async function getMyAcademicCalendar(): Promise<MyAcademicCalendar> {
   const { data } = await apiClient.get<{ data: MyAcademicCalendar }>("/me/academic-calendar");
   return data.data;
 }
+
+// GET /me/faculty-academic-calendar (Faculty/HoD) - see
+// EOS-backend/src/modules/faculty/timetable/timetable.service.ts
+// getMergedAcademicCalendarForFaculty(). GET /me/academic-calendar above is
+// student-only; a faculty member can teach into several distinct
+// (batch, semester) calendars at once, so this merges all of them into one
+// deduped events list. `semester` is only a single number when every
+// resolved calendar shares it - otherwise null (same MyAcademicCalendar
+// shape, so this is a drop-in for the shared AcademicCalendarScreen).
+export async function getMyAcademicCalendarAsFaculty(): Promise<MyAcademicCalendar> {
+  const { data } = await apiClient.get<{ data: MyAcademicCalendar }>("/me/faculty-academic-calendar");
+  return data.data;
+}

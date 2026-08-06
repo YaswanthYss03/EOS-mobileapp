@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -8,33 +8,71 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
+import { getApiErrorMessage } from "@/services/api/client";
+import { createFacultyOd, listFacultyOd, type MyFacultyOd } from "@/services/api/faculty-od.api";
 import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, formatDate } from "@/utils/calendar";
-import { odBalance, odTypes, mockOdHistory, type MyOdRequest } from "./data/mockOdRequest";
+import { odBalance } from "./data/mockOdRequest";
 
 type Tab = "apply" | "history";
 type DateField = "start" | "end" | null;
+type LoadStatus = "loading" | "success" | "error";
 
-// TODO: this is an apply+history UI over mockOdRequest - wire to a real
-// on-duty backend endpoint once one exists. This is the logged-in
-// employee's OWN on-duty application (Employee section), not the HoD's
-// approval view of student/faculty OD (see erp/od). Reachable from both
-// the Employee/Faculty and HoD dashboards.
+const PLACE_MAX = 255;
+const PURPOSE_MAX = 255;
+
+function toDateOnly(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+// Wired to POST /me/create-od and GET /me/faculty-od (real
+// faculty_od_requests rows, two-stage HoD-then-HR approval collapsed into a
+// single overall_status). This is the logged-in employee's OWN on-duty
+// application (Employee section), not the HoD's approval view of
+// student/faculty OD (see erp/od). Reachable from both the Employee/Faculty
+// and HoD dashboards. There is no od_type column and no OD-balance/quota
+// concept in the schema - the balance cards below stay static UI only, and
+// the OD Type picker was removed since it has nothing real to submit.
 export function OdRequestScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
+  const today = useMemo(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  }, []);
+
   const [tab, setTab] = useState<Tab>("apply");
-  const [odType, setOdType] = useState(odTypes[0]);
-  const [typePickerOpen, setTypePickerOpen] = useState(false);
   const [place, setPlace] = useState("");
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
   const [purpose, setPurpose] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [datePickerFor, setDatePickerFor] = useState<DateField>(null);
-  const [pickerYear, setPickerYear] = useState(2026);
-  const [pickerMonth, setPickerMonth] = useState(7); // August (0-indexed)
-  const [history, setHistory] = useState(mockOdHistory);
+  const [pickerYear, setPickerYear] = useState(today.getFullYear());
+  const [pickerMonth, setPickerMonth] = useState(today.getMonth());
+
+  const [historyStatus, setHistoryStatus] = useState<LoadStatus>("loading");
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [history, setHistory] = useState<MyFacultyOd[]>([]);
+
+  const loadHistory = useCallback(() => {
+    setHistoryStatus("loading");
+    setHistoryError(null);
+    listFacultyOd()
+      .then((response) => {
+        setHistory(response);
+        setHistoryStatus("success");
+      })
+      .catch((err) => {
+        setHistoryError(getApiErrorMessage(err, "Couldn't load your OD history."));
+        setHistoryStatus("error");
+      });
+  }, []);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
 
   // This screen renders its own full header below, so hide the shared
   // CollegeHeader while it's focused - same pattern as the other ERP
@@ -73,8 +111,13 @@ export function OdRequestScreen() {
     }
   }
 
+  function isBeforeToday(date: Date): boolean {
+    return date < today;
+  }
+
   function handlePickDate(day: number) {
     const picked = new Date(pickerYear, pickerMonth, day);
+    if (isBeforeToday(picked)) return;
     if (datePickerFor === "start") {
       setStartDate(picked);
       if (endDate && endDate < picked) setEndDate(picked);
@@ -89,7 +132,6 @@ export function OdRequestScreen() {
   }
 
   function resetForm() {
-    setOdType(odTypes[0]);
     setPlace("");
     setStartDate(null);
     setEndDate(null);
@@ -109,21 +151,26 @@ export function OdRequestScreen() {
       toast.warning("Add the purpose of your on-duty request");
       return;
     }
-    const newRequest: MyOdRequest = {
-      id: `local-${history.length}-${Date.now()}`,
-      odType,
+
+    setIsSubmitting(true);
+    createFacultyOd({
+      from_date: toDateOnly(startDate),
+      to_date: toDateOnly(endDate),
       place: place.trim(),
-      fromDate: formatDate(startDate),
-      toDate: formatDate(endDate),
-      days,
       purpose: purpose.trim(),
-      status: "pending",
-      appliedOn: formatDate(new Date()),
-    };
-    setHistory((prev) => [newRequest, ...prev]);
-    toast.success("On-duty request submitted");
-    resetForm();
-    setTab("history");
+    })
+      .then(() => {
+        toast.success("On-duty request submitted");
+        resetForm();
+        setTab("history");
+        loadHistory();
+      })
+      .catch((err) => {
+        toast.error(getApiErrorMessage(err, "Couldn't submit your on-duty request."));
+      })
+      .finally(() => {
+        setIsSubmitting(false);
+      });
   }
 
   return (
@@ -178,23 +225,14 @@ export function OdRequestScreen() {
           <>
             <Text style={styles.sectionTitle}>Apply On Duty</Text>
             <View style={styles.card}>
-              <Text style={styles.fieldLabel}>OD Type</Text>
-              <TouchableOpacity
-                style={styles.selectRow}
-                onPress={() => setTypePickerOpen(true)}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.selectValue}>{odType}</Text>
-                <Ionicons name="chevron-down" size={18} color="#B0B7C3" />
-              </TouchableOpacity>
-
               <Text style={styles.fieldLabel}>Place / Organisation</Text>
               <TextInput
                 style={styles.input}
                 placeholder="e.g. Anna University, Chennai"
                 placeholderTextColor="#9AA6B2"
                 value={place}
-                onChangeText={setPlace}
+                onChangeText={(text) => setPlace(text.slice(0, PLACE_MAX))}
+                maxLength={PLACE_MAX}
               />
 
               <View style={styles.dateRow}>
@@ -238,7 +276,8 @@ export function OdRequestScreen() {
                 placeholder="Purpose of the on-duty request"
                 placeholderTextColor="#9AA6B2"
                 value={purpose}
-                onChangeText={setPurpose}
+                onChangeText={(text) => setPurpose(text.slice(0, PURPOSE_MAX))}
+                maxLength={PURPOSE_MAX}
                 multiline
               />
 
@@ -247,11 +286,32 @@ export function OdRequestScreen() {
                 <Text style={styles.attachButtonText}>Attach supporting document (optional)</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.submitButton} onPress={handleSubmit} activeOpacity={0.85}>
-                <Text style={styles.submitButtonText}>Submit OD Request</Text>
+              <TouchableOpacity
+                style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
+                onPress={handleSubmit}
+                activeOpacity={0.85}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.submitButtonText}>Submit OD Request</Text>
+                )}
               </TouchableOpacity>
             </View>
           </>
+        ) : historyStatus === "loading" ? (
+          <View style={styles.inlineLoading}>
+            <ActivityIndicator color="#2F6FE0" />
+          </View>
+        ) : historyStatus === "error" ? (
+          <View style={styles.errorNotice}>
+            <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+            <Text style={styles.errorNoticeText}>{historyError ?? "Something went wrong."}</Text>
+            <TouchableOpacity onPress={loadHistory} style={styles.retryButton} activeOpacity={0.8}>
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
         ) : history.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
@@ -261,33 +321,6 @@ export function OdRequestScreen() {
           history.map((item) => <HistoryCard key={item.id} item={item} />)
         )}
       </ScrollView>
-
-      <Modal
-        visible={typePickerOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setTypePickerOpen(false)}
-      >
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setTypePickerOpen(false)}>
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>OD Type</Text>
-            {odTypes.map((type) => (
-              <TouchableOpacity
-                key={type}
-                style={styles.modalOptionRow}
-                onPress={() => {
-                  setOdType(type);
-                  setTypePickerOpen(false);
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.modalOptionName}>{type}</Text>
-                {odType === type && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
-              </TouchableOpacity>
-            ))}
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
 
       <Modal
         visible={datePickerFor !== null}
@@ -323,9 +356,15 @@ export function OdRequestScreen() {
                   if (day === null) {
                     return <View key={dayIndex} style={styles.dayCell} />;
                   }
+                  const disabled = isBeforeToday(new Date(pickerYear, pickerMonth, day));
                   return (
-                    <TouchableOpacity key={dayIndex} style={styles.dayCell} onPress={() => handlePickDate(day)}>
-                      <Text style={styles.dayCellText}>{day}</Text>
+                    <TouchableOpacity
+                      key={dayIndex}
+                      style={styles.dayCell}
+                      onPress={() => handlePickDate(day)}
+                      disabled={disabled}
+                    >
+                      <Text style={[styles.dayCellText, disabled && styles.dayCellTextDisabled]}>{day}</Text>
                     </TouchableOpacity>
                   );
                 })}
@@ -338,35 +377,36 @@ export function OdRequestScreen() {
   );
 }
 
-function HistoryCard({ item }: { item: MyOdRequest }) {
+function HistoryCard({ item }: { item: MyFacultyOd }) {
+  const status = item.overall_status;
   return (
     <View style={styles.historyCard}>
       <View style={styles.historyHeader}>
-        <Text style={styles.historyType}>{item.odType}</Text>
+        <Text style={styles.historyType}>On Duty Request</Text>
         <View
           style={[
             styles.statusBadge,
-            item.status === "approved" && styles.statusBadgeApproved,
-            item.status === "rejected" && styles.statusBadgeRejected,
+            status === "approved" && styles.statusBadgeApproved,
+            status === "rejected" && styles.statusBadgeRejected,
           ]}
         >
           <Text
             style={[
               styles.statusBadgeText,
-              item.status === "approved" && styles.statusBadgeTextApproved,
-              item.status === "rejected" && styles.statusBadgeTextRejected,
+              status === "approved" && styles.statusBadgeTextApproved,
+              status === "rejected" && styles.statusBadgeTextRejected,
             ]}
           >
-            {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+            {status.charAt(0).toUpperCase() + status.slice(1)}
           </Text>
         </View>
       </View>
-      <Text style={styles.historyPlace}>{item.place}</Text>
+      {item.place && <Text style={styles.historyPlace}>{item.place}</Text>}
       <Text style={styles.historyDates}>
-        {item.fromDate} → {item.toDate} · {item.days} day{item.days > 1 ? "s" : ""}
+        {formatDate(new Date(item.from_date))} → {formatDate(new Date(item.to_date))}
       </Text>
-      <Text style={styles.historyReason}>{item.purpose}</Text>
-      <Text style={styles.historyAppliedOn}>Applied on {item.appliedOn}</Text>
+      {item.purpose && <Text style={styles.historyReason}>{item.purpose}</Text>}
+      <Text style={styles.historyAppliedOn}>Applied on {formatDate(new Date(item.created_at))}</Text>
     </View>
   );
 }
@@ -764,5 +804,41 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: fonts.semibold,
     color: "#111827",
+  },
+  dayCellTextDisabled: {
+    color: "#D1D5DB",
+  },
+  inlineLoading: {
+    paddingVertical: 48,
+    alignItems: "center",
+  },
+  errorNotice: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 48,
+    paddingHorizontal: 16,
+  },
+  errorNoticeText: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
+    textAlign: "center",
+    paddingHorizontal: 12,
+  },
+  retryButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+  },
+  submitButtonDisabled: {
+    backgroundColor: "#B7CBE6",
   },
 });

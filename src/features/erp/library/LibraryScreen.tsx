@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TextInput, TouchableOpacity, Linking, StyleSheet } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, View, Text, ScrollView, TextInput, TouchableOpacity, Linking, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -8,16 +8,19 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
+import { getApiErrorMessage } from "@/services/api/client";
 import {
-  libraryInfo,
-  mockCatalogue,
-  eResources,
-  mockBorrowedBooks,
-  mockLibraryHistory,
-  type BorrowedBook,
-} from "./data/mockLibrary";
+  searchBooks,
+  searchEResources,
+  getMyFacultyBorrowRecords,
+  type LibraryBook,
+  type EResource,
+  type FacultyBorrowRecord,
+} from "@/services/api/library.api";
+import { libraryInfo } from "./data/mockLibrary";
 
 type Tab = "search" | "e-resources" | "borrowed" | "history";
+type LoadStatus = "loading" | "success" | "error";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "search", label: "Search" },
@@ -26,17 +29,98 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "history", label: "History" },
 ];
 
-// TODO: this is a view-only catalogue/borrowed/history UI over mockLibrary -
-// wire to a real library backend endpoint once one exists. Reachable from
-// the Employee-section "Library" item on both the Employee/Faculty and HoD
-// dashboards.
+function formatShortDate(dateOnly: string): string {
+  return new Date(dateOnly).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+// Wired to GET /library/books, GET /library/e-resources and GET
+// /library/borrow-records (real books/e_resources/book_borrow_records rows).
+// The borrow-records endpoint has no @Roles restriction and auto-scopes to
+// the caller's own faculty_id when role is faculty (distinct from the
+// student-only /me/library/borrow-records used by erp/student-library).
+// There is no faculty-callable renew/return action anywhere in the backend
+// (those mutations are library/admin only), so Renew shows an honest notice
+// instead of a fake success. Reachable from the Employee-section "Library"
+// item on both the Employee/Faculty and HoD dashboards.
 export function LibraryScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>("search");
   const [search, setSearch] = useState("");
-  const [borrowed, setBorrowed] = useState(mockBorrowedBooks);
+
+  const [catalogueStatus, setCatalogueStatus] = useState<LoadStatus>("loading");
+  const [catalogue, setCatalogue] = useState<LibraryBook[]>([]);
+
+  const [eResourcesStatus, setEResourcesStatus] = useState<LoadStatus>("loading");
+  const [resources, setResources] = useState<EResource[]>([]);
+
+  const [borrowedStatus, setBorrowedStatus] = useState<LoadStatus>("loading");
+  const [borrowedError, setBorrowedError] = useState<string | null>(null);
+  const [borrowed, setBorrowed] = useState<FacultyBorrowRecord[]>([]);
+
+  const [historyStatus, setHistoryStatus] = useState<LoadStatus>("loading");
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [history, setHistory] = useState<FacultyBorrowRecord[]>([]);
+
+  useEffect(() => {
+    setCatalogueStatus("loading");
+    const handle = setTimeout(() => {
+      searchBooks(search)
+        .then((rows) => {
+          setCatalogue(rows);
+          setCatalogueStatus("success");
+        })
+        .catch(() => setCatalogueStatus("error"));
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [search]);
+
+  useEffect(() => {
+    setEResourcesStatus("loading");
+    searchEResources("")
+      .then((rows) => {
+        setResources(rows);
+        setEResourcesStatus("success");
+      })
+      .catch(() => setEResourcesStatus("error"));
+  }, []);
+
+  const loadBorrowed = useCallback(() => {
+    setBorrowedStatus("loading");
+    setBorrowedError(null);
+    getMyFacultyBorrowRecords("borrowed")
+      .then((rows) => {
+        setBorrowed(rows);
+        setBorrowedStatus("success");
+      })
+      .catch((err) => {
+        setBorrowedError(getApiErrorMessage(err, "Couldn't load your borrowed books."));
+        setBorrowedStatus("error");
+      });
+  }, []);
+
+  const loadHistory = useCallback(() => {
+    setHistoryStatus("loading");
+    setHistoryError(null);
+    getMyFacultyBorrowRecords("returned")
+      .then((rows) => {
+        setHistory(rows);
+        setHistoryStatus("success");
+      })
+      .catch((err) => {
+        setHistoryError(getApiErrorMessage(err, "Couldn't load your library history."));
+        setHistoryStatus("error");
+      });
+  }, []);
+
+  useEffect(() => {
+    loadBorrowed();
+  }, [loadBorrowed]);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
 
   // This screen renders its own full header below, so hide the shared
   // CollegeHeader while it's focused - same pattern as the other ERP
@@ -50,26 +134,12 @@ export function LibraryScreen() {
     }, [navigation]),
   );
 
-  const filteredCatalogue = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return mockCatalogue;
-    return mockCatalogue.filter(
-      (book) =>
-        book.title.toLowerCase().includes(query) ||
-        book.author.toLowerCase().includes(query) ||
-        book.category.toLowerCase().includes(query),
-    );
-  }, [search]);
-
-  function handleOpenResource(url: string, name: string) {
-    Linking.openURL(url).catch(() => toast.error(`Couldn't open ${name}`));
+  function handleOpenResource(url: string, title: string) {
+    Linking.openURL(url).catch(() => toast.error(`Couldn't open ${title}`));
   }
 
-  function handleRenew(book: BorrowedBook) {
-    setBorrowed((prev) =>
-      prev.map((item) => (item.id === book.id ? { ...item, status: "active" } : item)),
-    );
-    toast.success(`${book.title} renewed for 14 more days`);
+  function handleRenew() {
+    toast.info("Renewals must be requested at the library desk");
   }
 
   return (
@@ -124,112 +194,170 @@ export function LibraryScreen() {
             </View>
 
             <Text style={styles.sectionTitle}>Catalogue</Text>
-            {filteredCatalogue.map((book) => (
-              <View key={book.id} style={styles.card}>
-                <Text style={styles.bookTitle}>{book.title}</Text>
-                <Text style={styles.bookAuthor}>
-                  {book.author} · {book.category}
-                </Text>
-                <Text style={[styles.bookMeta, !book.inStock && styles.bookMetaOutOfStock]}>
-                  {book.code} · {book.availability}
-                </Text>
-              </View>
-            ))}
-
-            {filteredCatalogue.length === 0 && (
-              <View style={styles.emptyState}>
-                <Ionicons name="search-outline" size={32} color="#B0B7C3" />
-                <Text style={styles.emptyStateText}>No books match "{search}"</Text>
-              </View>
-            )}
+            <AsyncSection
+              status={catalogueStatus}
+              onRetry={() => searchBooks(search).then(setCatalogue).catch(() => setCatalogueStatus("error"))}
+              emptyText={search ? `No books match "${search}"` : "No books found."}
+              isEmpty={catalogue.length === 0}
+            >
+              {catalogue.map((book) => (
+                <View key={book.id} style={styles.card}>
+                  <Text style={styles.bookTitle}>{book.title}</Text>
+                  <Text style={styles.bookAuthor}>
+                    {book.author ?? "Unknown author"} · {book.category_name}
+                  </Text>
+                  <Text style={[styles.bookMeta, book.available_copies === 0 && styles.bookMetaOutOfStock]}>
+                    {book.qr_code} · {book.available_copies === 0
+                      ? "out of stock"
+                      : `${book.available_copies} cop${book.available_copies === 1 ? "y" : "ies"} free`}
+                  </Text>
+                </View>
+              ))}
+            </AsyncSection>
           </>
         )}
 
         {tab === "e-resources" && (
           <>
             <Text style={styles.sectionTitle}>E-Resources</Text>
-            {eResources.map((resource) => (
-              <TouchableOpacity
-                key={resource.id}
-                style={styles.card}
-                onPress={() => handleOpenResource(resource.url, resource.name)}
-                activeOpacity={0.8}
-              >
-                <View style={styles.eResourceRow}>
-                  <View style={styles.eResourceTextWrap}>
-                    <Text style={styles.bookTitle}>{resource.name}</Text>
-                    <Text style={styles.bookAuthor}>{resource.description}</Text>
+            <AsyncSection
+              status={eResourcesStatus}
+              onRetry={() => searchEResources("").then(setResources).catch(() => setEResourcesStatus("error"))}
+              emptyText="No e-resources available."
+              isEmpty={resources.length === 0}
+            >
+              {resources.map((resource) => (
+                <TouchableOpacity
+                  key={resource.id}
+                  style={styles.card}
+                  onPress={() => handleOpenResource(resource.url, resource.title)}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.eResourceRow}>
+                    <View style={styles.eResourceTextWrap}>
+                      <Text style={styles.bookTitle}>{resource.title}</Text>
+                      <Text style={styles.bookAuthor}>{resource.format ?? "Link"}</Text>
+                    </View>
+                    <Ionicons name="open-outline" size={18} color="#2F6FE0" />
                   </View>
-                  <Ionicons name="open-outline" size={18} color="#2F6FE0" />
-                </View>
-              </TouchableOpacity>
-            ))}
+                </TouchableOpacity>
+              ))}
+            </AsyncSection>
           </>
         )}
 
         {tab === "borrowed" && (
           <>
             <Text style={styles.sectionTitle}>Borrowed Books</Text>
-            {borrowed.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Ionicons name="library-outline" size={32} color="#B0B7C3" />
-                <Text style={styles.emptyStateText}>Nothing borrowed right now</Text>
-              </View>
-            ) : (
-              borrowed.map((book) => (
+            <AsyncSection
+              status={borrowedStatus}
+              onRetry={loadBorrowed}
+              errorText={borrowedError}
+              emptyText="Nothing borrowed right now"
+              emptyIcon="library-outline"
+              isEmpty={borrowed.length === 0}
+            >
+              {borrowed.map((book) => (
                 <View key={book.id} style={styles.card}>
                   <View style={styles.borrowedHeader}>
-                    <Text style={styles.bookTitle}>{book.title}</Text>
-                    <View style={[styles.statusBadge, book.status === "overdue" && styles.statusBadgeOverdue]}>
+                    <Text style={styles.bookTitle}>{book.book.title}</Text>
+                    <View style={[styles.statusBadge, book.is_overdue && styles.statusBadgeOverdue]}>
                       <Text
-                        style={[styles.statusBadgeText, book.status === "overdue" && styles.statusBadgeTextOverdue]}
+                        style={[styles.statusBadgeText, book.is_overdue && styles.statusBadgeTextOverdue]}
                       >
-                        {book.status === "overdue" ? "Overdue" : "Active"}
+                        {book.is_overdue ? "Overdue" : "Active"}
                       </Text>
                     </View>
                   </View>
-                  <Text style={styles.bookAuthor}>{book.author}</Text>
                   <Text style={styles.bookMeta}>
-                    Borrowed {book.borrowedOn} · Due {book.dueDate}
+                    Borrowed {formatShortDate(book.borrowed_date)} · Due {formatShortDate(book.due_date)}
                   </Text>
                   <TouchableOpacity
                     style={styles.renewButton}
-                    onPress={() => handleRenew(book)}
+                    onPress={handleRenew}
                     activeOpacity={0.85}
                   >
                     <Ionicons name="refresh-outline" size={14} color="#2F6FE0" />
                     <Text style={styles.renewButtonText}>Renew</Text>
                   </TouchableOpacity>
                 </View>
-              ))
-            )}
+              ))}
+            </AsyncSection>
           </>
         )}
 
         {tab === "history" && (
           <>
             <Text style={styles.sectionTitle}>Return History</Text>
-            {mockLibraryHistory.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
-                <Text style={styles.emptyStateText}>No history yet</Text>
-              </View>
-            ) : (
-              mockLibraryHistory.map((entry) => (
+            <AsyncSection
+              status={historyStatus}
+              onRetry={loadHistory}
+              errorText={historyError}
+              emptyText="No history yet"
+              emptyIcon="checkmark-done-outline"
+              isEmpty={history.length === 0}
+            >
+              {history.map((entry) => (
                 <View key={entry.id} style={styles.card}>
-                  <Text style={styles.bookTitle}>{entry.title}</Text>
-                  <Text style={styles.bookAuthor}>{entry.author}</Text>
+                  <Text style={styles.bookTitle}>{entry.book.title}</Text>
                   <Text style={styles.bookMeta}>
-                    Borrowed {entry.borrowedOn} · Returned {entry.returnedOn}
+                    Borrowed {formatShortDate(entry.borrowed_date)}
+                    {entry.returned_date ? ` · Returned ${formatShortDate(entry.returned_date)}` : ""}
                   </Text>
                 </View>
-              ))
-            )}
+              ))}
+            </AsyncSection>
           </>
         )}
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+function AsyncSection({
+  status,
+  onRetry,
+  errorText,
+  emptyText,
+  emptyIcon = "search-outline",
+  isEmpty,
+  children,
+}: {
+  status: LoadStatus;
+  onRetry: () => void;
+  errorText?: string | null;
+  emptyText: string;
+  emptyIcon?: keyof typeof Ionicons.glyphMap;
+  isEmpty: boolean;
+  children: React.ReactNode;
+}) {
+  if (status === "loading") {
+    return (
+      <View style={styles.inlineLoading}>
+        <ActivityIndicator color="#2F6FE0" />
+      </View>
+    );
+  }
+  if (status === "error") {
+    return (
+      <View style={styles.errorNotice}>
+        <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+        <Text style={styles.errorNoticeText}>{errorText ?? "Something went wrong."}</Text>
+        <TouchableOpacity onPress={onRetry} style={styles.retryButton} activeOpacity={0.8}>
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+  if (isEmpty) {
+    return (
+      <View style={styles.emptyState}>
+        <Ionicons name={emptyIcon} size={32} color="#B0B7C3" />
+        <Text style={styles.emptyStateText}>{emptyText}</Text>
+      </View>
+    );
+  }
+  return <>{children}</>;
 }
 
 const styles = StyleSheet.create({
@@ -412,5 +540,35 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: fonts.medium,
     color: "#9AA6B2",
+  },
+  inlineLoading: {
+    paddingVertical: 40,
+    alignItems: "center",
+  },
+  errorNotice: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 40,
+    paddingHorizontal: 16,
+  },
+  errorNoticeText: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
+    textAlign: "center",
+    paddingHorizontal: 12,
+  },
+  retryButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
   },
 });
