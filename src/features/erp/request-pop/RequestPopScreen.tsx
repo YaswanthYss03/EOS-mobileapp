@@ -1,5 +1,14 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  View,
+  Text,
+  ScrollView,
+  TextInput,
+  TouchableOpacity,
+  Modal,
+  StyleSheet,
+  ActivityIndicator,
+} from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -8,29 +17,58 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
-import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, formatDate } from "@/utils/calendar";
-import { mockPopHistory, type PopRequest } from "./data/mockRequestPop";
+import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, formatDate, toIsoDate } from "@/utils/calendar";
+import {
+  createPurchaseRequest,
+  listMyPurchaseRequests,
+  getPurchaseRequestStatusMeta,
+  type PurchaseRequest,
+} from "@/services/api/purchase-requests.api";
+import { listDepartments, type Department } from "@/services/api/departments.api";
 
 type Tab = "new" | "history";
 
-// TODO: this is a raise+history UI over mockRequestPop - wire to a real
-// procurement backend endpoint once one exists. Reachable from the
-// Secretary dashboard's "Request POP" item.
+// Secretary's raise+history screen for Purchase requests - see
+// EOSbackend1/src/modules/procurement/purchase-requests/purchase-requests.*.ts.
+// Reachable from the Secretary dashboard's "Request POP" item.
 export function RequestPopScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
   const [tab, setTab] = useState<Tab>("new");
-  const [itemRequired, setItemRequired] = useState("");
-  const [specification, setSpecification] = useState("");
+  const [itemName, setItemName] = useState("");
+  const [purpose, setPurpose] = useState("");
   const [quantity, setQuantity] = useState("");
   const [neededBy, setNeededBy] = useState<Date | null>(null);
-  const [justification, setJustification] = useState("");
+  const [department, setDepartment] = useState<Department | null>(null);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [deptPickerOpen, setDeptPickerOpen] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [pickerYear, setPickerYear] = useState(2026);
   const [pickerMonth, setPickerMonth] = useState(7); // August (0-indexed)
-  const [history, setHistory] = useState(mockPopHistory);
+  const [submitting, setSubmitting] = useState(false);
+
+  const [history, setHistory] = useState<PurchaseRequest[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      setHistory(await listMyPurchaseRequests());
+    } catch {
+      toast.error("Couldn't load your purchase requests");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadHistory();
+    listDepartments()
+      .then(setDepartments)
+      .catch(() => toast.error("Couldn't load the department list"));
+  }, [loadHistory]);
 
   // This screen renders its own full header below, so hide the shared
   // CollegeHeader while it's focused - same pattern as the other ERP
@@ -74,50 +112,49 @@ export function RequestPopScreen() {
   }
 
   function resetForm() {
-    setItemRequired("");
-    setSpecification("");
+    setItemName("");
+    setPurpose("");
     setQuantity("");
     setNeededBy(null);
-    setJustification("");
+    setDepartment(null);
   }
 
-  function handleSubmit() {
-    if (!itemRequired.trim()) {
+  async function handleSubmit() {
+    if (!department) {
+      toast.warning("Select the department this request is for");
+      return;
+    }
+    if (!itemName.trim()) {
       toast.warning("Add the item required");
       return;
     }
-    if (!specification.trim()) {
-      toast.warning("Add a specification");
-      return;
-    }
-    if (!quantity.trim()) {
-      toast.warning("Add the quantity needed");
+    if (!quantity.trim() || Number(quantity) < 1) {
+      toast.warning("Add a valid quantity");
       return;
     }
     if (!neededBy) {
       toast.warning("Select a needed-by date");
       return;
     }
-    if (!justification.trim()) {
-      toast.warning("Add the justification for this request");
-      return;
-    }
 
-    const newRequest: PopRequest = {
-      id: `local-${history.length}-${Date.now()}`,
-      itemRequired: itemRequired.trim(),
-      specification: specification.trim(),
-      quantity: quantity.trim(),
-      neededBy: formatDate(neededBy),
-      justification: justification.trim(),
-      ref: `POP/CSE/2026/${String(43 + history.length).padStart(3, "0")}`,
-      raisedOn: formatDate(new Date()),
-      status: "pending",
-    };
-    setHistory((prev) => [newRequest, ...prev]);
-    toast.success("Purchase request sent to HoD");
-    resetForm();
-    setTab("history");
+    setSubmitting(true);
+    try {
+      await createPurchaseRequest({
+        department_id: department.id,
+        item_name: itemName.trim(),
+        quantity: Number(quantity),
+        purpose: purpose.trim() || undefined,
+        needed_by: toIsoDate(neededBy),
+      });
+      toast.success("Purchase request sent to HOD");
+      resetForm();
+      setTab("history");
+      loadHistory();
+    } catch {
+      toast.error("Couldn't send the purchase request. Please try again");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -163,22 +200,21 @@ export function RequestPopScreen() {
           <>
             <Text style={styles.sectionTitle}>New Purchase Request</Text>
             <View style={styles.card}>
+              <Text style={styles.fieldLabel}>Department</Text>
+              <TouchableOpacity style={styles.dateButtonFull} onPress={() => setDeptPickerOpen(true)} activeOpacity={0.8}>
+                <Ionicons name="business-outline" size={14} color="#2F6FE0" />
+                <Text style={[styles.dateButtonText, !department && styles.dateButtonPlaceholder]}>
+                  {department ? department.name : "Select department"}
+                </Text>
+              </TouchableOpacity>
+
               <Text style={styles.fieldLabel}>Item Required</Text>
               <TextInput
                 style={styles.input}
                 placeholder="e.g. GPU workstation for the AI lab"
                 placeholderTextColor="#9AA6B2"
-                value={itemRequired}
-                onChangeText={setItemRequired}
-              />
-
-              <Text style={styles.fieldLabel}>Specification</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. RTX-class GPU, 64 GB RAM, 2TB SSD"
-                placeholderTextColor="#9AA6B2"
-                value={specification}
-                onChangeText={setSpecification}
+                value={itemName}
+                onChangeText={setItemName}
               />
 
               <View style={styles.rowFields}>
@@ -186,10 +222,11 @@ export function RequestPopScreen() {
                   <Text style={styles.fieldLabel}>Quantity</Text>
                   <TextInput
                     style={styles.input}
-                    placeholder="e.g. 2 units"
+                    placeholder="e.g. 2"
                     placeholderTextColor="#9AA6B2"
                     value={quantity}
-                    onChangeText={setQuantity}
+                    onChangeText={(text) => setQuantity(text.replace(/[^0-9]/g, ""))}
+                    keyboardType="number-pad"
                   />
                 </View>
                 <View style={styles.rowField}>
@@ -207,13 +244,13 @@ export function RequestPopScreen() {
                 </View>
               </View>
 
-              <Text style={styles.fieldLabel}>Justification & Extra Details</Text>
+              <Text style={styles.fieldLabel}>Specification & Justification (optional)</Text>
               <TextInput
                 style={[styles.input, styles.textArea]}
-                placeholder="Why it is needed, where it will be used, vendor preference if any..."
+                placeholder="Spec details, why it is needed, where it will be used..."
                 placeholderTextColor="#9AA6B2"
-                value={justification}
-                onChangeText={setJustification}
+                value={purpose}
+                onChangeText={setPurpose}
                 multiline
               />
 
@@ -222,11 +259,24 @@ export function RequestPopScreen() {
                 <Text style={styles.attachButtonText}>Attach quotation or catalogue (optional)</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.submitButton} onPress={handleSubmit} activeOpacity={0.85}>
-                <Text style={styles.submitButtonText}>Send to HOD</Text>
+              <TouchableOpacity
+                style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
+                onPress={handleSubmit}
+                activeOpacity={0.85}
+                disabled={submitting}
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.submitButtonText}>Send to HOD</Text>
+                )}
               </TouchableOpacity>
             </View>
           </>
+        ) : historyLoading ? (
+          <View style={styles.emptyState}>
+            <ActivityIndicator color="#2F6FE0" size="small" />
+          </View>
         ) : history.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
@@ -236,6 +286,34 @@ export function RequestPopScreen() {
           history.map((item) => <HistoryCard key={item.id} item={item} />)
         )}
       </ScrollView>
+
+      <Modal
+        visible={deptPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeptPickerOpen(false)}
+      >
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setDeptPickerOpen(false)}>
+          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
+            <Text style={styles.modalTitle}>Select department</Text>
+            <ScrollView style={styles.deptList} showsVerticalScrollIndicator={false}>
+              {departments.map((dept) => (
+                <TouchableOpacity
+                  key={dept.id}
+                  style={styles.deptRow}
+                  onPress={() => {
+                    setDepartment(dept);
+                    setDeptPickerOpen(false);
+                  }}
+                >
+                  <Text style={styles.deptRowText}>{dept.name}</Text>
+                  {department?.id === dept.id && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
 
       <Modal
         visible={datePickerOpen}
@@ -286,36 +364,44 @@ export function RequestPopScreen() {
   );
 }
 
-function HistoryCard({ item }: { item: PopRequest }) {
+function HistoryCard({ item }: { item: PurchaseRequest }) {
+  const meta = getPurchaseRequestStatusMeta(item.status);
   return (
     <View style={styles.historyCard}>
       <View style={styles.historyHeader}>
-        <Text style={styles.historyItem}>{item.itemRequired}</Text>
+        <Text style={styles.historyItem}>{item.title}</Text>
         <View
           style={[
             styles.statusBadge,
-            item.status === "forwarded" && styles.statusBadgeForwarded,
-            item.status === "returned" && styles.statusBadgeReturned,
+            meta.tone === "positive" && styles.statusBadgeForwarded,
+            meta.tone === "negative" && styles.statusBadgeReturned,
           ]}
         >
           <Text
             style={[
               styles.statusBadgeText,
-              item.status === "forwarded" && styles.statusBadgeTextForwarded,
-              item.status === "returned" && styles.statusBadgeTextReturned,
+              meta.tone === "positive" && styles.statusBadgeTextForwarded,
+              meta.tone === "negative" && styles.statusBadgeTextReturned,
             ]}
           >
-            {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+            {meta.label}
           </Text>
         </View>
       </View>
       <Text style={styles.historyRef}>
-        {item.ref} · {item.raisedOn}
+        {item.department.name} · #{item.id}
+        {item.order_number ? ` · ${item.order_number}` : ""}
       </Text>
-      <Text style={styles.historySpec}>{item.specification}</Text>
+      {item.purpose && <Text style={styles.historySpec}>{item.purpose}</Text>}
       <Text style={styles.historyMeta}>
-        {item.quantity} · Needed by {item.neededBy}
+        Qty {item.quantity} · Needed by {item.needed_by ? formatDate(new Date(item.needed_by)) : "—"}
       </Text>
+      {item.status === "rejected_by_hod" && item.hod_remarks && (
+        <Text style={styles.remarksText}>HoD remarks: {item.hod_remarks}</Text>
+      )}
+      {item.status === "rejected_by_finance" && item.finance_remarks && (
+        <Text style={styles.remarksText}>Finance remarks: {item.finance_remarks}</Text>
+      )}
     </View>
   );
 }
@@ -447,6 +533,18 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginBottom: 14,
   },
+  dateButtonFull: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#F9FAFB",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 14,
+  },
   dateButtonText: {
     fontSize: 12,
     fontFamily: fonts.semibold,
@@ -484,6 +582,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
+  },
+  submitButtonDisabled: {
+    opacity: 0.7,
   },
   submitButtonText: {
     fontSize: 14,
@@ -554,6 +655,12 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     marginTop: 6,
   },
+  remarksText: {
+    fontSize: 11,
+    fontFamily: fonts.medium,
+    color: "#DC2626",
+    marginTop: 6,
+  },
   emptyState: {
     alignItems: "center",
     paddingVertical: 40,
@@ -574,6 +681,30 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 18,
     padding: 18,
+  },
+  modalTitle: {
+    fontSize: 14,
+    fontFamily: fonts.bold,
+    color: "#111827",
+    marginBottom: 12,
+  },
+  deptList: {
+    maxHeight: 340,
+  },
+  deptRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F3F6",
+  },
+  deptRowText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    color: "#111827",
+    paddingRight: 8,
   },
   calendarNav: {
     flexDirection: "row",

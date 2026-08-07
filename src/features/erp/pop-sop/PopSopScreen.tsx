@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -8,43 +8,146 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
-import { deptInfo, mockOrders, type PopSopOrder, type PopSopStage, type PopSopType } from "./data/mockPopSop";
+import { formatDate } from "@/utils/calendar";
+import {
+  listPurchaseRequestsForHodReview,
+  hodReviewPurchaseRequest,
+  getPurchaseRequestStatusMeta,
+  type PurchaseRequest,
+  type PurchaseRequestStatus,
+} from "@/services/api/purchase-requests.api";
+import {
+  listServiceRequestsForHodReview,
+  hodReviewServiceRequest,
+  type ServiceRequest,
+} from "@/services/api/service-requests.api";
 
-type StatusFilter = "pending" | "forwarded" | "returned" | "all";
+type PopSopType = "pop" | "sop";
+type StatusFilter = "pending" | "forwarded" | "rejected" | "all";
+type Stage = "secretary" | "hod" | "finance";
 
-const STATUS_FILTERS: StatusFilter[] = ["pending", "forwarded", "returned", "all"];
-const STAGE_ORDER: PopSopStage[] = ["secretary", "hod", "finance"];
-const STAGE_LABELS: Record<PopSopStage, string> = { secretary: "Secretary", hod: "HOD", finance: "Finance" };
+// Both request types share the exact same 6-value derived status union (see
+// purchase-requests.api.ts / service-requests.api.ts) - normalized here so
+// one OrderCard can render either.
+type DisplayOrder = {
+  id: number;
+  type: PopSopType;
+  title: string;
+  status: PurchaseRequestStatus;
+  department: { id: number; name: string };
+  raisedByEmail: string;
+  detailLabel: string;
+  detailValue: string;
+  quantity: string;
+  neededBy: string | null;
+  hodRemarks: string | null;
+  financeRemarks: string | null;
+  orderNumber: string | null;
+  createdAt: string;
+};
+
+function fromPurchaseRequest(r: PurchaseRequest): DisplayOrder {
+  return {
+    id: r.id,
+    type: "pop",
+    title: r.title,
+    status: r.status,
+    department: r.department,
+    raisedByEmail: r.raised_by.email,
+    detailLabel: "SPECIFICATION",
+    detailValue: r.purpose || "—",
+    quantity: String(r.quantity),
+    neededBy: r.needed_by,
+    hodRemarks: r.hod_remarks,
+    financeRemarks: r.finance_remarks,
+    orderNumber: r.order_number,
+    createdAt: r.created_at,
+  };
+}
+
+function fromServiceRequest(r: ServiceRequest): DisplayOrder {
+  return {
+    id: r.id,
+    type: "sop",
+    title: r.title ?? "Service request",
+    status: r.status,
+    department: r.department,
+    raisedByEmail: r.raised_by.email,
+    detailLabel: "LOCATION",
+    detailValue: `${r.location || "—"}${r.service_description ? ` — ${r.service_description}` : ""}`,
+    quantity: r.quantity ?? "—",
+    neededBy: r.needed_by,
+    hodRemarks: r.hod_remarks,
+    financeRemarks: r.finance_remarks,
+    orderNumber: r.order_number,
+    createdAt: r.created_at,
+  };
+}
+
+const STATUS_FILTERS: StatusFilter[] = ["pending", "forwarded", "rejected", "all"];
+const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
+  pending: "Pending",
+  forwarded: "Forwarded",
+  rejected: "Rejected",
+  all: "All",
+};
+const STAGE_ORDER: Stage[] = ["secretary", "hod", "finance"];
+const STAGE_LABELS: Record<Stage, string> = { secretary: "Secretary", hod: "HOD", finance: "Finance" };
 
 const TYPE_META: Record<PopSopType, { tabLabel: string; headerTitle: string; headerSubtitle: string }> = {
   pop: { tabLabel: "POP · Purchase", headerTitle: "Purchase Orders", headerSubtitle: "POP · raised by the dept secretary" },
   sop: { tabLabel: "SOP · Service", headerTitle: "Service Orders", headerSubtitle: "SOP · raised by the dept secretary" },
 };
 
-function initialsFromName(name: string) {
-  return name
-    .replace(/^(Dr|Mr|Mrs|Ms)\.?\s+/i, "")
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
-    .join("");
+function toFilterBucket(status: PurchaseRequestStatus): Exclude<StatusFilter, "all"> {
+  if (status === "pending_hod") return "pending";
+  if (status === "rejected_by_hod" || status === "rejected_by_finance") return "rejected";
+  return "forwarded"; // pending_finance | approved | converted
 }
 
-function formatRupees(amount: number) {
-  return `₹${amount.toLocaleString("en-IN")}`;
+function toStage(status: PurchaseRequestStatus): Stage {
+  if (status === "pending_hod" || status === "rejected_by_hod") return "hod";
+  return "finance"; // pending_finance | approved | converted | rejected_by_finance
 }
 
-// TODO: this is a review UI over mockPopSop - wire to a real procurement
-// backend endpoint once one exists. Reachable from the HoD dashboard's
-// "POP / SOP" item.
+function formatMaybeDate(iso: string | null) {
+  return iso ? formatDate(new Date(iso)) : "—";
+}
+
+// HoD's review queue for Purchase/Service requests - see
+// EOSbackend1/src/modules/procurement/purchase-requests and
+// .../service-requests. Backend auto-scopes each list to the HoD's own
+// department. Reachable from the HoD dashboard's "POP / SOP" item.
 export function PopSopScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [type, setType] = useState<PopSopType>("pop");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
-  const [orders, setOrders] = useState(mockOrders);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseRequest[]>([]);
+  const [serviceOrders, setServiceOrders] = useState<ServiceRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [reviewingIds, setReviewingIds] = useState<Set<number>>(new Set());
+
+  const loadOrders = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [pop, sop] = await Promise.all([
+        listPurchaseRequestsForHodReview(),
+        listServiceRequestsForHodReview(),
+      ]);
+      setPurchaseOrders(pop);
+      setServiceOrders(sop);
+    } catch {
+      toast.error("Couldn't load POP/SOP requests");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadOrders();
+  }, [loadOrders]);
 
   // This screen renders its own full header below, so hide the shared
   // CollegeHeader while it's focused - same pattern as the other ERP
@@ -58,25 +161,24 @@ export function PopSopScreen() {
     }, [navigation]),
   );
 
-  const ordersOfType = useMemo(() => orders.filter((o) => o.type === type), [orders, type]);
-
-  const pendingTotal = useMemo(
-    () => ordersOfType.filter((o) => o.status === "pending").reduce((sum, o) => sum + o.indicativeCost, 0),
-    [ordersOfType],
+  const ordersOfType = useMemo<DisplayOrder[]>(
+    () => (type === "pop" ? purchaseOrders.map(fromPurchaseRequest) : serviceOrders.map(fromServiceRequest)),
+    [type, purchaseOrders, serviceOrders],
   );
 
   const counts = useMemo(
     () => ({
-      pending: ordersOfType.filter((o) => o.status === "pending").length,
-      forwarded: ordersOfType.filter((o) => o.status === "forwarded").length,
-      returned: ordersOfType.filter((o) => o.status === "returned").length,
+      pending: ordersOfType.filter((o) => toFilterBucket(o.status) === "pending").length,
+      forwarded: ordersOfType.filter((o) => toFilterBucket(o.status) === "forwarded").length,
+      rejected: ordersOfType.filter((o) => toFilterBucket(o.status) === "rejected").length,
       all: ordersOfType.length,
     }),
     [ordersOfType],
   );
 
   const filteredOrders = useMemo(
-    () => (statusFilter === "all" ? ordersOfType : ordersOfType.filter((o) => o.status === statusFilter)),
+    () =>
+      statusFilter === "all" ? ordersOfType : ordersOfType.filter((o) => toFilterBucket(o.status) === statusFilter),
     [ordersOfType, statusFilter],
   );
 
@@ -85,18 +187,40 @@ export function PopSopScreen() {
     setStatusFilter("pending");
   }
 
-  function handleApproveAndForward(id: string) {
-    setOrders((prev) =>
-      prev.map((o) => (o.id === id ? { ...o, status: "forwarded", currentStage: "finance" } : o)),
-    );
-    toast.success("Order approved and forwarded to Finance");
+  async function submitReview(order: DisplayOrder, decision: "approved" | "rejected") {
+    setReviewingIds((prev) => new Set(prev).add(order.id));
+    try {
+      if (order.type === "pop") {
+        const updated = await hodReviewPurchaseRequest(order.id, decision);
+        setPurchaseOrders((prev) => prev.map((o) => (o.id === order.id ? updated : o)));
+      } else {
+        const updated = await hodReviewServiceRequest(order.id, decision);
+        setServiceOrders((prev) => prev.map((o) => (o.id === order.id ? updated : o)));
+      }
+      toast.success(decision === "approved" ? "Approved and forwarded to Finance" : "Request sent back");
+    } catch {
+      toast.error("Couldn't submit your review. Please try again");
+    } finally {
+      setReviewingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(order.id);
+        return next;
+      });
+    }
   }
 
-  function handleSendBack(id: string) {
-    setOrders((prev) =>
-      prev.map((o) => (o.id === id ? { ...o, status: "returned", currentStage: "secretary" } : o)),
-    );
-    toast.info("Order sent back to the dept secretary");
+  function handleApproveAndForward(order: DisplayOrder) {
+    Alert.alert("Approve & forward?", `"${order.title}" will move to Finance for review.`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Approve", onPress: () => submitReview(order, "approved") },
+    ]);
+  }
+
+  function handleSendBack(order: DisplayOrder) {
+    Alert.alert("Send back?", `"${order.title}" will be rejected and closed out. This can't be undone.`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Send back", style: "destructive", onPress: () => submitReview(order, "rejected") },
+    ]);
   }
 
   const meta = TYPE_META[type];
@@ -141,64 +265,62 @@ export function PopSopScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryIconWrap}>
-            <Ionicons name="receipt-outline" size={18} color="#2F6FE0" />
-          </View>
-          <View style={styles.summaryTextWrap}>
-            <Text style={styles.summaryValue}>{formatRupees(pendingTotal)}</Text>
-            <Text style={styles.summarySubtitle}>Indicative value awaiting approval · vendor fixed by Purchase</Text>
-          </View>
-          <View style={styles.deptBadge}>
-            <Text style={styles.deptBadgeText}>{deptInfo.label}</Text>
-          </View>
+      {loading ? (
+        <View style={styles.emptyState}>
+          <ActivityIndicator color="#2F6FE0" size="small" />
         </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <View style={styles.statusRow}>
+            {STATUS_FILTERS.map((status) => (
+              <TouchableOpacity
+                key={status}
+                style={[styles.statusPill, statusFilter === status && styles.statusPillActive]}
+                onPress={() => setStatusFilter(status)}
+              >
+                <Text style={[styles.statusPillText, statusFilter === status && styles.statusPillTextActive]}>
+                  {STATUS_FILTER_LABELS[status]} ({counts[status]})
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
-        <View style={styles.statusRow}>
-          {STATUS_FILTERS.map((status) => (
-            <TouchableOpacity
-              key={status}
-              style={[styles.statusPill, statusFilter === status && styles.statusPillActive]}
-              onPress={() => setStatusFilter(status)}
-            >
-              <Text style={[styles.statusPillText, statusFilter === status && styles.statusPillTextActive]}>
-                {status.charAt(0).toUpperCase() + status.slice(1)} ({counts[status]})
-              </Text>
-            </TouchableOpacity>
+          {filteredOrders.map((order) => (
+            <OrderCard
+              key={order.id}
+              order={order}
+              reviewing={reviewingIds.has(order.id)}
+              onApproveAndForward={() => handleApproveAndForward(order)}
+              onSendBack={() => handleSendBack(order)}
+            />
           ))}
-        </View>
 
-        {filteredOrders.map((order) => (
-          <OrderCard
-            key={order.id}
-            order={order}
-            onApproveAndForward={() => handleApproveAndForward(order.id)}
-            onSendBack={() => handleSendBack(order.id)}
-          />
-        ))}
-
-        {filteredOrders.length === 0 && (
-          <View style={styles.emptyState}>
-            <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
-            <Text style={styles.emptyStateText}>No orders here</Text>
-          </View>
-        )}
-      </ScrollView>
+          {filteredOrders.length === 0 && (
+            <View style={styles.emptyState}>
+              <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
+              <Text style={styles.emptyStateText}>No orders here</Text>
+            </View>
+          )}
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
 
 function OrderCard({
   order,
+  reviewing,
   onApproveAndForward,
   onSendBack,
 }: {
-  order: PopSopOrder;
+  order: DisplayOrder;
+  reviewing: boolean;
   onApproveAndForward: () => void;
   onSendBack: () => void;
 }) {
-  const currentIndex = STAGE_ORDER.indexOf(order.currentStage);
+  const currentIndex = STAGE_ORDER.indexOf(toStage(order.status));
+  const statusMeta = getPurchaseRequestStatusMeta(order.status);
+  const raiserLabel = order.raisedByEmail.split("@")[0];
 
   return (
     <View style={styles.card}>
@@ -207,40 +329,39 @@ function OrderCard({
         <View
           style={[
             styles.statusBadge,
-            order.status === "forwarded" && styles.statusBadgeForwarded,
-            order.status === "returned" && styles.statusBadgeReturned,
+            statusMeta.tone === "positive" && styles.statusBadgeForwarded,
+            statusMeta.tone === "negative" && styles.statusBadgeReturned,
           ]}
         >
           <Text
             style={[
               styles.statusBadgeText,
-              order.status === "forwarded" && styles.statusBadgeTextForwarded,
-              order.status === "returned" && styles.statusBadgeTextReturned,
+              statusMeta.tone === "positive" && styles.statusBadgeTextForwarded,
+              statusMeta.tone === "negative" && styles.statusBadgeTextReturned,
             ]}
           >
-            {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+            {statusMeta.label}
           </Text>
         </View>
       </View>
       <Text style={styles.cardRef}>
-        {order.ref} · {order.raisedOn}
+        #{order.type.toUpperCase()}-{order.id} · {formatMaybeDate(order.createdAt)}
+        {order.orderNumber ? ` · ${order.orderNumber}` : ""}
       </Text>
 
       <View style={styles.raisedByRow}>
         <View style={styles.raisedByAvatar}>
-          <Text style={styles.raisedByAvatarText}>{initialsFromName(order.raisedBy)}</Text>
+          <Text style={styles.raisedByAvatarText}>{raiserLabel.slice(0, 2).toUpperCase()}</Text>
         </View>
-        <Text style={styles.raisedByText}>
-          Raised by {order.raisedBy} · {order.raisedByRole}
-        </Text>
+        <Text style={styles.raisedByText}>Raised by {raiserLabel} · Dept Secretary</Text>
       </View>
 
       <View style={styles.divider} />
 
       <View style={styles.metaRow}>
         <View style={styles.metaCol}>
-          <Text style={styles.metaLabel}>SPECIFICATION</Text>
-          <Text style={styles.metaValue}>{order.specification}</Text>
+          <Text style={styles.metaLabel}>{order.detailLabel}</Text>
+          <Text style={styles.metaValue}>{order.detailValue}</Text>
         </View>
         <View style={styles.metaColSmall}>
           <Text style={styles.metaLabel}>QTY</Text>
@@ -248,21 +369,7 @@ function OrderCard({
         </View>
         <View style={styles.metaColSmall}>
           <Text style={styles.metaLabel}>NEEDED BY</Text>
-          <Text style={styles.metaValue}>{order.neededBy}</Text>
-        </View>
-      </View>
-
-      <Text style={styles.metaLabel}>JUSTIFICATION</Text>
-      <Text style={styles.justificationText}>{order.justification}</Text>
-
-      <View style={styles.budgetRow}>
-        <View style={styles.budgetCol}>
-          <Text style={styles.metaLabel}>BUDGET HEAD</Text>
-          <Text style={styles.metaValue}>{order.budgetHead}</Text>
-        </View>
-        <View style={styles.costCol}>
-          <Text style={styles.metaLabel}>INDICATIVE COST</Text>
-          <Text style={styles.costValue}>{formatRupees(order.indicativeCost)}</Text>
+          <Text style={styles.metaValue}>{formatMaybeDate(order.neededBy)}</Text>
         </View>
       </View>
 
@@ -282,13 +389,36 @@ function OrderCard({
         ))}
       </View>
 
-      {order.status === "pending" && (
+      {(order.status === "rejected_by_hod" || order.status === "rejected_by_finance") &&
+        (order.hodRemarks || order.financeRemarks) && (
+          <Text style={styles.remarksText}>
+            {order.status === "rejected_by_hod"
+              ? `HoD remarks: ${order.hodRemarks}`
+              : `Finance remarks: ${order.financeRemarks}`}
+          </Text>
+        )}
+
+      {order.status === "pending_hod" && (
         <View style={styles.actionsRow}>
-          <TouchableOpacity style={styles.sendBackButton} onPress={onSendBack} activeOpacity={0.85}>
+          <TouchableOpacity
+            style={styles.sendBackButton}
+            onPress={onSendBack}
+            activeOpacity={0.85}
+            disabled={reviewing}
+          >
             <Text style={styles.sendBackButtonText}>Send back</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.approveButton} onPress={onApproveAndForward} activeOpacity={0.85}>
-            <Text style={styles.approveButtonText}>Approve & forward</Text>
+          <TouchableOpacity
+            style={[styles.approveButton, reviewing && styles.approveButtonDisabled]}
+            onPress={onApproveAndForward}
+            activeOpacity={0.85}
+            disabled={reviewing}
+          >
+            {reviewing ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={styles.approveButtonText}>Approve & forward</Text>
+            )}
           </TouchableOpacity>
         </View>
       )}
@@ -364,54 +494,6 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
-  },
-  summaryCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 14,
-    elevation: 2,
-    shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-  },
-  summaryIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "#E4EBFB",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  summaryTextWrap: {
-    flex: 1,
-  },
-  summaryValue: {
-    fontSize: 18,
-    fontFamily: fonts.bold,
-    color: "#111827",
-  },
-  summarySubtitle: {
-    fontSize: 11,
-    fontFamily: fonts.regular,
-    color: "#9AA6B2",
-    marginTop: 2,
-  },
-  deptBadge: {
-    backgroundColor: "#F1F3F6",
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  deptBadgeText: {
-    fontSize: 10,
-    fontFamily: fonts.bold,
-    color: "#6B7280",
-    letterSpacing: 0.5,
   },
   statusRow: {
     flexDirection: "row",
@@ -546,29 +628,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     color: "#111827",
   },
-  justificationText: {
-    fontSize: 12,
-    fontFamily: fonts.regular,
-    color: "#374151",
-    lineHeight: 17,
-    marginBottom: 12,
-  },
-  budgetRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 14,
-  },
-  budgetCol: {
-    flex: 1,
-  },
-  costCol: {
-    alignItems: "flex-end",
-  },
-  costValue: {
-    fontSize: 14,
-    fontFamily: fonts.bold,
-    color: "#2F6FE0",
-  },
   stageLabelsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -597,6 +656,12 @@ const styles = StyleSheet.create({
   stageBarSegmentFilled: {
     backgroundColor: "#2F6FE0",
   },
+  remarksText: {
+    fontSize: 11,
+    fontFamily: fonts.medium,
+    color: "#DC2626",
+    marginBottom: 12,
+  },
   actionsRow: {
     flexDirection: "row",
     gap: 10,
@@ -623,13 +688,18 @@ const styles = StyleSheet.create({
     backgroundColor: "#2F6FE0",
     paddingVertical: 10,
   },
+  approveButtonDisabled: {
+    opacity: 0.7,
+  },
   approveButtonText: {
     fontSize: 13,
     fontFamily: fonts.bold,
     color: "#fff",
   },
   emptyState: {
+    flex: 1,
     alignItems: "center",
+    justifyContent: "center",
     paddingVertical: 40,
     gap: 8,
   },

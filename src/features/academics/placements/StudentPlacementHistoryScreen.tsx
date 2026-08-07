@@ -7,8 +7,13 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "@/theme";
 import { formatDate } from "@/utils/calendar";
-import { getStudentPlacementHistory, type DriveHistoryItem } from "@/services/api/faculty-placements.api";
+import {
+  getStudentPlacementHistory,
+  getDepartmentStudentPlacementHistory,
+  type DriveHistoryItem,
+} from "@/services/api/faculty-placements.api";
 import type { ApplicationStatus } from "@/services/api/placements.api";
+import { useRole } from "@/hooks/useRole";
 
 // Same status labels/colors as PlacementsOverviewScreen's own history view -
 // "Round N cleared" comes straight from drive_application_status_enum, the
@@ -55,14 +60,17 @@ function StudentHeader({ onBack, name, studentIdNo }: { onBack: () => void; name
   );
 }
 
-// Drill-down from PlacementsOverviewScreen's faculty History tab - a single
-// mentee's own placement history, authorized server-side via class_mentors
-// (see @/services/api/faculty-placements.api.ts's getStudentPlacementHistory).
-// Lives under Academics (not the ERP tab) to match where the faculty
-// reaches the Placements tile itself from.
+// Drill-down from PlacementsOverviewScreen's mentor/HoD History tab - a
+// single student's own placement history. Authorized server-side either
+// via class_mentors (faculty) or the HoD's own department_id (HoD) - same
+// shared route/screen for both, branching on useRole() to call the right
+// endpoint (see @/services/api/faculty-placements.api.ts). Lives under
+// Academics (not the ERP tab) to match where both roles reach the
+// Placements tile itself from.
 export function StudentPlacementHistoryScreen() {
   const router = useRouter();
   const navigation = useNavigation();
+  const role = useRole();
   const params = useLocalSearchParams<{ studentId: string; name?: string; studentIdNo?: string }>();
   const studentId = Number(params.studentId);
   const name = params.name ?? "Student";
@@ -87,7 +95,8 @@ export function StudentPlacementHistoryScreen() {
     setLoading(true);
     setErrored(false);
 
-    getStudentPlacementHistory(studentId)
+    const fetchHistory = role === "hod" ? getDepartmentStudentPlacementHistory : getStudentPlacementHistory;
+    fetchHistory(studentId)
       .then((data) => {
         if (!cancelled) setHistory(data);
       })
@@ -101,7 +110,7 @@ export function StudentPlacementHistoryScreen() {
     return () => {
       cancelled = true;
     };
-  }, [studentId, reloadToken]);
+  }, [studentId, role, reloadToken]);
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>

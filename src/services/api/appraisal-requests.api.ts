@@ -52,11 +52,24 @@ export type AppraisalAttachment = {
   uploaded_at: string;
 };
 
+// Always present on the wire (see AppraisalService.toResponse) - the
+// faculty's own Apply/History screen just has no reason to render it
+// (it's the caller's own name), but the HoD review queue needs it to show
+// who each request belongs to.
+export type AppraisalRequestFaculty = {
+  id: number;
+  first_name: string;
+  last_name: string;
+  designation: string;
+  department_name: string;
+};
+
 export type MyAppraisalRequest = {
   id: number;
   academic_year: string;
   status: AppraisalStatus;
   created_at: string;
+  faculty: AppraisalRequestFaculty;
   entries: AppraisalEntry[];
   attachments: AppraisalAttachment[];
 };
@@ -92,6 +105,7 @@ function normalizeRequest(raw: RawAppraisalRequest): MyAppraisalRequest {
     academic_year: raw.academic_year,
     status: raw.status,
     created_at: raw.created_at,
+    faculty: raw.faculty,
     entries: raw.entries.map((entry) => ({
       id: entry.id,
       description: entry.description,
@@ -165,4 +179,30 @@ export async function uploadAppraisalAttachments(
 
 export async function deleteAppraisalAttachment(requestId: number, attachmentId: number): Promise<void> {
   await apiClient.delete(`/me/appraisal_requests/${requestId}/attachments/${attachmentId}`);
+}
+
+// ───────────────────────────── HoD review queue ─────────────────────────────
+// Same GET /me/appraisal_requests endpoint the faculty Apply/History screen
+// uses, but for a HOD caller the backend auto-scopes to their own
+// department (via the HoD's own faculty row's department_id - see
+// AppraisalService.findAll) - no department_id param to pass here.
+
+export async function listAppraisalRequestsForReview(status?: AppraisalStatus): Promise<MyAppraisalRequest[]> {
+  const { data } = await apiClient.get<{ data: { data: RawAppraisalRequest[] } }>("/me/appraisal_requests", {
+    params: { limit: 100, status },
+  });
+  return data.data.data.map(normalizeRequest);
+}
+
+// HoD's only two moves on a 'submitted' request: forward it to HR
+// ('hod_reviewed') or send it back ('rejected') - there is no "send back to
+// faculty for edits" status in appraisal_status_enum, rejected is terminal.
+export async function reviewAppraisalRequest(
+  id: number,
+  decision: "hod_reviewed" | "rejected",
+): Promise<MyAppraisalRequest> {
+  const { data } = await apiClient.patch<{ data: RawAppraisalRequest }>(`/me/appraisal_requests/${id}`, {
+    status: decision,
+  });
+  return normalizeRequest(data.data);
 }

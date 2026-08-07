@@ -1,5 +1,14 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  View,
+  Text,
+  ScrollView,
+  TextInput,
+  TouchableOpacity,
+  Modal,
+  StyleSheet,
+  ActivityIndicator,
+} from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -8,14 +17,21 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
-import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, formatDate } from "@/utils/calendar";
-import { sopServiceTypes, mockSopHistory, type SopRequest } from "./data/mockRequestSop";
+import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, formatDate, toIsoDate } from "@/utils/calendar";
+import { sopServiceTypes } from "./data/mockRequestSop";
+import {
+  createServiceRequest,
+  listMyServiceRequests,
+  getServiceRequestStatusMeta,
+  type ServiceRequest,
+} from "@/services/api/service-requests.api";
+import { listDepartments, type Department } from "@/services/api/departments.api";
 
 type Tab = "new" | "history";
 
-// TODO: this is a raise+history UI over mockRequestSop - wire to a real
-// facilities backend endpoint once one exists. Reachable from the
-// Secretary dashboard's "Request SOP" item.
+// Secretary's raise+history screen for Service requests - see
+// EOSbackend1/src/modules/procurement/service-requests/service-requests.*.ts.
+// Reachable from the Secretary dashboard's "Request SOP" item.
 export function RequestSopScreen() {
   const navigation = useNavigation();
   const router = useRouter();
@@ -27,10 +43,34 @@ export function RequestSopScreen() {
   const [units, setUnits] = useState("");
   const [neededBy, setNeededBy] = useState<Date | null>(null);
   const [complaintDetails, setComplaintDetails] = useState("");
+  const [department, setDepartment] = useState<Department | null>(null);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [deptPickerOpen, setDeptPickerOpen] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [pickerYear, setPickerYear] = useState(2026);
   const [pickerMonth, setPickerMonth] = useState(7); // August (0-indexed)
-  const [history, setHistory] = useState(mockSopHistory);
+  const [submitting, setSubmitting] = useState(false);
+
+  const [history, setHistory] = useState<ServiceRequest[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      setHistory(await listMyServiceRequests());
+    } catch {
+      toast.error("Couldn't load your service requests");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadHistory();
+    listDepartments()
+      .then(setDepartments)
+      .catch(() => toast.error("Couldn't load the department list"));
+  }, [loadHistory]);
 
   // This screen renders its own full header below, so hide the shared
   // CollegeHeader while it's focused - same pattern as the other ERP
@@ -79,9 +119,14 @@ export function RequestSopScreen() {
     setUnits("");
     setNeededBy(null);
     setComplaintDetails("");
+    setDepartment(null);
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
+    if (!department) {
+      toast.warning("Select the department this request is for");
+      return;
+    }
     if (!location.trim()) {
       toast.warning("Add the location");
       return;
@@ -99,21 +144,25 @@ export function RequestSopScreen() {
       return;
     }
 
-    const newRequest: SopRequest = {
-      id: `local-${history.length}-${Date.now()}`,
-      serviceType,
-      location: location.trim(),
-      units: units.trim(),
-      neededBy: formatDate(neededBy),
-      complaintDetails: complaintDetails.trim(),
-      ref: `SOP/CSE/2026/${String(15 + history.length).padStart(3, "0")}`,
-      raisedOn: formatDate(new Date()),
-      status: "pending",
-    };
-    setHistory((prev) => [newRequest, ...prev]);
-    toast.success("Service request raised");
-    resetForm();
-    setTab("history");
+    setSubmitting(true);
+    try {
+      await createServiceRequest({
+        department_id: department.id,
+        title: serviceType,
+        service_description: complaintDetails.trim(),
+        location: location.trim(),
+        quantity: units.trim(),
+        needed_by: toIsoDate(neededBy),
+      });
+      toast.success("Service request raised");
+      resetForm();
+      setTab("history");
+      loadHistory();
+    } catch {
+      toast.error("Couldn't raise the service request. Please try again");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -159,6 +208,14 @@ export function RequestSopScreen() {
           <>
             <Text style={styles.sectionTitle}>New Service Request</Text>
             <View style={styles.card}>
+              <Text style={styles.fieldLabel}>Department</Text>
+              <TouchableOpacity style={styles.dateButtonFull} onPress={() => setDeptPickerOpen(true)} activeOpacity={0.8}>
+                <Ionicons name="business-outline" size={14} color="#2F6FE0" />
+                <Text style={[styles.dateButtonText, !department && styles.dateButtonPlaceholder]}>
+                  {department ? department.name : "Select department"}
+                </Text>
+              </TouchableOpacity>
+
               <Text style={styles.fieldLabel}>Service Needed</Text>
               <View style={styles.chipRow}>
                 {sopServiceTypes.map((type) => {
@@ -227,11 +284,24 @@ export function RequestSopScreen() {
                 <Text style={styles.attachButtonText}>Attach a photo of the fault (optional)</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.submitButton} onPress={handleSubmit} activeOpacity={0.85}>
-                <Text style={styles.submitButtonText}>Raise Service Request</Text>
+              <TouchableOpacity
+                style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
+                onPress={handleSubmit}
+                activeOpacity={0.85}
+                disabled={submitting}
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.submitButtonText}>Raise Service Request</Text>
+                )}
               </TouchableOpacity>
             </View>
           </>
+        ) : historyLoading ? (
+          <View style={styles.emptyState}>
+            <ActivityIndicator color="#2F6FE0" size="small" />
+          </View>
         ) : history.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
@@ -241,6 +311,34 @@ export function RequestSopScreen() {
           history.map((item) => <HistoryCard key={item.id} item={item} />)
         )}
       </ScrollView>
+
+      <Modal
+        visible={deptPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeptPickerOpen(false)}
+      >
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setDeptPickerOpen(false)}>
+          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
+            <Text style={styles.modalTitle}>Select department</Text>
+            <ScrollView style={styles.deptList} showsVerticalScrollIndicator={false}>
+              {departments.map((dept) => (
+                <TouchableOpacity
+                  key={dept.id}
+                  style={styles.deptRow}
+                  onPress={() => {
+                    setDepartment(dept);
+                    setDeptPickerOpen(false);
+                  }}
+                >
+                  <Text style={styles.deptRowText}>{dept.name}</Text>
+                  {department?.id === dept.id && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
 
       <Modal
         visible={datePickerOpen}
@@ -291,37 +389,46 @@ export function RequestSopScreen() {
   );
 }
 
-function HistoryCard({ item }: { item: SopRequest }) {
+function HistoryCard({ item }: { item: ServiceRequest }) {
+  const meta = getServiceRequestStatusMeta(item.status);
   return (
     <View style={styles.historyCard}>
       <View style={styles.historyHeader}>
-        <Text style={styles.historyItem}>{item.serviceType}</Text>
+        <Text style={styles.historyItem}>{item.title ?? "Service request"}</Text>
         <View
           style={[
             styles.statusBadge,
-            item.status === "forwarded" && styles.statusBadgeForwarded,
-            item.status === "returned" && styles.statusBadgeReturned,
+            meta.tone === "positive" && styles.statusBadgeForwarded,
+            meta.tone === "negative" && styles.statusBadgeReturned,
           ]}
         >
           <Text
             style={[
               styles.statusBadgeText,
-              item.status === "forwarded" && styles.statusBadgeTextForwarded,
-              item.status === "returned" && styles.statusBadgeTextReturned,
+              meta.tone === "positive" && styles.statusBadgeTextForwarded,
+              meta.tone === "negative" && styles.statusBadgeTextReturned,
             ]}
           >
-            {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+            {meta.label}
           </Text>
         </View>
       </View>
       <Text style={styles.historyRef}>
-        {item.ref} · {item.raisedOn}
+        {item.department.name} · #{item.id}
+        {item.order_number ? ` · ${item.order_number}` : ""}
       </Text>
       <Text style={styles.historySpec}>{item.location}</Text>
-      <Text style={styles.historyComplaint}>{item.complaintDetails}</Text>
+      <Text style={styles.historyComplaint}>{item.service_description}</Text>
       <Text style={styles.historyMeta}>
-        {item.units} unit{Number(item.units) === 1 ? "" : "s"} · Needed by {item.neededBy}
+        {item.quantity ? `${item.quantity} unit${item.quantity === "1" ? "" : "s"} · ` : ""}
+        Needed by {item.needed_by ? formatDate(new Date(item.needed_by)) : "—"}
       </Text>
+      {item.status === "rejected_by_hod" && item.hod_remarks && (
+        <Text style={styles.remarksText}>HoD remarks: {item.hod_remarks}</Text>
+      )}
+      {item.status === "rejected_by_finance" && item.finance_remarks && (
+        <Text style={styles.remarksText}>Finance remarks: {item.finance_remarks}</Text>
+      )}
     </View>
   );
 }
@@ -478,6 +585,18 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginBottom: 14,
   },
+  dateButtonFull: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#F9FAFB",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 14,
+  },
   dateButtonText: {
     fontSize: 12,
     fontFamily: fonts.semibold,
@@ -515,6 +634,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
+  },
+  submitButtonDisabled: {
+    opacity: 0.7,
   },
   submitButtonText: {
     fontSize: 14,
@@ -591,6 +713,12 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     marginTop: 6,
   },
+  remarksText: {
+    fontSize: 11,
+    fontFamily: fonts.medium,
+    color: "#DC2626",
+    marginTop: 6,
+  },
   emptyState: {
     alignItems: "center",
     paddingVertical: 40,
@@ -611,6 +739,30 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 18,
     padding: 18,
+  },
+  modalTitle: {
+    fontSize: 14,
+    fontFamily: fonts.bold,
+    color: "#111827",
+    marginBottom: 12,
+  },
+  deptList: {
+    maxHeight: 340,
+  },
+  deptRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F3F6",
+  },
+  deptRowText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    color: "#111827",
+    paddingRight: 8,
   },
   calendarNav: {
     flexDirection: "row",

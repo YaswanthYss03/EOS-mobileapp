@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet, Modal } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -7,6 +7,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "@/theme";
 import { formatDate } from "@/utils/calendar";
+import { toast } from "@/utils/toast";
 import { useRole } from "@/hooks/useRole";
 import {
   getUpcomingDrives,
@@ -18,8 +19,11 @@ import {
 import {
   getUpcomingDrivesForFaculty,
   getMentoredStudents,
+  getDepartmentStudents,
+  getDepartmentClasses,
   type UpcomingDrive as FacultyUpcomingDrive,
   type MentoredStudent,
+  type DepartmentClass,
 } from "@/services/api/faculty-placements.api";
 
 type PlacementTab = "upcoming" | "history";
@@ -67,7 +71,10 @@ function PlacementsHeader({ onBack }: { onBack: () => void }) {
 // useRole() since a student and a faculty/HoD mentor need genuinely
 // different data here - a student has their own application outcome to
 // track, a mentor has none (they're not an applicant) but instead needs to
-// see their mentees' histories.
+// see students' histories. Faculty and HoD share the exact same UI (the
+// "History" tab is just "pick a student, see their placement history") -
+// only which students they can pick from differs: a faculty mentor sees
+// their own mentored classes, a HoD sees every class in their department.
 export function PlacementsOverviewScreen() {
   const role = useRole();
   const router = useRouter();
@@ -81,7 +88,16 @@ export function PlacementsOverviewScreen() {
     }, [navigation, router]),
   );
 
-  return role === "student" ? <StudentPlacementsBody /> : <FacultyPlacementsBody />;
+  if (role === "student") return <StudentPlacementsBody />;
+  return role === "hod" ? (
+    <MentorPlacementsBody
+      fetchStudents={getDepartmentStudents}
+      emptyStudentsText="No classes have been assigned to your department yet."
+      classPicker
+    />
+  ) : (
+    <MentorPlacementsBody fetchStudents={getMentoredStudents} emptyStudentsText="You aren't mentoring any class yet." />
+  );
 }
 
 // ───────────────────────────── Student body ─────────────────────────────
@@ -225,7 +241,25 @@ function initialsFromName(name: string) {
     .join("");
 }
 
-function FacultyPlacementsBody() {
+// Shared by both a faculty mentor and a HoD - identical UI, only which
+// students are pickable differs (fetchStudents passed in by the caller;
+// see PlacementsOverviewScreen). The drill-down destination
+// (StudentPlacementHistoryScreen) re-derives the same role split itself via
+// useRole(), so no route/param plumbing is needed here for that.
+//
+// `classPicker` additionally renders a class selector above the student
+// list (HoD only - a faculty mentor already has a small, fixed set of
+// mentored classes, so narrowing further isn't useful) - selecting a class
+// re-fetches fetchStudents(classId), "All classes" (the default) omits it.
+function MentorPlacementsBody({
+  fetchStudents,
+  emptyStudentsText,
+  classPicker,
+}: {
+  fetchStudents: (classId?: number) => Promise<MentoredStudent[]>;
+  emptyStudentsText: string;
+  classPicker?: boolean;
+}) {
   const router = useRouter();
   const [tab, setTab] = useState<PlacementTab>("upcoming");
 
@@ -239,6 +273,10 @@ function FacultyPlacementsBody() {
   const [studentsErrored, setStudentsErrored] = useState(false);
   const [studentsReloadToken, setStudentsReloadToken] = useState(0);
 
+  const [classes, setClasses] = useState<DepartmentClass[]>([]);
+  const [selectedClass, setSelectedClass] = useState<DepartmentClass | null>(null);
+  const [classPickerOpen, setClassPickerOpen] = useState(false);
+
   useEffect(() => {
     setUpcomingLoading(true);
     setUpcomingErrored(false);
@@ -249,13 +287,20 @@ function FacultyPlacementsBody() {
   }, [upcomingReloadToken]);
 
   useEffect(() => {
+    if (!classPicker) return;
+    getDepartmentClasses()
+      .then(setClasses)
+      .catch(() => toast.error("Couldn't load the class list"));
+  }, [classPicker]);
+
+  useEffect(() => {
     setStudentsLoading(true);
     setStudentsErrored(false);
-    getMentoredStudents()
+    fetchStudents(selectedClass?.class_id)
       .then(setStudents)
       .catch(() => setStudentsErrored(true))
       .finally(() => setStudentsLoading(false));
-  }, [studentsReloadToken]);
+  }, [fetchStudents, selectedClass, studentsReloadToken]);
 
   function openStudentHistory(student: MentoredStudent) {
     router.push({
@@ -284,24 +329,96 @@ function FacultyPlacementsBody() {
             ) : (
               <EmptyState icon="briefcase-outline" text="No drives coming up right now." />
             )
-          ) : studentsLoading ? (
-            <LoadingState />
-          ) : studentsErrored ? (
-            <ErrorState onRetry={() => setStudentsReloadToken((n) => n + 1)} />
-          ) : students && students.length > 0 ? (
-            <>
-              <Text style={styles.sectionHint}>Tap a student to see their placement history.</Text>
-              {students.map((student) => (
-                <StudentRow key={student.student_id} student={student} onPress={() => openStudentHistory(student)} />
-              ))}
-            </>
           ) : (
-            <EmptyState icon="people-outline" text="You aren't mentoring any class yet." />
+            <>
+              {classPicker && (
+                <TouchableOpacity
+                  style={styles.classPickerButton}
+                  onPress={() => setClassPickerOpen(true)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="school-outline" size={16} color="#2F6FE0" />
+                  <Text style={styles.classPickerButtonText}>
+                    {selectedClass ? classLabel(selectedClass) : "All classes"}
+                  </Text>
+                  <Ionicons name="chevron-down" size={16} color="#2F6FE0" />
+                </TouchableOpacity>
+              )}
+
+              {studentsLoading ? (
+                <LoadingState />
+              ) : studentsErrored ? (
+                <ErrorState onRetry={() => setStudentsReloadToken((n) => n + 1)} />
+              ) : students && students.length > 0 ? (
+                <>
+                  <Text style={styles.sectionHint}>Tap a student to see their placement history.</Text>
+                  {students.map((student) => (
+                    <StudentRow
+                      key={student.student_id}
+                      student={student}
+                      onPress={() => openStudentHistory(student)}
+                    />
+                  ))}
+                </>
+              ) : (
+                <EmptyState icon="people-outline" text={selectedClass ? "No students in this class yet." : emptyStudentsText} />
+              )}
+            </>
           )}
         </ScrollView>
       </View>
+
+      {classPicker && (
+        <Modal
+          visible={classPickerOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setClassPickerOpen(false)}
+        >
+          <TouchableOpacity
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPress={() => setClassPickerOpen(false)}
+          >
+            <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
+              <Text style={styles.modalTitle}>Select a class</Text>
+              <ScrollView style={styles.classList} showsVerticalScrollIndicator={false}>
+                <TouchableOpacity
+                  style={styles.classRow}
+                  onPress={() => {
+                    setSelectedClass(null);
+                    setClassPickerOpen(false);
+                  }}
+                >
+                  <Text style={styles.classRowText}>All classes</Text>
+                  {!selectedClass && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
+                </TouchableOpacity>
+                {classes.map((cls) => (
+                  <TouchableOpacity
+                    key={cls.class_id}
+                    style={styles.classRow}
+                    onPress={() => {
+                      setSelectedClass(cls);
+                      setClassPickerOpen(false);
+                    }}
+                  >
+                    <Text style={styles.classRowText}>{classLabel(cls)}</Text>
+                    {selectedClass?.class_id === cls.class_id && (
+                      <Ionicons name="checkmark" size={16} color="#2F6FE0" />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
+      )}
     </SafeAreaView>
   );
+}
+
+function classLabel(cls: DepartmentClass): string {
+  return `${cls.course_code} - Section ${cls.section} (${cls.batch_name})`;
 }
 
 function FacultyUpcomingCard({ drive }: { drive: FacultyUpcomingDrive }) {
@@ -475,6 +592,57 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     color: "#9AA6B2",
     marginBottom: 10,
+  },
+  classPickerButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    alignSelf: "flex-start",
+    backgroundColor: "#EAF0FD",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 12,
+  },
+  classPickerButtonText: {
+    fontSize: 13,
+    fontFamily: fonts.semibold,
+    color: "#2F6FE0",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.5)",
+    justifyContent: "center",
+    padding: 20,
+  },
+  modalCard: {
+    backgroundColor: "#fff",
+    borderRadius: 18,
+    padding: 18,
+  },
+  modalTitle: {
+    fontSize: 14,
+    fontFamily: fonts.bold,
+    color: "#111827",
+    marginBottom: 12,
+  },
+  classList: {
+    maxHeight: 400,
+  },
+  classRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F3F6",
+  },
+  classRowText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    color: "#111827",
+    paddingRight: 8,
   },
   card: {
     backgroundColor: "#fff",
