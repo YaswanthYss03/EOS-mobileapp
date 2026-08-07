@@ -30,6 +30,10 @@ export type StudentOdRequest = {
   reason: string | null;
   faculty_guide_name: string | null;
   mentor_approval_status: OdApprovalStatus;
+  // Only meaningful when fetched via getHodStudentOdRequests() — the
+  // calling HoD's own department's od_request_hod_approvals row status.
+  // Always null for the mentor's own queue (getStudentOdRequests).
+  hod_approval_status: OdApprovalStatus | null;
   created_at: string;
 };
 
@@ -48,6 +52,27 @@ export async function facultyApproveOd(
   decision: "approved" | "rejected",
 ): Promise<StudentOdRequest> {
   const { data } = await apiClient.patch<{ data: StudentOdRequest }>(`/me/student-ods/${id}/faculty-approve`, {
+    decision,
+  });
+  return data.data;
+}
+
+// HoD's own-department queue — same GET endpoint, role-branched server-side
+// (see StudentOdsService.findAll). Only includes requests that have already
+// reached this HoD's department (mentor-approved, fanned out per member —
+// see od_request_hod_approvals), so hod_approval_status is always non-null here.
+export async function getHodStudentOdRequests(): Promise<StudentOdRequest[]> {
+  const { data } = await apiClient.get<{ data: { data: StudentOdRequest[] } }>("/me/student-ods", {
+    params: { page: 1, limit: 100 },
+  });
+  return data.data.data;
+}
+
+export async function hodApproveOd(
+  id: number,
+  decision: "approved" | "rejected",
+): Promise<StudentOdRequest> {
+  const { data } = await apiClient.patch<{ data: StudentOdRequest }>(`/me/student-ods/${id}/hod-approve`, {
     decision,
   });
   return data.data;

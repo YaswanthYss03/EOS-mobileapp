@@ -19,6 +19,15 @@ export type MyFacultyOd = {
   hr_approval_status: FacultyOdApprovalStatus;
   overall_status: FacultyOdApprovalStatus;
   created_at: string;
+  // Only present on the HoD-facing list (getHodFacultyOds) — absent on the
+  // self-service listFacultyOd() response.
+  faculty?: {
+    id: number;
+    first_name: string;
+    last_name: string;
+    designation: string;
+    departments: { id: number; name: string; code: string } | null;
+  };
 };
 
 export type CreateFacultyOdPayload = {
@@ -38,4 +47,24 @@ export async function listFacultyOd(): Promise<MyFacultyOd[]> {
     params: { limit: 100 },
   });
   return data.data.data;
+}
+
+// HoD's own-department queue — same GET endpoint, role-branched server-side
+// (see FacultyOdService.findAll) — the HoD is the FIRST stage here, so all
+// statuses are relevant, no exclusion needed.
+export async function getHodFacultyOds(): Promise<MyFacultyOd[]> {
+  const { data } = await apiClient.get<{ data: { data: MyFacultyOd[] } }>("/me/faculty-od", {
+    params: { limit: 100 },
+  });
+  return data.data.data;
+}
+
+export async function hodApproveFacultyOd(
+  id: number,
+  decision: "approved" | "rejected",
+): Promise<MyFacultyOd> {
+  const { data } = await apiClient.patch<{ data: MyFacultyOd }>(`/me/faculty-od/${id}`, {
+    hod_approval_status: decision,
+  });
+  return data.data;
 }

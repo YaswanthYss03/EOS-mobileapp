@@ -17,6 +17,15 @@ export type MyFacultyLeave = {
   hr_approval_status: FacultyLeaveApprovalStatus;
   overall_status: FacultyLeaveApprovalStatus;
   created_at: string;
+  // Only present on the HoD-facing list (getHodFacultyLeaves) — absent on
+  // the self-service listFacultyLeaves() response.
+  faculty?: {
+    id: number;
+    first_name: string;
+    last_name: string;
+    designation: string;
+    departments: { id: number; name: string; code: string } | null;
+  };
 };
 
 export type CreateFacultyLeavePayload = {
@@ -35,4 +44,25 @@ export async function listFacultyLeaves(): Promise<MyFacultyLeave[]> {
     params: { limit: 100 },
   });
   return data.data.data;
+}
+
+// HoD's own-department queue — same GET endpoint, role-branched server-side
+// (see FacultyLeavesService.findAll) — the HoD is the FIRST stage here
+// (unlike student leaves, there's no prior mentor gate), so all statuses
+// are relevant, no exclusion needed.
+export async function getHodFacultyLeaves(): Promise<MyFacultyLeave[]> {
+  const { data } = await apiClient.get<{ data: { data: MyFacultyLeave[] } }>("/me/faculty-leaves", {
+    params: { limit: 100 },
+  });
+  return data.data.data;
+}
+
+export async function hodApproveFacultyLeave(
+  id: number,
+  decision: "approved" | "rejected",
+): Promise<MyFacultyLeave> {
+  const { data } = await apiClient.patch<{ data: MyFacultyLeave }>(`/me/faculty-leaves/${id}`, {
+    hod_approval_status: decision,
+  });
+  return data.data;
 }
