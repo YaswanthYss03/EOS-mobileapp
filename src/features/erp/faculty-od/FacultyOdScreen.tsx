@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -8,10 +8,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
-import { mockFacultyOdRequests, mockOtherStaffOdRequests, type FacultyOdRequest, type FacultyOdStatus } from "./data/mockFacultyOd";
+import { formatDate } from "@/utils/calendar";
+import { getApiErrorMessage } from "@/services/api/client";
+import { listFacultyOdForReview, reviewFacultyOdAsHr } from "@/services/api/faculty-od.api";
+import { mockOtherStaffOdRequests, type FacultyOdRequest, type FacultyOdStatus } from "./data/mockFacultyOd";
 
 type Tab = "faculty" | "others";
 type StatusFilter = "pending" | "approved" | "rejected" | "all";
+type LoadStatus = "loading" | "success" | "error";
 
 const STATUS_FILTERS: StatusFilter[] = ["pending", "approved", "rejected", "all"];
 
@@ -25,10 +29,32 @@ function initialsFromName(name: string) {
     .join("");
 }
 
-// TODO: this is a view-only approve/reject UI over mockFacultyOd - wire to a
-// real on-duty backend endpoint once one exists. Standalone from the HoD's
-// existing Student/Faculty On Duty screen (see erp/od/OdScreen.tsx) - this
-// one splits teaching Faculty vs non-teaching Others staff instead.
+function daysBetweenInclusive(fromIso: string, toIso: string): number {
+  return Math.round((new Date(toIso).getTime() - new Date(fromIso).getTime()) / 86400000) + 1;
+}
+
+// Combines the two real place/purpose columns into the single "REASON" slot
+// this card already has (faculty_od_requests has no combined reason/remarks
+// column) - no fabrication, just formatting two real fields into one line.
+function combineReason(place: string | null, purpose: string | null): string {
+  if (purpose && place) return `${purpose} — ${place}`;
+  return purpose ?? place ?? "";
+}
+
+// Wired to GET/PATCH /me/faculty-od (real faculty_od_requests rows) for the
+// Faculty tab - this HR Payroll caller sees every faculty member's requests
+// (the backend only self-scopes the FACULTY role, not HR_PAYROLL/HOD), but
+// only ones the HoD has already approved - the backend force-filters
+// hod_approval_status='approved' for HR_PAYROLL callers, so a request still
+// awaiting HoD review never appears here at all (there would be nothing for
+// HR to act on yet - see FacultyOdService.findAll). overall_status drives
+// the pending/approved/rejected pills and badge - "pending" here always
+// means "HoD approved, awaiting HR", never "awaiting HoD".
+// faculty_od_requests has no department column, so the card subtitle
+// shows designation only (no "· CSE" suffix). The Others (non-teaching
+// staff) tab has no backend module at all yet and stays on mock data,
+// standalone from the HoD's existing Student/Faculty On Duty screen (see
+// erp/od/OdScreen.tsx).
 export function FacultyOdScreen() {
   const navigation = useNavigation();
   const router = useRouter();
@@ -36,8 +62,42 @@ export function FacultyOdScreen() {
 
   const [tab, setTab] = useState<Tab>("faculty");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
-  const [facultyRequests, setFacultyRequests] = useState(mockFacultyOdRequests);
+
+  const [facultyStatus, setFacultyStatus] = useState<LoadStatus>("loading");
+  const [facultyError, setFacultyError] = useState<string | null>(null);
+  const [facultyRequests, setFacultyRequests] = useState<FacultyOdRequest[]>([]);
+  const [actingOnId, setActingOnId] = useState<string | null>(null);
+
   const [otherRequests, setOtherRequests] = useState(mockOtherStaffOdRequests);
+
+  const loadFacultyRequests = useCallback(() => {
+    setFacultyStatus("loading");
+    setFacultyError(null);
+    listFacultyOdForReview()
+      .then((rows) => {
+        setFacultyRequests(
+          rows.map((row) => ({
+            id: String(row.id),
+            name: `${row.faculty.first_name} ${row.faculty.last_name}`,
+            subtitle: row.faculty.designation,
+            fromDate: formatDate(new Date(row.from_date)),
+            toDate: formatDate(new Date(row.to_date)),
+            days: daysBetweenInclusive(row.from_date, row.to_date),
+            reason: combineReason(row.place, row.purpose),
+            status: row.overall_status,
+          })),
+        );
+        setFacultyStatus("success");
+      })
+      .catch((err) => {
+        setFacultyError(getApiErrorMessage(err, "Couldn't load faculty OD requests."));
+        setFacultyStatus("error");
+      });
+  }, []);
+
+  useEffect(() => {
+    loadFacultyRequests();
+  }, [loadFacultyRequests]);
 
   useFocusEffect(
     useCallback(() => {
@@ -65,19 +125,46 @@ export function FacultyOdScreen() {
     [requests, statusFilter],
   );
 
-  function updateStatus(id: string, status: FacultyOdStatus) {
-    const setter = tab === "faculty" ? setFacultyRequests : setOtherRequests;
-    setter((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
+  function updateOtherStatus(id: string, status: FacultyOdStatus) {
+    setOtherRequests((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
   }
 
   function handleApprove(id: string) {
-    updateStatus(id, "approved");
-    toast.success("On-duty request approved");
+    if (tab === "others") {
+      updateOtherStatus(id, "approved");
+      toast.success("On-duty request approved");
+      return;
+    }
+
+    setActingOnId(id);
+    reviewFacultyOdAsHr(Number(id), "approved")
+      .then(() => {
+        toast.success("On-duty request approved");
+        loadFacultyRequests();
+      })
+      .catch((err) => {
+        toast.error(getApiErrorMessage(err, "Couldn't approve this OD request."));
+      })
+      .finally(() => setActingOnId(null));
   }
 
   function handleReject(id: string) {
-    updateStatus(id, "rejected");
-    toast.info("On-duty request rejected");
+    if (tab === "others") {
+      updateOtherStatus(id, "rejected");
+      toast.info("On-duty request rejected");
+      return;
+    }
+
+    setActingOnId(id);
+    reviewFacultyOdAsHr(Number(id), "rejected")
+      .then(() => {
+        toast.info("On-duty request rejected");
+        loadFacultyRequests();
+      })
+      .catch((err) => {
+        toast.error(getApiErrorMessage(err, "Couldn't reject this OD request."));
+      })
+      .finally(() => setActingOnId(null));
   }
 
   function switchTab(nextTab: Tab) {
@@ -138,20 +225,37 @@ export function FacultyOdScreen() {
           ))}
         </View>
 
-        {filteredRequests.map((request) => (
-          <FacultyOdCard
-            key={request.id}
-            request={request}
-            onApprove={() => handleApprove(request.id)}
-            onReject={() => handleReject(request.id)}
-          />
-        ))}
-
-        {filteredRequests.length === 0 && (
-          <View style={styles.emptyState}>
-            <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
-            <Text style={styles.emptyStateText}>No requests here</Text>
+        {tab === "faculty" && facultyStatus === "loading" ? (
+          <View style={styles.inlineLoading}>
+            <ActivityIndicator color="#2F6FE0" />
           </View>
+        ) : tab === "faculty" && facultyStatus === "error" ? (
+          <View style={styles.emptyState}>
+            <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+            <Text style={styles.emptyStateText}>{facultyError ?? "Something went wrong."}</Text>
+            <TouchableOpacity onPress={loadFacultyRequests} style={styles.retryButton} activeOpacity={0.8}>
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            {filteredRequests.map((request) => (
+              <FacultyOdCard
+                key={request.id}
+                request={request}
+                isActing={actingOnId === request.id}
+                onApprove={() => handleApprove(request.id)}
+                onReject={() => handleReject(request.id)}
+              />
+            ))}
+
+            {filteredRequests.length === 0 && (
+              <View style={styles.emptyState}>
+                <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
+                <Text style={styles.emptyStateText}>No requests here</Text>
+              </View>
+            )}
+          </>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -160,10 +264,12 @@ export function FacultyOdScreen() {
 
 function FacultyOdCard({
   request,
+  isActing = false,
   onApprove,
   onReject,
 }: {
   request: FacultyOdRequest;
+  isActing?: boolean;
   onApprove: () => void;
   onReject: () => void;
 }) {
@@ -200,16 +306,34 @@ function FacultyOdCard({
         </View>
       </View>
 
-      <Text style={styles.reasonLabel}>REASON</Text>
-      <Text style={styles.reasonText}>{reason}</Text>
+      {reason && (
+        <>
+          <Text style={styles.reasonLabel}>REASON</Text>
+          <Text style={styles.reasonText}>{reason}</Text>
+        </>
+      )}
 
       {status === "pending" ? (
         <View style={styles.actionsRow}>
-          <TouchableOpacity style={styles.rejectButton} onPress={onReject} activeOpacity={0.85}>
+          <TouchableOpacity
+            style={styles.rejectButton}
+            onPress={onReject}
+            activeOpacity={0.85}
+            disabled={isActing}
+          >
             <Text style={styles.rejectButtonText}>Reject</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.approveButton} onPress={onApprove} activeOpacity={0.85}>
-            <Text style={styles.approveButtonText}>Approve</Text>
+          <TouchableOpacity
+            style={styles.approveButton}
+            onPress={onApprove}
+            activeOpacity={0.85}
+            disabled={isActing}
+          >
+            {isActing ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={styles.approveButtonText}>Approve</Text>
+            )}
           </TouchableOpacity>
         </View>
       ) : (
@@ -471,5 +595,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: fonts.medium,
     color: "#9AA6B2",
+  },
+  inlineLoading: {
+    paddingVertical: 40,
+    alignItems: "center",
+  },
+  retryButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
   },
 });

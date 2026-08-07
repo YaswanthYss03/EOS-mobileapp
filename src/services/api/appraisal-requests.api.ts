@@ -72,6 +72,11 @@ export type MyAppraisalRequest = {
   faculty: AppraisalRequestFaculty;
   entries: AppraisalEntry[];
   attachments: AppraisalAttachment[];
+  // Always present in the real response, but only rendered by
+  // AppraisalRequestScreen's History tab for HR Payroll - who sees every
+  // faculty member's applications (unscoped), not just their own - so it
+  // needs to show whose request each row is.
+  faculty: { id: number; first_name: string; last_name: string; designation: string };
 };
 
 type RawAppraisalCriteriaResponse = {
@@ -118,6 +123,7 @@ function normalizeRequest(raw: RawAppraisalRequest): MyAppraisalRequest {
       },
     })),
     attachments: raw.attachments,
+    faculty: raw.faculty,
   };
 }
 

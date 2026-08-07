@@ -99,26 +99,22 @@ export function AnnouncementsScreen() {
   const [drafts, setDrafts] = useState<Announcement[]>([]);
 
   const loadClasses = useCallback(() => {
-    // Faculty (class advisors) fetch their own assigned classes. The HoD
-    // path needs a batch selection this screen doesn't collect yet (see
-    // GET /announcements/lookup/classes), so "Target classes" is left
-    // unavailable there rather than calling an endpoint that would 403.
-    if (isFacultyAudience) {
-      setClassesStatus("loading");
-      setClassesError(null);
-      getMyAssignedClasses()
-        .then((rows) => {
-          setClasses(rows);
-          setClassesStatus("success");
-        })
-        .catch((err) => {
-          setClassesError(getApiErrorMessage(err, "Couldn't load your classes."));
-          setClassesStatus("error");
-        });
-    } else {
-      setClassesStatus("unavailable");
-    }
-  }, [isFacultyAudience]);
+    // /announcements/lookup/assigned-classes now allows both Faculty and
+    // HoD - an HoD who is themselves mapped to teach/mentor a class gets
+    // the same real list; one who isn't just gets an empty array (handled
+    // by the "No classes are assigned to you yet" empty state below).
+    setClassesStatus("loading");
+    setClassesError(null);
+    getMyAssignedClasses()
+      .then((rows) => {
+        setClasses(rows);
+        setClassesStatus("success");
+      })
+      .catch((err) => {
+        setClassesError(getApiErrorMessage(err, "Couldn't load your classes."));
+        setClassesStatus("error");
+      });
+  }, []);
 
   const loadFacultyTargets = useCallback(() => {
     if (isFacultyAudience) {
@@ -406,12 +402,6 @@ export function AnnouncementsScreen() {
 
             {classesStatus === "error" && (
               <ErrorNotice message={classesError ?? "Something went wrong."} onRetry={loadClasses} />
-            )}
-
-            {classesStatus === "unavailable" && (
-              <Text style={styles.emptyInlineText}>
-                Class targeting isn't available from this view yet.
-              </Text>
             )}
 
             {classesStatus === "success" && classes.length === 0 && (

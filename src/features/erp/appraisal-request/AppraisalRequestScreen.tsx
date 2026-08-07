@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
+import { useRole } from "@/hooks/useRole";
 import { toast } from "@/utils/toast";
 import { formatDate } from "@/utils/calendar";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -44,13 +45,18 @@ const STATUS_LABEL: Record<AppraisalStatus, string> = {
 // user-addable repeat entries), so the category cards below now render the
 // real divisions/criteria instead of a hardcoded taxonomy. There is no
 // cycle-deadline concept in the schema, so the header shows the real
-// academic year instead of a fabricated "closes on" date.
+// academic year instead of a fabricated "closes on" date. HR Payroll has no
+// appraisal cycle of their own to apply for (GET /me/appraisal-criteria is
+// @Roles(ROLES.FACULTY) only), so this role only ever sees History - no
+// Apply tab, no criteria fetch.
 export function AppraisalRequestScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const role = useRole();
+  const canApply = role !== "hr-payroll";
 
-  const [tab, setTab] = useState<Tab>("apply");
+  const [tab, setTab] = useState<Tab>(canApply ? "apply" : "history");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [descriptions, setDescriptions] = useState<Record<number, string>>({});
   const [stagedFiles, setStagedFiles] = useState<Record<number, PickedAppraisalFile[]>>({});
@@ -96,8 +102,8 @@ export function AppraisalRequestScreen() {
   }, []);
 
   useEffect(() => {
-    loadCriteria();
-  }, [loadCriteria]);
+    if (canApply) loadCriteria();
+  }, [canApply, loadCriteria]);
 
   useEffect(() => {
     loadHistory();
@@ -217,20 +223,22 @@ export function AppraisalRequestScreen() {
       </LinearGradient>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.tabSwitch}>
-          <TouchableOpacity
-            style={[styles.tabSwitchButton, tab === "apply" && styles.tabSwitchButtonActive]}
-            onPress={() => setTab("apply")}
-          >
-            <Text style={[styles.tabSwitchText, tab === "apply" && styles.tabSwitchTextActive]}>Apply</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabSwitchButton, tab === "history" && styles.tabSwitchButtonActive]}
-            onPress={() => setTab("history")}
-          >
-            <Text style={[styles.tabSwitchText, tab === "history" && styles.tabSwitchTextActive]}>History</Text>
-          </TouchableOpacity>
-        </View>
+        {canApply && (
+          <View style={styles.tabSwitch}>
+            <TouchableOpacity
+              style={[styles.tabSwitchButton, tab === "apply" && styles.tabSwitchButtonActive]}
+              onPress={() => setTab("apply")}
+            >
+              <Text style={[styles.tabSwitchText, tab === "apply" && styles.tabSwitchTextActive]}>Apply</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tabSwitchButton, tab === "history" && styles.tabSwitchButtonActive]}
+              onPress={() => setTab("history")}
+            >
+              <Text style={[styles.tabSwitchText, tab === "history" && styles.tabSwitchTextActive]}>History</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {tab === "apply" ? (
           criteriaStatus === "loading" ? (
@@ -298,7 +306,7 @@ export function AppraisalRequestScreen() {
             <Text style={styles.emptyStateText}>No appraisal history yet</Text>
           </View>
         ) : (
-          history.map((item) => <HistoryCard key={item.id} item={item} />)
+          history.map((item) => <HistoryCard key={item.id} item={item} showFaculty={!canApply} />)
         )}
       </ScrollView>
     </SafeAreaView>
@@ -387,13 +395,18 @@ function AppraisalCategoryCard({
   );
 }
 
-function HistoryCard({ item }: { item: MyAppraisalRequest }) {
+function HistoryCard({ item, showFaculty = false }: { item: MyAppraisalRequest; showFaculty?: boolean }) {
   const scoredEntries = item.entries.filter((entry) => entry.score !== null);
   const totalScore = scoredEntries.reduce((sum, entry) => sum + (entry.score ?? 0), 0);
   const totalMax = scoredEntries.reduce((sum, entry) => sum + entry.criteria.max_score, 0);
 
   return (
     <View style={styles.historyCard}>
+      {showFaculty && (
+        <Text style={styles.historyFacultyName}>
+          {item.faculty.first_name} {item.faculty.last_name} · {item.faculty.designation}
+        </Text>
+      )}
       <View style={styles.historyHeader}>
         <Text style={styles.historyCycle}>Cycle {item.academic_year}</Text>
         <View
@@ -662,6 +675,12 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 6,
+  },
+  historyFacultyName: {
+    fontSize: 15,
+    fontFamily: fonts.bold,
+    color: "#111827",
+    marginBottom: 6,
   },
   historyHeader: {
     flexDirection: "row",

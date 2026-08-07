@@ -51,3 +51,23 @@ export async function facultyApproveLeave(
   });
   return data.data;
 }
+
+// HoD's own-department queue — same GET endpoint, role-branched server-side
+// (see StudentLeavesService.findAll). Never includes status='pending' (a
+// request the mentor hasn't even reviewed yet isn't relevant to a HoD).
+export async function getHodStudentLeaveRequests(): Promise<StudentLeaveRequest[]> {
+  const { data } = await apiClient.get<{ data: { data: StudentLeaveRequest[] } }>("/me/student-leaves", {
+    params: { page: 1, limit: 100 },
+  });
+  return data.data.data;
+}
+
+export async function hodApproveLeave(
+  id: number,
+  decision: "approved" | "rejected",
+): Promise<StudentLeaveRequest> {
+  const { data } = await apiClient.patch<{ data: StudentLeaveRequest }>(`/me/student-leaves/${id}/hod-approve`, {
+    decision,
+  });
+  return data.data;
+}

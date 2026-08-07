@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -8,11 +8,20 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
-import { departmentInfo } from "../data/departmentInfo";
+import { getApiErrorMessage } from "@/services/api/client";
+import {
+  getHodStudentLeaveRequests,
+  hodApproveLeave,
+  type StudentLeaveRequest,
+} from "@/services/api/student-leaves.api";
+import { getHodStudentOdRequests, hodApproveOd, type StudentOdRequest } from "@/services/api/student-ods.api";
+import { getHodFacultyLeaves, hodApproveFacultyLeave, type MyFacultyLeave } from "@/services/api/faculty-leaves.api";
+import { getHodFacultyOds, hodApproveFacultyOd, type MyFacultyOd } from "@/services/api/faculty-od.api";
 import type { ApprovalRequest, ApprovalStatus } from "../types";
 
 type Tab = "student" | "faculty";
 type StatusFilter = "pending" | "approved" | "rejected" | "all";
+type LoadStatus = "loading" | "success" | "error";
 
 const STATUS_FILTERS: StatusFilter[] = ["pending", "approved", "rejected", "all"];
 
@@ -26,25 +35,105 @@ function initialsFromName(name: string) {
     .join("");
 }
 
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function daysBetween(fromIso: string, toIso: string): number {
+  const from = new Date(fromIso);
+  const to = new Date(toIso);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return 1;
+  const diff = Math.round((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24));
+  return Math.max(1, diff + 1);
+}
+
+// student_leaves.status has no bare "pending" relevance for a HoD (the
+// mentor hasn't reviewed it yet) - the backend already excludes it by
+// default, this is just a defensive guard against a stray row.
+function mapStudentLeave(row: StudentLeaveRequest): ApprovalRequest | null {
+  const statusMap: Record<string, ApprovalStatus | undefined> = {
+    faculty_approved: "pending",
+    hod_approved: "approved",
+    rejected: "rejected",
+  };
+  const status = statusMap[row.status];
+  if (!status) return null;
+  return {
+    id: String(row.id),
+    name: row.student.name,
+    subtitle: `${row.student.student_id_no}${row.student.section ? ` · ${row.student.section}` : ""}`,
+    fromDate: formatDate(row.from_date),
+    toDate: formatDate(row.to_date),
+    days: daysBetween(row.from_date, row.to_date),
+    reason: row.reason ?? "No reason provided",
+    status,
+  };
+}
+
+function mapStudentOd(row: StudentOdRequest): ApprovalRequest | null {
+  const status = row.hod_approval_status;
+  if (!status) return null;
+  return {
+    id: String(row.id),
+    name: row.creator.name,
+    subtitle: `${row.creator.student_id_no}${row.creator.section ? ` · ${row.creator.section}` : ""}`,
+    fromDate: formatDate(row.from_date),
+    toDate: formatDate(row.to_date),
+    days: daysBetween(row.from_date, row.to_date),
+    reason: row.reason ?? "No reason provided",
+    status,
+  };
+}
+
+function facultySubtitle(faculty: { designation: string; departments: { code: string } | null } | undefined) {
+  if (!faculty) return "";
+  return faculty.departments ? `${faculty.designation} · ${faculty.departments.code}` : faculty.designation;
+}
+
+function mapFacultyLeave(row: MyFacultyLeave): ApprovalRequest {
+  return {
+    id: String(row.id),
+    name: row.faculty ? `${row.faculty.first_name} ${row.faculty.last_name}`.trim() : "Faculty",
+    subtitle: facultySubtitle(row.faculty),
+    fromDate: formatDate(row.from_date),
+    toDate: formatDate(row.to_date),
+    days: daysBetween(row.from_date, row.to_date),
+    reason: row.reason ?? "No reason provided",
+    status: row.hod_approval_status,
+  };
+}
+
+function mapFacultyOd(row: MyFacultyOd): ApprovalRequest {
+  return {
+    id: String(row.id),
+    name: row.faculty ? `${row.faculty.first_name} ${row.faculty.last_name}`.trim() : "Faculty",
+    subtitle: facultySubtitle(row.faculty),
+    fromDate: formatDate(row.from_date),
+    toDate: formatDate(row.to_date),
+    days: daysBetween(row.from_date, row.to_date),
+    reason: row.purpose ?? row.place ?? "No reason provided",
+    status: row.hod_approval_status,
+  };
+}
+
 type Props = {
+  kind: "leave" | "od";
   title: string;
   studentHeaderSubtitle: string;
   facultyHeaderSubtitle: string;
-  initialStudentRequests: ApprovalRequest[];
-  initialFacultyRequests: ApprovalRequest[];
 };
 
 // Shared HoD approve/reject workflow screen - Leave and On Duty are both
-// thin wrappers over this (same layout: Student/Faculty toggle, context row,
-// status filters, request cards). See src/features/erp/leave/LeaveScreen.tsx
-// and src/features/erp/od/OdScreen.tsx.
-export function ApprovalRequestsScreen({
-  title,
-  studentHeaderSubtitle,
-  facultyHeaderSubtitle,
-  initialStudentRequests,
-  initialFacultyRequests,
-}: Props) {
+// thin wrappers over this (same layout: Student/Faculty toggle, status
+// filters, request cards). See src/features/erp/leave/LeaveScreen.tsx and
+// src/features/erp/od/OdScreen.tsx. Student requests only ever reach here
+// once already approved by the class mentor faculty (see mapStudentLeave/
+// mapStudentOd); a HoD's own Approve/Reject is the final stage for those,
+// and the FIRST stage for a faculty member's own leave/OD (which then
+// still needs HR's separate sign-off, out of scope on this screen).
+export function ApprovalRequestsScreen({ kind, title, studentHeaderSubtitle, facultyHeaderSubtitle }: Props) {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -52,8 +141,62 @@ export function ApprovalRequestsScreen({
 
   const [tab, setTab] = useState<Tab>(initialTab === "faculty" ? "faculty" : "student");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
-  const [studentRequests, setStudentRequests] = useState(initialStudentRequests);
-  const [facultyRequests, setFacultyRequests] = useState(initialFacultyRequests);
+
+  const [studentStatus, setStudentStatus] = useState<LoadStatus>("loading");
+  const [studentError, setStudentError] = useState<string | null>(null);
+  const [studentRequests, setStudentRequests] = useState<ApprovalRequest[]>([]);
+
+  const [facultyStatus, setFacultyStatus] = useState<LoadStatus>("loading");
+  const [facultyError, setFacultyError] = useState<string | null>(null);
+  const [facultyRequests, setFacultyRequests] = useState<ApprovalRequest[]>([]);
+
+  const [actingId, setActingId] = useState<string | null>(null);
+
+  const loadStudent = useCallback(() => {
+    setStudentStatus("loading");
+    setStudentError(null);
+    const request =
+      kind === "leave"
+        ? getHodStudentLeaveRequests().then((rows) => rows.map(mapStudentLeave).filter((r): r is ApprovalRequest => r !== null))
+        : getHodStudentOdRequests().then((rows) => rows.map(mapStudentOd).filter((r): r is ApprovalRequest => r !== null));
+
+    request
+      .then((rows) => {
+        setStudentRequests(rows);
+        setStudentStatus("success");
+      })
+      .catch((err) => {
+        setStudentError(getApiErrorMessage(err, "Couldn't load requests."));
+        setStudentStatus("error");
+      });
+  }, [kind]);
+
+  const loadFaculty = useCallback(() => {
+    setFacultyStatus("loading");
+    setFacultyError(null);
+    const request =
+      kind === "leave"
+        ? getHodFacultyLeaves().then((rows) => rows.map(mapFacultyLeave))
+        : getHodFacultyOds().then((rows) => rows.map(mapFacultyOd));
+
+    request
+      .then((rows) => {
+        setFacultyRequests(rows);
+        setFacultyStatus("success");
+      })
+      .catch((err) => {
+        setFacultyError(getApiErrorMessage(err, "Couldn't load requests."));
+        setFacultyStatus("error");
+      });
+  }, [kind]);
+
+  useEffect(() => {
+    loadStudent();
+  }, [loadStudent]);
+
+  useEffect(() => {
+    loadFaculty();
+  }, [loadFaculty]);
 
   // This screen renders its own full header below, so hide the shared
   // CollegeHeader while it's focused - same pattern as the ERP employee/hod
@@ -68,6 +211,9 @@ export function ApprovalRequestsScreen({
   );
 
   const requests = tab === "student" ? studentRequests : facultyRequests;
+  const loadStatus = tab === "student" ? studentStatus : facultyStatus;
+  const loadError = tab === "student" ? studentError : facultyError;
+  const reload = tab === "student" ? loadStudent : loadFaculty;
 
   const counts = useMemo(
     () => ({
@@ -84,22 +230,29 @@ export function ApprovalRequestsScreen({
     [requests, statusFilter],
   );
 
-  function updateStatus(id: string, status: ApprovalStatus) {
-    if (tab === "student") {
-      setStudentRequests((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
-    } else {
-      setFacultyRequests((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
-    }
-  }
+  function handleDecision(id: string, decision: "approved" | "rejected") {
+    if (actingId !== null) return;
+    setActingId(id);
+    const numericId = Number(id);
 
-  function handleApprove(id: string) {
-    updateStatus(id, "approved");
-    toast.success(`${title} request approved`);
-  }
+    const call =
+      tab === "student"
+        ? kind === "leave"
+          ? hodApproveLeave(numericId, decision)
+          : hodApproveOd(numericId, decision)
+        : kind === "leave"
+          ? hodApproveFacultyLeave(numericId, decision)
+          : hodApproveFacultyOd(numericId, decision);
 
-  function handleReject(id: string) {
-    updateStatus(id, "rejected");
-    toast.info(`${title} request rejected`);
+    call
+      .then(() => {
+        toast[decision === "approved" ? "success" : "info"](
+          `${title} request ${decision === "approved" ? "approved" : "rejected"}`,
+        );
+        tab === "student" ? loadStudent() : loadFaculty();
+      })
+      .catch((err) => toast.error(getApiErrorMessage(err, "Couldn't submit your decision.")))
+      .finally(() => setActingId(null));
   }
 
   function switchTab(nextTab: Tab) {
@@ -146,25 +299,14 @@ export function ApprovalRequestsScreen({
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {tab === "student" ? (
-          <TouchableOpacity style={styles.contextCard} activeOpacity={0.8}>
-            <View style={styles.contextIconWrap}>
-              <Ionicons name="people-outline" size={16} color="#2F6FE0" />
-            </View>
-            <View style={styles.contextTextWrap}>
-              <Text style={styles.contextTitle}>All sections</Text>
-              <Text style={styles.contextSubtitle}>Whole department · {departmentInfo.sectionCount} sections</Text>
-            </View>
-            <Ionicons name="chevron-down" size={18} color="#B0B7C3" />
-          </TouchableOpacity>
-        ) : (
+        {tab === "faculty" && (
           <View style={styles.contextCard}>
             <View style={styles.contextIconWrap}>
               <Ionicons name="business-outline" size={16} color="#2F6FE0" />
             </View>
             <View style={styles.contextTextWrap}>
-              <Text style={styles.contextTitle}>{departmentInfo.name}</Text>
-              <Text style={styles.contextSubtitle}>{departmentInfo.facultyCount} faculty · Head of Department</Text>
+              <Text style={styles.contextTitle}>Head of Department</Text>
+              <Text style={styles.contextSubtitle}>Faculty {title.toLowerCase()} requests</Text>
             </View>
             <View style={styles.myDeptBadge}>
               <Text style={styles.myDeptBadgeText}>MY DEPT</Text>
@@ -186,16 +328,28 @@ export function ApprovalRequestsScreen({
           ))}
         </View>
 
-        {filteredRequests.map((request) => (
-          <ApprovalRequestCard
-            key={request.id}
-            request={request}
-            onApprove={() => handleApprove(request.id)}
-            onReject={() => handleReject(request.id)}
-          />
-        ))}
+        {loadStatus === "loading" && (
+          <View style={styles.inlineLoading}>
+            <ActivityIndicator color="#2F6FE0" />
+          </View>
+        )}
 
-        {filteredRequests.length === 0 && (
+        {loadStatus === "error" && (
+          <ErrorNotice message={loadError ?? "Something went wrong."} onRetry={reload} />
+        )}
+
+        {loadStatus === "success" &&
+          filteredRequests.map((request) => (
+            <ApprovalRequestCard
+              key={request.id}
+              request={request}
+              acting={actingId === request.id}
+              onApprove={() => handleDecision(request.id, "approved")}
+              onReject={() => handleDecision(request.id, "rejected")}
+            />
+          ))}
+
+        {loadStatus === "success" && filteredRequests.length === 0 && (
           <View style={styles.emptyState}>
             <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
             <Text style={styles.emptyStateText}>No requests here</Text>
@@ -206,12 +360,26 @@ export function ApprovalRequestsScreen({
   );
 }
 
+function ErrorNotice({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <View style={styles.errorNotice}>
+      <Ionicons name="alert-circle-outline" size={20} color="#DC2626" />
+      <Text style={styles.errorNoticeText}>{message}</Text>
+      <TouchableOpacity onPress={onRetry} style={styles.retryButton} activeOpacity={0.8}>
+        <Text style={styles.retryButtonText}>Retry</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 function ApprovalRequestCard({
   request,
+  acting,
   onApprove,
   onReject,
 }: {
   request: ApprovalRequest;
+  acting: boolean;
   onApprove: () => void;
   onReject: () => void;
 }) {
@@ -251,11 +419,21 @@ function ApprovalRequestCard({
 
       {status === "pending" ? (
         <View style={styles.actionsRow}>
-          <TouchableOpacity style={styles.rejectButton} onPress={onReject} activeOpacity={0.85}>
+          <TouchableOpacity
+            style={[styles.rejectButton, acting && styles.actionButtonDisabled]}
+            onPress={onReject}
+            activeOpacity={0.85}
+            disabled={acting}
+          >
             <Text style={styles.rejectButtonText}>Reject</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.approveButton} onPress={onApprove} activeOpacity={0.85}>
-            <Text style={styles.approveButtonText}>Approve</Text>
+          <TouchableOpacity
+            style={[styles.approveButton, acting && styles.actionButtonDisabled]}
+            onPress={onApprove}
+            activeOpacity={0.85}
+            disabled={acting}
+          >
+            {acting ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.approveButtonText}>Approve</Text>}
           </TouchableOpacity>
         </View>
       ) : (
@@ -427,6 +605,35 @@ const styles = StyleSheet.create({
   statusPillTextActive: {
     color: "#fff",
   },
+  inlineLoading: {
+    paddingVertical: 24,
+    alignItems: "center",
+  },
+  errorNotice: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 20,
+  },
+  errorNoticeText: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
+    textAlign: "center",
+    paddingHorizontal: 12,
+  },
+  retryButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+  },
   card: {
     backgroundColor: "#fff",
     borderRadius: 16,
@@ -529,6 +736,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: "#2F6FE0",
     paddingVertical: 10,
+  },
+  actionButtonDisabled: {
+    opacity: 0.6,
   },
   approveButtonText: {
     fontSize: 13,

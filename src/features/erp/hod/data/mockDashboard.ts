@@ -34,7 +34,7 @@ export const studentSectionItems: QuickAccessItem[] = [
   { id: "pop-sop", label: "POP / SOP", icon: "document-text-outline", route: "/(tabs)/erp/pop-sop" },
   {
     id: "assign-faculty",
-    label: "Assign Faculty",
+    label: "Assigned Faculty",
     icon: "person-add-outline",
     route: "/(tabs)/erp/assign-faculty",
   },
