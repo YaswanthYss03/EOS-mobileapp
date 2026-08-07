@@ -40,3 +40,14 @@ export async function getMyAcademicCalendarAsFaculty(): Promise<MyAcademicCalend
   const { data } = await apiClient.get<{ data: MyAcademicCalendar }>("/me/faculty-academic-calendar");
   return data.data;
 }
+
+// GET /me/academic-calendar-institution (HoD/HR Payroll) - see
+// EOS-backend's TimetableService.getInstitutionAcademicCalendar(). HR
+// Payroll has no "own" batch/semester to scope a calendar to, so this
+// merges every academic_calendars row institution-wide instead - same
+// MyAcademicCalendar shape (semester is realistically always null here,
+// since more than one semester's calendar exists at once institution-wide).
+export async function getInstitutionAcademicCalendar(): Promise<MyAcademicCalendar> {
+  const { data } = await apiClient.get<{ data: MyAcademicCalendar }>("/me/academic-calendar-institution");
+  return data.data;
+}

@@ -7,15 +7,10 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
-import { useRole } from "@/hooks/useRole";
-import {
-  getMyAcademicCalendar,
-  getMyAcademicCalendarAsFaculty,
-  getInstitutionAcademicCalendar,
-  type CalendarEventType,
-  type MyAcademicCalendar,
-  type MyCalendarEvent,
-} from "@/services/api/academic-calendar.api";
+import { getChildAcademicCalendar } from "@/services/api/parents.api";
+import type { CalendarEventType, MyAcademicCalendar, MyCalendarEvent } from "@/services/api/academic-calendar.api";
+import { useParentChildren } from "./useParentChildren";
+import { ChildSelector } from "./ChildSelector";
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -57,10 +52,6 @@ function AcademicCalendarHeader({ onBack, calendar }: { onBack: () => void; cale
     calendar?.start_date && calendar?.end_date
       ? `${formatShortMonthYear(calendar.start_date)} – ${formatShortMonthYear(calendar.end_date)}`
       : null;
-  // A faculty member teaching into several semesters at once has no single
-  // semester number to show (see getMergedAcademicCalendarForFaculty) - the
-  // real merged date range is still shown on its own rather than a
-  // fabricated "Semester N".
   const subtitle =
     calendar?.semester !== null && calendar?.semester !== undefined
       ? `Semester ${calendar.semester}${range ? ` · ${range}` : ""}`
@@ -88,21 +79,17 @@ function AcademicCalendarHeader({ onBack, calendar }: { onBack: () => void; cale
   );
 }
 
-// Wired to GET /me/academic-calendar for STUDENTS (real calendar_events for
-// the student's own batch + current semester), GET
-// /me/faculty-academic-calendar for Faculty/HoD app users, who reach this
-// exact same screen (see AcademicsChooserScreen - "same for hod, faculty and
-// student"), and GET /me/academic-calendar-institution for HR Payroll (who
-// has no "own" batch/semester at all, so gets every calendar merged
-// institution-wide instead - see getInstitutionAcademicCalendar). A faculty
-// member can teach into several distinct batch+semester calendars at once,
-// so their events are merged/deduped server-side too - see
-// getMergedAcademicCalendarForFaculty. Only "holiday"/"event" types exist in
-// the schema - there is no "review"/"exam" category to show.
-export function AcademicCalendarScreen() {
+// Same real GET /me/academic-calendar data/UI as the shared
+// AcademicCalendarScreen (student/faculty/hod), just scoped to the parent's
+// selected child via GET /me/children/:studentId/academic-calendar - see
+// parents.api.ts. Only "holiday"/"event" types exist in the schema - there
+// is no "review"/"exam" category to show.
+export function ParentCalendarScreen() {
   const router = useRouter();
   const navigation = useNavigation();
-  const role = useRole();
+
+  const { status: childrenStatus, error: childrenError, children, selectedChild, setSelectedChildId, reload: reloadChildren } =
+    useParentChildren();
 
   const today = useMemo(() => new Date(), []);
   const [viewYear, setViewYear] = useState(today.getFullYear());
@@ -111,25 +98,19 @@ export function AcademicCalendarScreen() {
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [calendar, setCalendar] = useState<MyAcademicCalendar | null>(null);
 
-  const load = useCallback(() => {
+  const load = useCallback((studentId: number) => {
     setStatus("loading");
-    const request =
-      role === "student"
-        ? getMyAcademicCalendar()
-        : role === "hr-payroll"
-          ? getInstitutionAcademicCalendar()
-          : getMyAcademicCalendarAsFaculty();
-    request
+    getChildAcademicCalendar(studentId)
       .then((response) => {
         setCalendar(response);
         setStatus("success");
       })
       .catch(() => setStatus("error"));
-  }, [role]);
+  }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (selectedChild) load(selectedChild.id);
+  }, [selectedChild, load]);
 
   useFocusEffect(
     useCallback(() => {
@@ -176,73 +157,104 @@ export function AcademicCalendarScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
-      {status === "loading" && (
-        <View style={styles.inlineLoading}>
-          <ActivityIndicator color="#2F6FE0" />
-        </View>
-      )}
-
-      {status === "error" && (
-        <View style={styles.errorNotice}>
-          <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
-          <Text style={styles.errorNoticeText}>Couldn't load the academic calendar.</Text>
-          <TouchableOpacity onPress={load} style={styles.retryButton} activeOpacity={0.8}>
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {status === "success" && (
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <View style={styles.calendarCard}>
-            <View style={styles.monthNavRow}>
-              <TouchableOpacity style={styles.navButton} onPress={() => goToMonth(-1)}>
-                <Ionicons name="chevron-back" size={18} color="#2F6FE0" />
-              </TouchableOpacity>
-              <View style={styles.monthNavCenter}>
-                <Text style={styles.monthTitle}>
-                  {MONTH_NAMES[viewMonth]} {viewYear}
-                </Text>
-                <Text style={styles.eventCount}>{eventsThisMonth.length} EVENTS</Text>
-              </View>
-              <TouchableOpacity style={styles.navButton} onPress={() => goToMonth(1)}>
-                <Ionicons name="chevron-forward" size={18} color="#2F6FE0" />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.weekdayRow}>
-              {WEEKDAY_LABELS.map((label, i) => (
-                <Text key={`${label}-${i}`} style={styles.weekdayLabel}>
-                  {label}
-                </Text>
-              ))}
-            </View>
-
-            {weeks.map((week, i) => (
-              <View key={i} style={styles.weekRow}>
-                {week.map((day, j) => (
-                  <View key={j} style={styles.dayCell}>
-                    {day !== null && (
-                      <View style={[styles.dayCellInner, eventDays.has(day) && styles.dayCellHighlighted]}>
-                        <Text style={[styles.dayNumber, eventDays.has(day) && styles.dayNumberHighlighted]}>
-                          {day}
-                        </Text>
-                        {eventDays.has(day) && <View style={styles.dayDot} />}
-                      </View>
-                    )}
-                  </View>
-                ))}
-              </View>
-            ))}
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {childrenStatus === "loading" && (
+          <View style={styles.inlineLoading}>
+            <ActivityIndicator color="#2F6FE0" />
           </View>
+        )}
 
-          <Text style={styles.sectionTitle}>This month</Text>
-          {eventsThisMonth.map((event) => (
-            <EventCard key={event.id} event={event} />
-          ))}
-          {eventsThisMonth.length === 0 && <Text style={styles.noEvents}>No events this month.</Text>}
-        </ScrollView>
-      )}
+        {childrenStatus === "error" && (
+          <View style={styles.errorNotice}>
+            <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+            <Text style={styles.errorNoticeText}>{childrenError ?? "Something went wrong."}</Text>
+            <TouchableOpacity onPress={reloadChildren} style={styles.retryButton} activeOpacity={0.8}>
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {childrenStatus === "success" && children.length === 0 && (
+          <View style={styles.errorNotice}>
+            <Ionicons name="people-outline" size={22} color="#B0B7C3" />
+            <Text style={styles.errorNoticeText}>No linked children found</Text>
+          </View>
+        )}
+
+        {childrenStatus === "success" && selectedChild && (
+          <>
+            <ChildSelector children={children} selected={selectedChild} onSelect={(c) => setSelectedChildId(c.id)} />
+
+            {status === "loading" && (
+              <View style={styles.inlineLoading}>
+                <ActivityIndicator color="#2F6FE0" />
+              </View>
+            )}
+
+            {status === "error" && (
+              <View style={styles.errorNotice}>
+                <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+                <Text style={styles.errorNoticeText}>Couldn't load this child's academic calendar.</Text>
+                <TouchableOpacity onPress={() => load(selectedChild.id)} style={styles.retryButton} activeOpacity={0.8}>
+                  <Text style={styles.retryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {status === "success" && (
+              <>
+                <View style={styles.calendarCard}>
+                  <View style={styles.monthNavRow}>
+                    <TouchableOpacity style={styles.navButton} onPress={() => goToMonth(-1)}>
+                      <Ionicons name="chevron-back" size={18} color="#2F6FE0" />
+                    </TouchableOpacity>
+                    <View style={styles.monthNavCenter}>
+                      <Text style={styles.monthTitle}>
+                        {MONTH_NAMES[viewMonth]} {viewYear}
+                      </Text>
+                      <Text style={styles.eventCount}>{eventsThisMonth.length} EVENTS</Text>
+                    </View>
+                    <TouchableOpacity style={styles.navButton} onPress={() => goToMonth(1)}>
+                      <Ionicons name="chevron-forward" size={18} color="#2F6FE0" />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.weekdayRow}>
+                    {WEEKDAY_LABELS.map((label, i) => (
+                      <Text key={`${label}-${i}`} style={styles.weekdayLabel}>
+                        {label}
+                      </Text>
+                    ))}
+                  </View>
+
+                  {weeks.map((week, i) => (
+                    <View key={i} style={styles.weekRow}>
+                      {week.map((day, j) => (
+                        <View key={j} style={styles.dayCell}>
+                          {day !== null && (
+                            <View style={[styles.dayCellInner, eventDays.has(day) && styles.dayCellHighlighted]}>
+                              <Text style={[styles.dayNumber, eventDays.has(day) && styles.dayNumberHighlighted]}>
+                                {day}
+                              </Text>
+                              {eventDays.has(day) && <View style={styles.dayDot} />}
+                            </View>
+                          )}
+                        </View>
+                      ))}
+                    </View>
+                  ))}
+                </View>
+
+                <Text style={styles.sectionTitle}>This month</Text>
+                {eventsThisMonth.map((event) => (
+                  <EventCard key={event.id} event={event} />
+                ))}
+                {eventsThisMonth.length === 0 && <Text style={styles.noEvents}>No events this month.</Text>}
+              </>
+            )}
+          </>
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 }

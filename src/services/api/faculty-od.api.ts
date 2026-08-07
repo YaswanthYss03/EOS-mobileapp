@@ -19,8 +19,9 @@ export type MyFacultyOd = {
   hr_approval_status: FacultyOdApprovalStatus;
   overall_status: FacultyOdApprovalStatus;
   created_at: string;
-  // Only present on the HoD-facing list (getHodFacultyOds) — absent on the
-  // self-service listFacultyOd() response.
+  // Only present on the HoD/HR-facing lists (getHodFacultyOds,
+  // listFacultyOdForReview) — absent on the self-service listFacultyOd()
+  // response.
   faculty?: {
     id: number;
     first_name: string;
@@ -59,12 +60,37 @@ export async function getHodFacultyOds(): Promise<MyFacultyOd[]> {
   return data.data.data;
 }
 
+// Same GET /me/faculty-od endpoint as above, but for an HR Payroll caller -
+// the backend hides any request not yet HoD-approved (see
+// FacultyOdService.findAll), so this only ever returns requests ready for
+// HR action.
+export async function listFacultyOdForReview(): Promise<MyFacultyOd[]> {
+  const { data } = await apiClient.get<{ data: { data: MyFacultyOd[] } }>("/me/faculty-od", {
+    params: { limit: 100 },
+  });
+  return data.data.data;
+}
+
 export async function hodApproveFacultyOd(
   id: number,
   decision: "approved" | "rejected",
 ): Promise<MyFacultyOd> {
   const { data } = await apiClient.patch<{ data: MyFacultyOd }>(`/me/faculty-od/${id}`, {
     hod_approval_status: decision,
+  });
+  return data.data;
+}
+
+// PATCH /me/faculty-od/:id (HR Payroll only sets hr_approval_status, and
+// only once hod_approval_status is already 'approved' - the backend 409s
+// with "HR approval requires HoD approval first" otherwise; that message is
+// surfaced as-is via getApiErrorMessage rather than a generic fallback).
+export async function reviewFacultyOdAsHr(
+  id: number,
+  decision: "approved" | "rejected",
+): Promise<MyFacultyOd> {
+  const { data } = await apiClient.patch<{ data: MyFacultyOd }>(`/me/faculty-od/${id}`, {
+    hr_approval_status: decision,
   });
   return data.data;
 }

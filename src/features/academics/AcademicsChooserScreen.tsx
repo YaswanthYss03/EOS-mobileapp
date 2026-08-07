@@ -7,6 +7,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
+import { useRole } from "@/hooks/useRole";
 
 type ChooserOption = {
   id: string;
@@ -22,7 +23,7 @@ const options: ChooserOption[] = [
   {
     id: "academics",
     title: "Academics",
-    description: "Timetable, courses, calendar and reminders",
+    description: "Timetable and calendar ",
     icon: "school-outline",
     route: "/(tabs)/academics/overview",
   },
@@ -34,6 +35,11 @@ const options: ChooserOption[] = [
     route: "/(tabs)/academics/placements",
   },
 ];
+
+// HR Payroll has nothing to do with student placements - only Academics
+// (which itself only shows Timetable/Calendar for this role, see
+// AcademicsOverviewScreen) is relevant.
+const hrOptions = options.filter((option) => option.id === "academics");
 
 function EduHeader({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
@@ -63,6 +69,8 @@ function EduHeader({ onBack }: { onBack: () => void }) {
 export function AcademicsChooserScreen() {
   const router = useRouter();
   const navigation = useNavigation();
+  const role = useRole();
+  const visibleOptions = role === "hr-payroll" ? hrOptions : options;
 
   // Swaps the shared CollegeHeader (mounted at the Tabs level, see
   // app/(tabs)/_layout.tsx) for this screen's own header while it's focused,
@@ -94,7 +102,7 @@ export function AcademicsChooserScreen() {
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       <View style={styles.row}>
-        {options.map((option) => (
+        {visibleOptions.map((option) => (
           <Pressable key={option.id} style={styles.card} onPress={() => router.push(option.route)}>
             <View style={styles.iconWrap}>
               <Ionicons name={option.icon} size={26} color="#2F6FE0" />
