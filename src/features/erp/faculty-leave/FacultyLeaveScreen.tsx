@@ -70,8 +70,11 @@ export function FacultyLeaveScreen() {
         setFacultyRequests(
           rows.map((row) => ({
             id: String(row.id),
-            name: `${row.faculty.first_name} ${row.faculty.last_name}`,
-            subtitle: row.faculty.designation,
+            // faculty is typed optional on MyFacultyLeave (absent on the
+            // self-service list) but listFacultyLeavesForReview's own doc
+            // comment guarantees it's always populated here.
+            name: `${row.faculty!.first_name} ${row.faculty!.last_name}`,
+            subtitle: row.faculty!.designation,
             fromDate: formatDate(new Date(row.from_date)),
             toDate: formatDate(new Date(row.to_date)),
             days: daysBetweenInclusive(row.from_date, row.to_date),
