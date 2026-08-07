@@ -20,12 +20,14 @@ const academicsItems = [
   { id: "calendar", label: "Calendar", icon: "calendar-outline", route: "/(tabs)/academics/calendar" },
 ];
 
-// HR Payroll has no "own" current semester (that's a self-service concept
-// for someone actually enrolled/teaching) - only Timetable and Calendar are
-// meaningful for HR, both of which branch to a department-roster browser
-// instead of a self-view (see app/(tabs)/academics/timetable/index.tsx and
-// .../calendar/index.tsx).
-const hrAcademicsItems = academicsItems.filter((item) => item.id !== "current-semester");
+// HR Payroll and Parent both have no "own" current semester (that's a
+// self-service concept for someone actually enrolled/teaching) - only
+// Timetable and Calendar are meaningful for these two roles, both of which
+// branch to a different real data source instead of a self-view (HR: a
+// department-roster browser; Parent: the selected child's own timetable/
+// calendar) - see app/(tabs)/academics/timetable/index.tsx and
+// .../calendar/index.tsx.
+const timetableAndCalendarOnly = academicsItems.filter((item) => item.id !== "current-semester");
 
 function AcademicsHeader({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
@@ -56,7 +58,8 @@ export function AcademicsOverviewScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const role = useRole();
-  const items = role === "hr-payroll" ? hrAcademicsItems : academicsItems;
+  const items =
+    role === "hr-payroll" || role === "parent" ? timetableAndCalendarOnly : academicsItems;
 
   // Same header-swap pattern as AcademicsChooserScreen and the ERP role
   // dashboards - see src/features/academics/AcademicsChooserScreen.tsx.
