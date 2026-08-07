@@ -7,6 +7,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { QuickAccessGrid } from "@/features/erp/components/QuickAccessGrid";
 import { fonts } from "@/theme";
+import { useRole } from "@/hooks/useRole";
 
 const academicsItems = [
   {
@@ -18,6 +19,13 @@ const academicsItems = [
   { id: "timetable", label: "Timetable", icon: "time-outline", route: "/(tabs)/academics/timetable" },
   { id: "calendar", label: "Calendar", icon: "calendar-outline", route: "/(tabs)/academics/calendar" },
 ];
+
+// HR Payroll has no "own" current semester (that's a self-service concept
+// for someone actually enrolled/teaching) - only Timetable and Calendar are
+// meaningful for HR, both of which branch to a department-roster browser
+// instead of a self-view (see app/(tabs)/academics/timetable/index.tsx and
+// .../calendar/index.tsx).
+const hrAcademicsItems = academicsItems.filter((item) => item.id !== "current-semester");
 
 function AcademicsHeader({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
@@ -47,6 +55,8 @@ function AcademicsHeader({ onBack }: { onBack: () => void }) {
 export function AcademicsOverviewScreen() {
   const router = useRouter();
   const navigation = useNavigation();
+  const role = useRole();
+  const items = role === "hr-payroll" ? hrAcademicsItems : academicsItems;
 
   // Same header-swap pattern as AcademicsChooserScreen and the ERP role
   // dashboards - see src/features/academics/AcademicsChooserScreen.tsx.
@@ -65,7 +75,7 @@ export function AcademicsOverviewScreen() {
     <SafeAreaView style={styles.container} edges={[]}>
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Academics</Text>
-        <QuickAccessGrid items={academicsItems} size="large" />
+        <QuickAccessGrid items={items} size="large" />
       </View>
     </SafeAreaView>
   );

@@ -11,6 +11,7 @@ import { useRole } from "@/hooks/useRole";
 import {
   getMyAcademicCalendar,
   getMyAcademicCalendarAsFaculty,
+  getInstitutionAcademicCalendar,
   type CalendarEventType,
   type MyAcademicCalendar,
   type MyCalendarEvent,
@@ -88,11 +89,14 @@ function AcademicCalendarHeader({ onBack, calendar }: { onBack: () => void; cale
 }
 
 // Wired to GET /me/academic-calendar for STUDENTS (real calendar_events for
-// the student's own batch + current semester) and GET
+// the student's own batch + current semester), GET
 // /me/faculty-academic-calendar for Faculty/HoD app users, who reach this
 // exact same screen (see AcademicsChooserScreen - "same for hod, faculty and
-// student"). A faculty member can teach into several distinct batch+semester
-// calendars at once, so their events are merged/deduped server-side - see
+// student"), and GET /me/academic-calendar-institution for HR Payroll (who
+// has no "own" batch/semester at all, so gets every calendar merged
+// institution-wide instead - see getInstitutionAcademicCalendar). A faculty
+// member can teach into several distinct batch+semester calendars at once,
+// so their events are merged/deduped server-side too - see
 // getMergedAcademicCalendarForFaculty. Only "holiday"/"event" types exist in
 // the schema - there is no "review"/"exam" category to show.
 export function AcademicCalendarScreen() {
@@ -109,7 +113,12 @@ export function AcademicCalendarScreen() {
 
   const load = useCallback(() => {
     setStatus("loading");
-    const request = role === "student" ? getMyAcademicCalendar() : getMyAcademicCalendarAsFaculty();
+    const request =
+      role === "student"
+        ? getMyAcademicCalendar()
+        : role === "hr-payroll"
+          ? getInstitutionAcademicCalendar()
+          : getMyAcademicCalendarAsFaculty();
     request
       .then((response) => {
         setCalendar(response);

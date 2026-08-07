@@ -8,16 +8,31 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
-import { formatDate } from "@/utils/calendar";
 import { getApiErrorMessage } from "@/services/api/client";
-import { listFacultyOdForReview, reviewFacultyOdAsHr } from "@/services/api/faculty-od.api";
-import { mockOtherStaffOdRequests, type FacultyOdRequest, type FacultyOdStatus } from "./data/mockFacultyOd";
+import {
+  listPayslipRequestsForReview,
+  rejectPayslipRequestAsHr,
+  approvePayslipRequestAsHr,
+  type MyPayslipRequest,
+} from "@/services/api/payslip-requests.api";
+import { months } from "../payslip-request/data/mockPayslipRequest";
+import {
+  mockOtherStaffPayslipRequests,
+  type PayslipRequestCard,
+  type PayslipCardStatus,
+} from "./data/mockFacultyPayslip";
 
 type Tab = "faculty" | "others";
-type StatusFilter = "pending" | "approved" | "rejected" | "all";
+type StatusFilter = "pending" | "processed" | "rejected" | "all";
 type LoadStatus = "loading" | "success" | "error";
 
-const STATUS_FILTERS: StatusFilter[] = ["pending", "approved", "rejected", "all"];
+const STATUS_FILTERS: StatusFilter[] = ["pending", "processed", "rejected", "all"];
+const STATUS_LABEL: Record<StatusFilter, string> = {
+  pending: "Pending",
+  processed: "Approved",
+  rejected: "Rejected",
+  all: "All",
+};
 
 function initialsFromName(name: string) {
   return name
@@ -29,33 +44,23 @@ function initialsFromName(name: string) {
     .join("");
 }
 
-function daysBetweenInclusive(fromIso: string, toIso: string): number {
-  return Math.round((new Date(toIso).getTime() - new Date(fromIso).getTime()) / 86400000) + 1;
+function monthLabelFor(monthString: string): string {
+  const [yearStr, monthStr] = monthString.split("-");
+  const monthName = months[Number(monthStr) - 1] ?? monthStr;
+  return `${monthName} ${yearStr}`;
 }
 
-// Combines the two real place/purpose columns into the single "REASON" slot
-// this card already has (faculty_od_requests has no combined reason/remarks
-// column) - no fabrication, just formatting two real fields into one line.
-function combineReason(place: string | null, purpose: string | null): string {
-  if (purpose && place) return `${purpose} — ${place}`;
-  return purpose ?? place ?? "";
-}
-
-// Wired to GET/PATCH /me/faculty-od (real faculty_od_requests rows) for the
-// Faculty tab - this HR Payroll caller sees every faculty member's requests
-// (the backend only self-scopes the FACULTY role, not HR_PAYROLL/HOD), but
-// only ones the HoD has already approved - the backend force-filters
-// hod_approval_status='approved' for HR_PAYROLL callers, so a request still
-// awaiting HoD review never appears here at all (there would be nothing for
-// HR to act on yet - see FacultyOdService.findAll). overall_status drives
-// the pending/approved/rejected pills and badge - "pending" here always
-// means "HoD approved, awaiting HR", never "awaiting HoD".
-// faculty_od_requests has no department column, so the card subtitle
-// shows designation only (no "· CSE" suffix). The Others (non-teaching
-// staff) tab has no backend module at all yet and stays on mock data,
-// standalone from the HoD's existing Student/Faculty On Duty screen (see
-// erp/od/OdScreen.tsx).
-export function FacultyOdScreen() {
+// Wired to GET/PATCH /me/payslip-requests (real payslip_requests rows) for
+// the Faculty tab - this HR Payroll caller sees every faculty member's
+// requests (the backend only self-scopes the FACULTY role, not HR_PAYROLL).
+// Unlike Leave/OD, payslip approval is a single-stage, HR-only workflow
+// (status: pending -> processed | rejected, no HoD stage at all - see
+// payslip_requests.status in the schema). Approve/Reject both just flip the
+// status directly - no file is required to approve; file_url stays null
+// unless attached some other way later. The Others (non-teaching staff) tab
+// has no backend module at all yet and stays on mock data, same gap as the
+// sibling Leave/OD/Attendance screens.
+export function FacultyPayslipScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -65,32 +70,30 @@ export function FacultyOdScreen() {
 
   const [facultyStatus, setFacultyStatus] = useState<LoadStatus>("loading");
   const [facultyError, setFacultyError] = useState<string | null>(null);
-  const [facultyRequests, setFacultyRequests] = useState<FacultyOdRequest[]>([]);
+  const [facultyRequests, setFacultyRequests] = useState<PayslipRequestCard[]>([]);
   const [actingOnId, setActingOnId] = useState<string | null>(null);
 
-  const [otherRequests, setOtherRequests] = useState(mockOtherStaffOdRequests);
+  const [otherRequests, setOtherRequests] = useState(mockOtherStaffPayslipRequests);
 
   const loadFacultyRequests = useCallback(() => {
     setFacultyStatus("loading");
     setFacultyError(null);
-    listFacultyOdForReview()
-      .then((rows) => {
+    listPayslipRequestsForReview()
+      .then((rows: MyPayslipRequest[]) => {
         setFacultyRequests(
           rows.map((row) => ({
             id: String(row.id),
             name: `${row.faculty.first_name} ${row.faculty.last_name}`,
             subtitle: row.faculty.designation,
-            fromDate: formatDate(new Date(row.from_date)),
-            toDate: formatDate(new Date(row.to_date)),
-            days: daysBetweenInclusive(row.from_date, row.to_date),
-            reason: combineReason(row.place, row.purpose),
-            status: row.overall_status,
+            month: monthLabelFor(row.month),
+            purpose: row.purpose ?? "",
+            status: row.status,
           })),
         );
         setFacultyStatus("success");
       })
       .catch((err) => {
-        setFacultyError(getApiErrorMessage(err, "Couldn't load faculty OD requests."));
+        setFacultyError(getApiErrorMessage(err, "Couldn't load payslip requests."));
         setFacultyStatus("error");
       });
   }, []);
@@ -113,7 +116,7 @@ export function FacultyOdScreen() {
   const counts = useMemo(
     () => ({
       pending: requests.filter((r) => r.status === "pending").length,
-      approved: requests.filter((r) => r.status === "approved").length,
+      processed: requests.filter((r) => r.status === "processed").length,
       rejected: requests.filter((r) => r.status === "rejected").length,
       all: requests.length,
     }),
@@ -125,44 +128,44 @@ export function FacultyOdScreen() {
     [requests, statusFilter],
   );
 
-  function updateOtherStatus(id: string, status: FacultyOdStatus) {
+  function updateOtherStatus(id: string, status: PayslipCardStatus) {
     setOtherRequests((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
-  }
-
-  function handleApprove(id: string) {
-    if (tab === "others") {
-      updateOtherStatus(id, "approved");
-      toast.success("On-duty request approved");
-      return;
-    }
-
-    setActingOnId(id);
-    reviewFacultyOdAsHr(Number(id), "approved")
-      .then(() => {
-        toast.success("On-duty request approved");
-        loadFacultyRequests();
-      })
-      .catch((err) => {
-        toast.error(getApiErrorMessage(err, "Couldn't approve this OD request."));
-      })
-      .finally(() => setActingOnId(null));
   }
 
   function handleReject(id: string) {
     if (tab === "others") {
       updateOtherStatus(id, "rejected");
-      toast.info("On-duty request rejected");
+      toast.info("Payslip request rejected");
       return;
     }
 
     setActingOnId(id);
-    reviewFacultyOdAsHr(Number(id), "rejected")
+    rejectPayslipRequestAsHr(Number(id))
       .then(() => {
-        toast.info("On-duty request rejected");
+        toast.info("Payslip request rejected");
         loadFacultyRequests();
       })
       .catch((err) => {
-        toast.error(getApiErrorMessage(err, "Couldn't reject this OD request."));
+        toast.error(getApiErrorMessage(err, "Couldn't reject this payslip request."));
+      })
+      .finally(() => setActingOnId(null));
+  }
+
+  function handleApprove(id: string) {
+    if (tab === "others") {
+      updateOtherStatus(id, "processed");
+      toast.success("Payslip request approved");
+      return;
+    }
+
+    setActingOnId(id);
+    approvePayslipRequestAsHr(Number(id))
+      .then(() => {
+        toast.success("Payslip request approved");
+        loadFacultyRequests();
+      })
+      .catch((err) => {
+        toast.error(getApiErrorMessage(err, "Couldn't approve this payslip request."));
       })
       .finally(() => setActingOnId(null));
   }
@@ -188,9 +191,9 @@ export function FacultyOdScreen() {
           <Ionicons name="arrow-back" size={20} color="#fff" />
         </TouchableOpacity>
         <View>
-          <Text style={styles.headerTitle}>On Duty</Text>
+          <Text style={styles.headerTitle}>Payslip</Text>
           <Text style={styles.headerSubtitle}>
-            {tab === "faculty" ? "Faculty OD requests" : "Support staff OD requests"}
+            {tab === "faculty" ? "Faculty payslip requests" : "Support staff payslip requests"}
           </Text>
         </View>
       </LinearGradient>
@@ -219,7 +222,7 @@ export function FacultyOdScreen() {
               onPress={() => setStatusFilter(status)}
             >
               <Text style={[styles.statusPillText, statusFilter === status && styles.statusPillTextActive]}>
-                {status.charAt(0).toUpperCase() + status.slice(1)} ({counts[status]})
+                {STATUS_LABEL[status]} ({counts[status]})
               </Text>
             </TouchableOpacity>
           ))}
@@ -240,7 +243,7 @@ export function FacultyOdScreen() {
         ) : (
           <>
             {filteredRequests.map((request) => (
-              <FacultyOdCard
+              <PayslipCard
                 key={request.id}
                 request={request}
                 isActing={actingOnId === request.id}
@@ -262,18 +265,18 @@ export function FacultyOdScreen() {
   );
 }
 
-function FacultyOdCard({
+function PayslipCard({
   request,
   isActing = false,
   onApprove,
   onReject,
 }: {
-  request: FacultyOdRequest;
+  request: PayslipRequestCard;
   isActing?: boolean;
   onApprove: () => void;
   onReject: () => void;
 }) {
-  const { name, subtitle, fromDate, toDate, days, reason, status } = request;
+  const { name, subtitle, month, purpose, status } = request;
 
   return (
     <View style={styles.card}>
@@ -289,27 +292,13 @@ function FacultyOdCard({
 
       <View style={styles.divider} />
 
-      <View style={styles.dateRow}>
-        <View style={styles.dateCol}>
-          <Text style={styles.dateLabel}>FROM DATE</Text>
-          <Text style={styles.dateValue}>{fromDate}</Text>
-        </View>
-        <View style={styles.dateCol}>
-          <Text style={styles.dateLabel}>TO DATE</Text>
-          <Text style={styles.dateValue}>{toDate}</Text>
-        </View>
-        <View style={styles.dateCol}>
-          <Text style={styles.dateLabel}>NO. OF DAYS</Text>
-          <Text style={styles.dateValue}>
-            {days} day{days > 1 ? "s" : ""}
-          </Text>
-        </View>
-      </View>
+      <Text style={styles.fieldLabel}>MONTH</Text>
+      <Text style={styles.fieldValue}>{month}</Text>
 
-      {reason && (
+      {purpose && (
         <>
-          <Text style={styles.reasonLabel}>REASON</Text>
-          <Text style={styles.reasonText}>{reason}</Text>
+          <Text style={[styles.fieldLabel, styles.purposeLabel]}>PURPOSE</Text>
+          <Text style={styles.purposeText}>{purpose}</Text>
         </>
       )}
 
@@ -340,16 +329,16 @@ function FacultyOdCard({
         <View
           style={[
             styles.statusBadge,
-            status === "approved" ? styles.statusBadgeApproved : styles.statusBadgeRejected,
+            status === "processed" ? styles.statusBadgeApproved : styles.statusBadgeRejected,
           ]}
         >
           <Ionicons
-            name={status === "approved" ? "checkmark-circle" : "close-circle"}
+            name={status === "processed" ? "checkmark-circle" : "close-circle"}
             size={14}
-            color={status === "approved" ? "#16A34A" : "#DC2626"}
+            color={status === "processed" ? "#16A34A" : "#DC2626"}
           />
-          <Text style={[styles.statusBadgeText, { color: status === "approved" ? "#16A34A" : "#DC2626" }]}>
-            {status === "approved" ? "Approved" : "Rejected"}
+          <Text style={[styles.statusBadgeText, { color: status === "processed" ? "#16A34A" : "#DC2626" }]}>
+            {status === "processed" ? "Approved" : "Rejected"}
           </Text>
         </View>
       )}
@@ -503,33 +492,23 @@ const styles = StyleSheet.create({
     backgroundColor: "#F1F3F6",
     marginBottom: 12,
   },
-  dateRow: {
-    flexDirection: "row",
-    marginBottom: 10,
-  },
-  dateCol: {
-    flex: 1,
-  },
-  dateLabel: {
+  fieldLabel: {
     fontSize: 9,
     fontFamily: fonts.bold,
     color: "#9AA6B2",
     letterSpacing: 0.5,
   },
-  dateValue: {
-    fontSize: 13,
+  fieldValue: {
+    fontSize: 14,
     fontFamily: fonts.bold,
     color: "#111827",
     marginTop: 3,
+    marginBottom: 10,
   },
-  reasonLabel: {
-    fontSize: 9,
-    fontFamily: fonts.bold,
-    color: "#9AA6B2",
-    letterSpacing: 0.5,
+  purposeLabel: {
     marginBottom: 3,
   },
-  reasonText: {
+  purposeText: {
     fontSize: 13,
     fontFamily: fonts.regular,
     color: "#374151",

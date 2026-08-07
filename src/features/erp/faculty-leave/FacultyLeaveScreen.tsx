@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -8,10 +8,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
-import { mockFacultyLeaveRequests, mockOtherStaffLeaveRequests, type FacultyLeaveRequest, type FacultyLeaveStatus } from "./data/mockFacultyLeave";
+import { formatDate } from "@/utils/calendar";
+import { getApiErrorMessage } from "@/services/api/client";
+import { listFacultyLeavesForReview, reviewFacultyLeaveAsHr } from "@/services/api/faculty-leaves.api";
+import { mockOtherStaffLeaveRequests, type FacultyLeaveRequest, type FacultyLeaveStatus } from "./data/mockFacultyLeave";
 
 type Tab = "faculty" | "others";
 type StatusFilter = "pending" | "approved" | "rejected" | "all";
+type LoadStatus = "loading" | "success" | "error";
 
 const STATUS_FILTERS: StatusFilter[] = ["pending", "approved", "rejected", "all"];
 
@@ -25,11 +29,24 @@ function initialsFromName(name: string) {
     .join("");
 }
 
-// TODO: this is a view-only approve/reject UI over mockFacultyLeave - wire to
-// a real leave backend endpoint once one exists. Standalone from the HoD's
-// existing Student/Faculty Leave screen (see erp/leave/LeaveScreen.tsx) -
-// this one splits teaching Faculty vs non-teaching Others staff instead, same
-// as the sibling erp/faculty-od/FacultyOdScreen.tsx.
+function daysBetweenInclusive(fromIso: string, toIso: string): number {
+  return Math.round((new Date(toIso).getTime() - new Date(fromIso).getTime()) / 86400000) + 1;
+}
+
+// Wired to GET/PATCH /me/faculty-leaves (real faculty_leaves rows) for the
+// Faculty tab - this HR Payroll caller sees every faculty member's requests
+// (the backend only self-scopes the FACULTY role, not HR_PAYROLL/HOD), but
+// only ones the HoD has already approved - the backend force-filters
+// hod_approval_status='approved' for HR_PAYROLL callers, so a request still
+// awaiting HoD review never appears here at all (there would be nothing for
+// HR to act on yet - see FacultyLeavesService.findAll). overall_status
+// drives the pending/approved/rejected pills and badge - "pending" here
+// always means "HoD approved, awaiting HR", never "awaiting HoD".
+// faculty_leaves has no department column, so the card subtitle
+// shows designation only (no "· CSE" suffix). The Others (non-teaching
+// staff) tab has no backend module at all yet and stays on mock data,
+// standalone from the HoD's existing Student/Faculty Leave screen (see
+// erp/leave/LeaveScreen.tsx) - same as the sibling erp/faculty-od/FacultyOdScreen.tsx.
 export function FacultyLeaveScreen() {
   const navigation = useNavigation();
   const router = useRouter();
@@ -37,8 +54,42 @@ export function FacultyLeaveScreen() {
 
   const [tab, setTab] = useState<Tab>("faculty");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
-  const [facultyRequests, setFacultyRequests] = useState(mockFacultyLeaveRequests);
+
+  const [facultyStatus, setFacultyStatus] = useState<LoadStatus>("loading");
+  const [facultyError, setFacultyError] = useState<string | null>(null);
+  const [facultyRequests, setFacultyRequests] = useState<FacultyLeaveRequest[]>([]);
+  const [actingOnId, setActingOnId] = useState<string | null>(null);
+
   const [otherRequests, setOtherRequests] = useState(mockOtherStaffLeaveRequests);
+
+  const loadFacultyRequests = useCallback(() => {
+    setFacultyStatus("loading");
+    setFacultyError(null);
+    listFacultyLeavesForReview()
+      .then((rows) => {
+        setFacultyRequests(
+          rows.map((row) => ({
+            id: String(row.id),
+            name: `${row.faculty.first_name} ${row.faculty.last_name}`,
+            subtitle: row.faculty.designation,
+            fromDate: formatDate(new Date(row.from_date)),
+            toDate: formatDate(new Date(row.to_date)),
+            days: daysBetweenInclusive(row.from_date, row.to_date),
+            reason: row.reason ?? "",
+            status: row.overall_status,
+          })),
+        );
+        setFacultyStatus("success");
+      })
+      .catch((err) => {
+        setFacultyError(getApiErrorMessage(err, "Couldn't load faculty leave requests."));
+        setFacultyStatus("error");
+      });
+  }, []);
+
+  useEffect(() => {
+    loadFacultyRequests();
+  }, [loadFacultyRequests]);
 
   useFocusEffect(
     useCallback(() => {
@@ -66,19 +117,46 @@ export function FacultyLeaveScreen() {
     [requests, statusFilter],
   );
 
-  function updateStatus(id: string, status: FacultyLeaveStatus) {
-    const setter = tab === "faculty" ? setFacultyRequests : setOtherRequests;
-    setter((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
+  function updateOtherStatus(id: string, status: FacultyLeaveStatus) {
+    setOtherRequests((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
   }
 
   function handleApprove(id: string) {
-    updateStatus(id, "approved");
-    toast.success("Leave request approved");
+    if (tab === "others") {
+      updateOtherStatus(id, "approved");
+      toast.success("Leave request approved");
+      return;
+    }
+
+    setActingOnId(id);
+    reviewFacultyLeaveAsHr(Number(id), "approved")
+      .then(() => {
+        toast.success("Leave request approved");
+        loadFacultyRequests();
+      })
+      .catch((err) => {
+        toast.error(getApiErrorMessage(err, "Couldn't approve this leave request."));
+      })
+      .finally(() => setActingOnId(null));
   }
 
   function handleReject(id: string) {
-    updateStatus(id, "rejected");
-    toast.info("Leave request rejected");
+    if (tab === "others") {
+      updateOtherStatus(id, "rejected");
+      toast.info("Leave request rejected");
+      return;
+    }
+
+    setActingOnId(id);
+    reviewFacultyLeaveAsHr(Number(id), "rejected")
+      .then(() => {
+        toast.info("Leave request rejected");
+        loadFacultyRequests();
+      })
+      .catch((err) => {
+        toast.error(getApiErrorMessage(err, "Couldn't reject this leave request."));
+      })
+      .finally(() => setActingOnId(null));
   }
 
   function switchTab(nextTab: Tab) {
@@ -139,20 +217,37 @@ export function FacultyLeaveScreen() {
           ))}
         </View>
 
-        {filteredRequests.map((request) => (
-          <FacultyLeaveCard
-            key={request.id}
-            request={request}
-            onApprove={() => handleApprove(request.id)}
-            onReject={() => handleReject(request.id)}
-          />
-        ))}
-
-        {filteredRequests.length === 0 && (
-          <View style={styles.emptyState}>
-            <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
-            <Text style={styles.emptyStateText}>No requests here</Text>
+        {tab === "faculty" && facultyStatus === "loading" ? (
+          <View style={styles.inlineLoading}>
+            <ActivityIndicator color="#2F6FE0" />
           </View>
+        ) : tab === "faculty" && facultyStatus === "error" ? (
+          <View style={styles.emptyState}>
+            <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+            <Text style={styles.emptyStateText}>{facultyError ?? "Something went wrong."}</Text>
+            <TouchableOpacity onPress={loadFacultyRequests} style={styles.retryButton} activeOpacity={0.8}>
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            {filteredRequests.map((request) => (
+              <FacultyLeaveCard
+                key={request.id}
+                request={request}
+                isActing={actingOnId === request.id}
+                onApprove={() => handleApprove(request.id)}
+                onReject={() => handleReject(request.id)}
+              />
+            ))}
+
+            {filteredRequests.length === 0 && (
+              <View style={styles.emptyState}>
+                <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
+                <Text style={styles.emptyStateText}>No requests here</Text>
+              </View>
+            )}
+          </>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -161,10 +256,12 @@ export function FacultyLeaveScreen() {
 
 function FacultyLeaveCard({
   request,
+  isActing = false,
   onApprove,
   onReject,
 }: {
   request: FacultyLeaveRequest;
+  isActing?: boolean;
   onApprove: () => void;
   onReject: () => void;
 }) {
@@ -201,16 +298,34 @@ function FacultyLeaveCard({
         </View>
       </View>
 
-      <Text style={styles.reasonLabel}>REASON</Text>
-      <Text style={styles.reasonText}>{reason}</Text>
+      {reason && (
+        <>
+          <Text style={styles.reasonLabel}>REASON</Text>
+          <Text style={styles.reasonText}>{reason}</Text>
+        </>
+      )}
 
       {status === "pending" ? (
         <View style={styles.actionsRow}>
-          <TouchableOpacity style={styles.rejectButton} onPress={onReject} activeOpacity={0.85}>
+          <TouchableOpacity
+            style={styles.rejectButton}
+            onPress={onReject}
+            activeOpacity={0.85}
+            disabled={isActing}
+          >
             <Text style={styles.rejectButtonText}>Reject</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.approveButton} onPress={onApprove} activeOpacity={0.85}>
-            <Text style={styles.approveButtonText}>Approve</Text>
+          <TouchableOpacity
+            style={styles.approveButton}
+            onPress={onApprove}
+            activeOpacity={0.85}
+            disabled={isActing}
+          >
+            {isActing ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={styles.approveButtonText}>Approve</Text>
+            )}
           </TouchableOpacity>
         </View>
       ) : (
@@ -472,5 +587,23 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: fonts.medium,
     color: "#9AA6B2",
+    textAlign: "center",
+  },
+  inlineLoading: {
+    paddingVertical: 40,
+    alignItems: "center",
+  },
+  retryButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
   },
 });
