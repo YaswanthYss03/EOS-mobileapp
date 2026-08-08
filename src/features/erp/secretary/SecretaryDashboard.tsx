@@ -1,39 +1,13 @@
 import { useCallback } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
+import { View, Text, ScrollView, StyleSheet } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { QuickAccessGrid } from "../components/QuickAccessGrid";
+import { DashboardHeader } from "../components/DashboardHeader";
 import { secretarySectionItems, employeeSectionItems } from "./data/mockDashboard";
-
-function SecretaryHeader({ onBack }: { onBack: () => void }) {
-  const insets = useSafeAreaInsets();
-
-  return (
-    <LinearGradient
-      colors={["#2F6FE0", "#1A3D8F"]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={[headerStyles.container, { paddingTop: insets.top + 10 }]}
-    >
-      <TouchableOpacity
-        onPress={onBack}
-        style={headerStyles.backButton}
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-      >
-        <Ionicons name="arrow-back" size={20} color="#fff" />
-      </TouchableOpacity>
-      <View>
-        <Text style={headerStyles.title}>EOS</Text>
-        <Text style={headerStyles.subtitle}>Secretary services</Text>
-      </View>
-    </LinearGradient>
-  );
-}
 
 // TODO: secretary RBAC - view-only pages for this role go here as siblings/subfolders.
 // Anything with complex operations (bulk edits, approvals, config) stays on the web app.
@@ -48,7 +22,7 @@ export function SecretaryDashboard() {
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({
-        header: () => <SecretaryHeader onBack={() => router.replace("/(tabs)/home")} />,
+        header: () => <DashboardHeader subtitle="Secretary services" onBack={() => router.replace("/(tabs)/home")} />,
       });
       return () => {
         navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
@@ -91,36 +65,5 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textTransform: "uppercase",
     marginBottom: 4,
-  },
-});
-
-const headerStyles = StyleSheet.create({
-  container: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
-  },
-  backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  title: {
-    color: "#fff",
-    fontSize: 18,
-    fontFamily: fonts.bold,
-  },
-  subtitle: {
-    color: "#D7E2FA",
-    fontSize: 12,
-    fontFamily: fonts.medium,
-    marginTop: 2,
   },
 });

@@ -1,7 +1,11 @@
+import { useCallback } from "react";
 import { View, Text, Image, Pressable, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { BackHeader } from "@/components/layout/BackHeader";
 import { fonts } from "@/theme";
 
 type AmenityOption = {
@@ -34,11 +38,26 @@ const options: AmenityOption[] = [
 
 export function AmenityHomeScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
+
+  // Swaps the shared CollegeHeader (mounted at the Tabs level, see
+  // app/(tabs)/_layout.tsx) for a plain "Amenity" + back button while this
+  // screen is focused, restoring the shared one on blur/unmount - same
+  // pattern as the ERP dashboards (see DashboardHeader), just without the
+  // "EOS" branding since this isn't a role dashboard.
+  useFocusEffect(
+    useCallback(() => {
+      navigation.getParent()?.setOptions({
+        header: () => <BackHeader title="Amenity" onBack={() => router.replace("/(tabs)/home")} />,
+      });
+      return () => {
+        navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
+      };
+    }, [navigation, router]),
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
-      <Text style={styles.title}>Amenity</Text>
-
       <View style={styles.list}>
         {options.map((option) => (
           <Pressable key={option.id} style={styles.card} onPress={() => router.push(option.route)}>
@@ -63,15 +82,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#fff",
   },
-  title: {
-    fontSize: 22,
-    fontFamily: fonts.bold,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 16,
-  },
   list: {
     paddingHorizontal: 16,
+    paddingTop: 16,
     gap: 16,
   },
   card: {

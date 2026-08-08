@@ -48,6 +48,12 @@
       "expo-web-browser",
       "expo-font",
       [
+        "expo-camera",
+        {
+          "cameraPermission": "EOS needs camera access to scan a wallet QR code when sending money."
+        }
+      ],
+      [
         "expo-notifications",
         {
           "icon": "./src/features/amenity/craveo/app/assets/icon.png",
