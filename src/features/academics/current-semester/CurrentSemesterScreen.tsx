@@ -217,7 +217,20 @@ export function CurrentSemesterScreen() {
             <Text style={styles.emptyText}>No subjects scheduled yet.</Text>
           ) : (
             subjects.map((subject) => (
-              <SubjectCard key={`${subject.id}-${subject.classId ?? ""}`} subject={subject} />
+              <SubjectCard
+                key={`${subject.id}-${subject.classId ?? ""}`}
+                subject={subject}
+                onPress={() =>
+                  router.push({
+                    pathname: "/(tabs)/academics/lms/[subjectId]",
+                    params: {
+                      subjectId: String(subject.id),
+                      subjectName: subject.name,
+                      subjectCode: subject.code,
+                    },
+                  })
+                }
+              />
             ))
           )}
         </ScrollView>
@@ -226,9 +239,9 @@ export function CurrentSemesterScreen() {
   );
 }
 
-function SubjectCard({ subject }: { subject: Subject }) {
+function SubjectCard({ subject, onPress }: { subject: Subject; onPress: () => void }) {
   return (
-    <View style={styles.card}>
+    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>
       <View style={styles.cardHeader}>
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>{initialsFromSubject(subject.name)}</Text>
@@ -261,7 +274,7 @@ function SubjectCard({ subject }: { subject: Subject }) {
         </View>
         <Text style={styles.footerText}>{subject.hoursPerWeek} hrs / week</Text>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 

@@ -7,13 +7,13 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
-import { mockProfile } from "@/features/profile/data/mockProfile";
 import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES } from "@/utils/calendar";
 import {
   getMyStaffAttendance,
   type MyStaffAttendanceResponse,
   type StaffAttendanceDayStatus,
 } from "@/services/api/staff-attendance.api";
+import { getMyProfile } from "@/services/api/profile.api";
 
 type LoadStatus = "loading" | "success" | "error";
 
@@ -58,6 +58,8 @@ export function MyAttendanceScreen() {
     }, [navigation]),
   );
 
+  const [headerLabel, setHeaderLabel] = useState<string | null>(null);
+
   const load = useCallback(() => {
     setStatus("loading");
     getMyStaffAttendance(viewYear, viewMonth + 1)
@@ -71,6 +73,13 @@ export function MyAttendanceScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Fetched once, not per month-navigation — this is just the header label.
+  useEffect(() => {
+    getMyProfile()
+      .then((profile) => setHeaderLabel(`${profile.name} · ${profile.id_no}`))
+      .catch(() => setHeaderLabel(null));
+  }, []);
 
   const weeks = useMemo(() => getCalendarWeeks(viewYear, viewMonth), [viewYear, viewMonth]);
 
@@ -114,9 +123,7 @@ export function MyAttendanceScreen() {
         </TouchableOpacity>
         <View>
           <Text style={styles.headerTitle}>Attendance</Text>
-          <Text style={styles.headerSubtitle}>
-            {mockProfile.name} · {mockProfile.employeeId}
-          </Text>
+          {headerLabel && <Text style={styles.headerSubtitle}>{headerLabel}</Text>}
         </View>
       </LinearGradient>
 

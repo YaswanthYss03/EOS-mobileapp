@@ -13,7 +13,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.eos.mobileapp"
@@ -52,7 +54,8 @@
           "color": "#FF4444",
           "defaultChannel": "alarm-channel"
         }
-      ]
+      ],
+      "expo-asset"
     ]
   }
 }
