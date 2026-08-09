@@ -28,6 +28,17 @@ export type AnnouncementFacultyTarget = {
   label: string;
 };
 
+// Principal (or Admin) only - one row per backend role, for the "Target
+// roles" checkbox grid. "Broadcast to everyone" is just selecting every row
+// here, not a distinct target_audience value - see
+// EOS-backend/src/modules/announcements/announcements/announcements.service.ts
+// lookupRoles().
+export type AnnouncementRole = {
+  id: number;
+  name: string;
+  description: string | null;
+};
+
 export type AnnouncementStatus = "draft" | "published";
 
 export type Announcement = {
@@ -35,8 +46,9 @@ export type Announcement = {
   title: string;
   content: string;
   status: AnnouncementStatus;
-  target_audience: "students" | "teachers" | "parents";
+  target_audience: "students" | "teachers" | "parents" | "roles";
   class_ids: number[];
+  role_ids: number[];
   department_id: number | null;
   file_url: string | null;
   file_name: string | null;
@@ -61,6 +73,14 @@ export async function getMyAssignedClasses(): Promise<AnnouncementClass[]> {
 export async function getMyDepartmentFacultyTarget(): Promise<AnnouncementFacultyTarget[]> {
   const { data } = await apiClient.get<{ data: AnnouncementFacultyTarget[] }>(
     "/announcements/lookup/my-department",
+  );
+  return data.data;
+}
+
+/** GET /announcements/lookup/roles - Principal/Admin only. */
+export async function getAnnouncementRoles(): Promise<AnnouncementRole[]> {
+  const { data } = await apiClient.get<{ data: AnnouncementRole[] }>(
+    "/announcements/lookup/roles",
   );
   return data.data;
 }
@@ -102,6 +122,27 @@ export async function publishAnnouncementToClasses(
     status: "published",
     target_audience: "students",
     class_ids: classIds,
+    file_key: attachment?.fileKey,
+    file_name: attachment?.fileName,
+  });
+  return data.data;
+}
+
+// Principal (or Admin) only - target_audience: 'roles', persisted via
+// announcement_role_mapping. "Broadcast to everyone" is just passing every
+// id from getAnnouncementRoles(), not a distinct call.
+export async function publishAnnouncementToRoles(
+  title: string,
+  content: string,
+  roleIds: number[],
+  attachment?: Attachment,
+): Promise<Announcement> {
+  const { data } = await apiClient.post<{ data: Announcement }>("/announcements", {
+    title,
+    content,
+    status: "published",
+    target_audience: "roles",
+    role_ids: roleIds,
     file_key: attachment?.fileKey,
     file_name: attachment?.fileName,
   });

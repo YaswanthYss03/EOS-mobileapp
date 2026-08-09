@@ -18,12 +18,15 @@ import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
+import { useRole } from "@/hooks/useRole";
 import {
   getMyAssignedClasses,
   getMyDepartmentFacultyTarget,
+  getAnnouncementRoles,
   uploadAnnouncementAttachment,
   publishAnnouncementToClasses,
   publishAnnouncementToDepartmentFaculty,
+  publishAnnouncementToRoles,
   createAnnouncementDraft,
   updateAnnouncementDraft,
   publishDraftToClasses,
@@ -31,6 +34,7 @@ import {
   deleteAnnouncement,
   type AnnouncementClass,
   type AnnouncementFacultyTarget,
+  type AnnouncementRole,
   type Announcement,
 } from "@/services/api/announcements.api";
 
@@ -75,12 +79,20 @@ export function AnnouncementsScreen() {
   const insets = useSafeAreaInsets();
   const { audience } = useLocalSearchParams<{ audience?: string }>();
   const isFacultyAudience = audience === "faculty";
+  const role = useRole();
+  // Only Principal (institution-wide broadcast) gets the "Target roles"
+  // section - every other role keeps the existing class/faculty targeting
+  // untouched. Admin has the same backend permission but no dashboard tile
+  // reaches this screen for that role today, so the UI stays scoped to what's
+  // actually reachable.
+  const canTargetRoles = role === "principal";
 
   const [tab, setTab] = useState<Tab>("create");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [selectedClassIds, setSelectedClassIds] = useState<number[]>([]);
   const [selectedFacultyDeptIds, setSelectedFacultyDeptIds] = useState<number[]>([]);
+  const [selectedRoleIds, setSelectedRoleIds] = useState<number[]>([]);
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [attaching, setAttaching] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -94,11 +106,23 @@ export function AnnouncementsScreen() {
   const [facultyTargetsError, setFacultyTargetsError] = useState<string | null>(null);
   const [facultyTargets, setFacultyTargets] = useState<AnnouncementFacultyTarget[]>([]);
 
+  const [rolesStatus, setRolesStatus] = useState<LoadStatus>("loading");
+  const [rolesError, setRolesError] = useState<string | null>(null);
+  const [roles, setRoles] = useState<AnnouncementRole[]>([]);
+
   const [draftsStatus, setDraftsStatus] = useState<LoadStatus>("loading");
   const [draftsError, setDraftsError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Announcement[]>([]);
 
   const loadClasses = useCallback(() => {
+    // Principal targets by role instead (see "Target roles" below) - class/
+    // department targeting is a Faculty/HoD/Admin concept a Principal has no
+    // use for, so skip the fetch entirely rather than loading data for a
+    // section that's hidden anyway.
+    if (canTargetRoles) {
+      setClassesStatus("unavailable");
+      return;
+    }
     // /announcements/lookup/assigned-classes now allows both Faculty and
     // HoD - an HoD who is themselves mapped to teach/mentor a class gets
     // the same real list; one who isn't just gets an empty array (handled
@@ -114,10 +138,10 @@ export function AnnouncementsScreen() {
         setClassesError(getApiErrorMessage(err, "Couldn't load your classes."));
         setClassesStatus("error");
       });
-  }, []);
+  }, [canTargetRoles]);
 
   const loadFacultyTargets = useCallback(() => {
-    if (isFacultyAudience) {
+    if (isFacultyAudience || canTargetRoles) {
       setFacultyTargetsStatus("unavailable");
       return;
     }
@@ -132,7 +156,25 @@ export function AnnouncementsScreen() {
         setFacultyTargetsError(getApiErrorMessage(err, "Couldn't load your department."));
         setFacultyTargetsStatus("error");
       });
-  }, [isFacultyAudience]);
+  }, [isFacultyAudience, canTargetRoles]);
+
+  const loadRoles = useCallback(() => {
+    if (!canTargetRoles) {
+      setRolesStatus("unavailable");
+      return;
+    }
+    setRolesStatus("loading");
+    setRolesError(null);
+    getAnnouncementRoles()
+      .then((rows) => {
+        setRoles(rows);
+        setRolesStatus("success");
+      })
+      .catch((err) => {
+        setRolesError(getApiErrorMessage(err, "Couldn't load roles."));
+        setRolesStatus("error");
+      });
+  }, [canTargetRoles]);
 
   const loadDrafts = useCallback(() => {
     setDraftsStatus("loading");
@@ -157,6 +199,10 @@ export function AnnouncementsScreen() {
   }, [loadFacultyTargets]);
 
   useEffect(() => {
+    loadRoles();
+  }, [loadRoles]);
+
+  useEffect(() => {
     loadDrafts();
   }, [loadDrafts]);
 
@@ -175,12 +221,14 @@ export function AnnouncementsScreen() {
   const allClassesSelected = classes.length > 0 && selectedClassIds.length === classes.length;
   const allFacultyTargetsSelected =
     facultyTargets.length > 0 && selectedFacultyDeptIds.length === facultyTargets.length;
+  const allRolesSelected = roles.length > 0 && selectedRoleIds.length === roles.length;
 
   function resetForm() {
     setTitle("");
     setDescription("");
     setSelectedClassIds([]);
     setSelectedFacultyDeptIds([]);
+    setSelectedRoleIds([]);
     setAttachment(null);
     setEditingDraftId(null);
   }
@@ -191,6 +239,10 @@ export function AnnouncementsScreen() {
 
   function handleToggleSendToAllFaculty() {
     setSelectedFacultyDeptIds(allFacultyTargetsSelected ? [] : facultyTargets.map((f) => f.id));
+  }
+
+  function handleToggleSelectAllRoles() {
+    setSelectedRoleIds(allRolesSelected ? [] : roles.map((r) => r.id));
   }
 
   function handleAttachFile() {
@@ -249,8 +301,16 @@ export function AnnouncementsScreen() {
       toast.warning("Add a title before publishing");
       return;
     }
-    if (selectedClassIds.length === 0 && selectedFacultyDeptIds.length === 0) {
-      toast.warning("Select at least one class or faculty group");
+    if (
+      selectedClassIds.length === 0 &&
+      selectedFacultyDeptIds.length === 0 &&
+      selectedRoleIds.length === 0
+    ) {
+      toast.warning(
+        canTargetRoles
+          ? "Select at least one class, faculty group, or role"
+          : "Select at least one class or faculty group",
+      );
       return;
     }
 
@@ -260,12 +320,13 @@ export function AnnouncementsScreen() {
       ? { fileKey: attachment.fileKey, fileName: attachment.fileName }
       : undefined;
 
-    // "students" (class_ids) and "teachers" (department_id) are mutually
-    // exclusive per announcement on the backend - selecting both sends two
-    // announcements sharing the same title/content. If we're publishing a
-    // saved draft and classes are selected, that reuses the draft's own
-    // row (PATCH); any faculty-department targets are always new rows,
-    // since a draft can never carry a department target itself.
+    // "students" (class_ids), "teachers" (department_id) and "roles"
+    // (role_ids) are mutually exclusive per announcement on the backend -
+    // selecting more than one sends separate announcements sharing the same
+    // title/content. If we're publishing a saved draft and classes are
+    // selected, that reuses the draft's own row (PATCH); faculty-department
+    // and role targets are always new rows, since a draft can never carry
+    // either of those at the same time as class_ids.
     const calls: Promise<Announcement>[] = [];
     if (selectedClassIds.length > 0) {
       calls.push(
@@ -278,6 +339,9 @@ export function AnnouncementsScreen() {
       calls.push(
         publishAnnouncementToDepartmentFaculty(trimmedTitle, description, departmentId, attachmentPayload),
       );
+    }
+    if (selectedRoleIds.length > 0) {
+      calls.push(publishAnnouncementToRoles(trimmedTitle, description, selectedRoleIds, attachmentPayload));
     }
 
     Promise.all(calls)
@@ -295,6 +359,7 @@ export function AnnouncementsScreen() {
     setDescription(draft.content);
     setSelectedClassIds(draft.class_ids);
     setSelectedFacultyDeptIds([]);
+    setSelectedRoleIds([]);
     setAttachment(attachmentFromAnnouncement(draft));
     setEditingDraftId(draft.id);
     setTab("create");
@@ -326,7 +391,9 @@ export function AnnouncementsScreen() {
         </TouchableOpacity>
         <View>
           <Text style={styles.headerTitle}>Announcements</Text>
-          <Text style={styles.headerSubtitle}>Post to your classes</Text>
+          <Text style={styles.headerSubtitle}>
+            {canTargetRoles ? "Post to any role, or everyone" : "Post to your classes"}
+          </Text>
         </View>
       </LinearGradient>
 
@@ -383,45 +450,49 @@ export function AnnouncementsScreen() {
               {description.length}/{DESCRIPTION_MAX}
             </Text>
 
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.fieldLabel}>Target classes</Text>
-              {classesStatus === "success" && classes.length > 0 && (
-                <TouchableOpacity style={styles.smallPillButton} onPress={handleTogglePublishToAll}>
-                  <Text style={styles.smallPillButtonText}>
-                    {allClassesSelected ? "Clear all" : "Publish to all"}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
+            {!canTargetRoles && (
+              <>
+                <View style={styles.sectionHeaderRow}>
+                  <Text style={styles.fieldLabel}>Target classes</Text>
+                  {classesStatus === "success" && classes.length > 0 && (
+                    <TouchableOpacity style={styles.smallPillButton} onPress={handleTogglePublishToAll}>
+                      <Text style={styles.smallPillButtonText}>
+                        {allClassesSelected ? "Clear all" : "Publish to all"}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
 
-            {classesStatus === "loading" && (
-              <View style={styles.inlineLoading}>
-                <ActivityIndicator color="#2F6FE0" />
-              </View>
+                {classesStatus === "loading" && (
+                  <View style={styles.inlineLoading}>
+                    <ActivityIndicator color="#2F6FE0" />
+                  </View>
+                )}
+
+                {classesStatus === "error" && (
+                  <ErrorNotice message={classesError ?? "Something went wrong."} onRetry={loadClasses} />
+                )}
+
+                {classesStatus === "success" && classes.length === 0 && (
+                  <Text style={styles.emptyInlineText}>No classes are assigned to you yet.</Text>
+                )}
+
+                {classesStatus === "success" && classes.length > 0 && (
+                  <View style={styles.checkboxGrid}>
+                    {classes.map((item) => (
+                      <CheckboxOption
+                        key={item.id}
+                        label={item.label}
+                        checked={selectedClassIds.includes(item.id)}
+                        onPress={() => setSelectedClassIds((prev) => toggleId(prev, item.id))}
+                      />
+                    ))}
+                  </View>
+                )}
+              </>
             )}
 
-            {classesStatus === "error" && (
-              <ErrorNotice message={classesError ?? "Something went wrong."} onRetry={loadClasses} />
-            )}
-
-            {classesStatus === "success" && classes.length === 0 && (
-              <Text style={styles.emptyInlineText}>No classes are assigned to you yet.</Text>
-            )}
-
-            {classesStatus === "success" && classes.length > 0 && (
-              <View style={styles.checkboxGrid}>
-                {classes.map((item) => (
-                  <CheckboxOption
-                    key={item.id}
-                    label={item.label}
-                    checked={selectedClassIds.includes(item.id)}
-                    onPress={() => setSelectedClassIds((prev) => toggleId(prev, item.id))}
-                  />
-                ))}
-              </View>
-            )}
-
-            {!isFacultyAudience && (
+            {!isFacultyAudience && !canTargetRoles && (
               <>
                 <View style={styles.sectionHeaderRow}>
                   <Text style={styles.fieldLabel}>Target faculty</Text>
@@ -455,6 +526,44 @@ export function AnnouncementsScreen() {
                         label={item.label}
                         checked={selectedFacultyDeptIds.includes(item.id)}
                         onPress={() => setSelectedFacultyDeptIds((prev) => toggleId(prev, item.id))}
+                      />
+                    ))}
+                  </View>
+                )}
+              </>
+            )}
+
+            {canTargetRoles && (
+              <>
+                <View style={styles.sectionHeaderRow}>
+                  <Text style={styles.fieldLabel}>Target roles</Text>
+                  {rolesStatus === "success" && roles.length > 1 && (
+                    <TouchableOpacity style={styles.smallPillButton} onPress={handleToggleSelectAllRoles}>
+                      <Text style={styles.smallPillButtonText}>
+                        {allRolesSelected ? "Clear all" : "Send to everyone"}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {rolesStatus === "loading" && (
+                  <View style={styles.inlineLoading}>
+                    <ActivityIndicator color="#2F6FE0" />
+                  </View>
+                )}
+
+                {rolesStatus === "error" && (
+                  <ErrorNotice message={rolesError ?? "Something went wrong."} onRetry={loadRoles} />
+                )}
+
+                {rolesStatus === "success" && roles.length > 0 && (
+                  <View style={styles.checkboxGrid}>
+                    {roles.map((item) => (
+                      <CheckboxOption
+                        key={item.id}
+                        label={item.description ?? item.name}
+                        checked={selectedRoleIds.includes(item.id)}
+                        onPress={() => setSelectedRoleIds((prev) => toggleId(prev, item.id))}
                       />
                     ))}
                   </View>

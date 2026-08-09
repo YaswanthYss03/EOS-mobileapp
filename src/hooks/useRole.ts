@@ -5,6 +5,7 @@ export type Role =
   | "parent"
   | "employee"
   | "admin"
+  | "principal"
   | "iqac"
   | "warden"
   | "hod"
@@ -15,12 +16,13 @@ export type Role =
   | "media-room"
   | "secretary";
 
-// EOS-backend has 17 roles (see EOS-backend/prisma/seed.ts) but this app only
+// EOS-backend has 18 roles (see EOS-backend/prisma/seed.ts) but this app only
 // has dedicated ERP dashboards/tabs for a subset of them - any backend role
 // without one falls back to "employee" (the generic staff view) rather than
 // crashing or showing nothing.
 const BACKEND_ROLE_MAP: Record<string, Role> = {
   admin: "admin",
+  principal: "principal",
   hod: "hod",
   faculty: "employee",
   student: "student",

@@ -1,8 +1,12 @@
+import { useCallback } from "react";
 import { View, Text, Image, Pressable, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
+import { useRole } from "@/hooks/useRole";
 
 type AmenityOption = {
   id: string;
@@ -32,13 +36,90 @@ const options: AmenityOption[] = [
   },
 ];
 
+// Principal has no use for canteen/stationery ordering - Craveo/Stationary
+// stay exactly as-is for every other role (student/faculty/hod/parent/etc),
+// this is purely a role-scoped swap. "Placements" here renders the exact
+// same PlacementsOverviewScreen the Academics chooser used to reach (see
+// AcademicsChooserScreen.tsx, which now hides that card for this role to
+// avoid showing it in two places) - but via its own Amenity route, not
+// nested under the Academics tab's navigation stack.
+type PrincipalAmenityOption = {
+  id: string;
+  title: string;
+  description: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  route:
+    | "/(tabs)/amenity/placements"
+    | "/(tabs)/amenity/higher-education"
+    | "/(tabs)/amenity/entrepreneur"
+    | "/(tabs)/amenity/alumni";
+};
+
+const principalOptions: PrincipalAmenityOption[] = [
+  {
+    id: "placements",
+    title: "Placements",
+    description: "Drives, eligibility, offers and training",
+    icon: "briefcase-outline",
+    route: "/(tabs)/amenity/placements",
+  },
+  {
+    id: "higher-education",
+    title: "Higher Education",
+    description: "Guidance and resources for further studies",
+    icon: "ribbon-outline",
+    route: "/(tabs)/amenity/higher-education",
+  },
+  {
+    id: "entrepreneur",
+    title: "Entrepreneur",
+    description: "Startup support and incubation resources",
+    icon: "rocket-outline",
+    route: "/(tabs)/amenity/entrepreneur",
+  },
+  {
+    id: "alumni",
+    title: "Alumni",
+    description: "Batch groups, chats and announcements",
+    icon: "people-circle-outline",
+    route: "/(tabs)/amenity/alumni",
+  },
+];
+
 export function AmenityHomeScreen() {
   const router = useRouter();
+  const role = useRole();
+  const navigation = useNavigation();
+
+  // Defensively re-claim the shared CollegeHeader on focus - some Amenity
+  // sub-screens (e.g. Placements) swap the parent header for their own and
+  // must restore it on blur, but this guards against any that don't.
+  useFocusEffect(
+    useCallback(() => {
+      navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
+    }, [navigation]),
+  );
+
+  if (role === "principal") {
+    return (
+      <SafeAreaView style={styles.container} edges={[]}>
+        <View style={styles.principalRow}>
+          {principalOptions.map((option) => (
+            <Pressable key={option.id} style={styles.principalCard} onPress={() => router.push(option.route)}>
+              <View style={styles.principalIconWrap}>
+                <Ionicons name={option.icon} size={26} color="#2F6FE0" />
+              </View>
+              <Text style={styles.principalCardTitle}>{option.title}</Text>
+              <Text style={styles.principalCardDescription}>{option.description}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
-      <Text style={styles.title}>Amenity</Text>
-
       <View style={styles.list}>
         {options.map((option) => (
           <Pressable key={option.id} style={styles.card} onPress={() => router.push(option.route)}>
@@ -63,15 +144,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#fff",
   },
-  title: {
-    fontSize: 22,
-    fontFamily: fonts.bold,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 16,
-  },
   list: {
     paddingHorizontal: 16,
+    paddingTop: 16,
     gap: 16,
   },
   card: {
@@ -117,5 +192,57 @@ const styles = StyleSheet.create({
     color: "#f0f0f0",
     fontSize: 13,
     fontFamily: fonts.regular,
+  },
+  // Copied from AcademicsChooserScreen's icon-circle card pattern (bordered
+  // white card, no cover image) - a deliberate visual departure from the
+  // image-cover cards above, scoped to the Principal role only.
+  principalRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    gap: 16,
+  },
+  principalCard: {
+    flexBasis: "45%",
+    flexGrow: 1,
+    minHeight: 180,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#EEF0F4",
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 20,
+    gap: 4,
+    shadowColor: "#000",
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
+  },
+  principalIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 18,
+    backgroundColor: "#EAF0FD",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  principalCardTitle: {
+    fontSize: 16,
+    fontFamily: fonts.bold,
+    color: "#111",
+    textAlign: "center",
+  },
+  principalCardDescription: {
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    color: "#7A828E",
+    textAlign: "center",
+    marginTop: 2,
+    lineHeight: 17,
   },
 });

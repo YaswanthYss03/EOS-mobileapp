@@ -5,6 +5,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { formatDate } from "@/utils/calendar";
 import { toast } from "@/utils/toast";
@@ -12,9 +13,13 @@ import { useRole } from "@/hooks/useRole";
 import {
   getUpcomingDrives,
   getDriveHistory,
+  getDepartmentUpcomingDrives,
+  getDepartmentDriveHistory,
   type UpcomingDrive,
   type DriveHistoryItem,
   type ApplicationStatus,
+  type DepartmentUpcomingDrive,
+  type DepartmentDriveHistoryItem,
 } from "@/services/api/placements.api";
 import {
   getUpcomingDrivesForFaculty,
@@ -25,6 +30,12 @@ import {
   type MentoredStudent,
   type DepartmentClass,
 } from "@/services/api/faculty-placements.api";
+import { listDepartments, type Department } from "@/services/api/departments.api";
+import {
+  getPrincipalPlacementsOverview,
+  type PrincipalPlacementsOverview,
+} from "@/services/api/principal-placements.api";
+import { getApiErrorMessage } from "@/services/api/client";
 
 type PlacementTab = "upcoming" | "history";
 
@@ -80,15 +91,23 @@ export function PlacementsOverviewScreen() {
   const router = useRouter();
   const navigation = useNavigation();
 
+  // Principal manages its own header (own back button + dynamic season
+  // subtitle, see PrincipalPlacementsBody) instead of this shared gradient
+  // one - skip claiming the parent header here so the two don't race.
   useFocusEffect(
     useCallback(() => {
+      if (role === "principal") return;
       navigation.getParent()?.setOptions({
         header: () => <PlacementsHeader onBack={() => router.back()} />,
       });
-    }, [navigation, router]),
+      return () => {
+        navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
+      };
+    }, [navigation, router, role]),
   );
 
   if (role === "student") return <StudentPlacementsBody />;
+  if (role === "principal") return <PrincipalPlacementsBody />;
   return role === "hod" ? (
     <MentorPlacementsBody
       fetchStudents={getDepartmentStudents}
@@ -228,6 +247,365 @@ function HistoryCard({ item }: { item: DriveHistoryItem }) {
       </View>
     </View>
   );
+}
+
+// ───────────────────────────── Principal (any department) body ─────────────────────────────
+
+// Unlike the HoD's own department (self-scoped, resolved server-side from
+// their faculty row), a Principal can view every department - so this picks
+// one via a dropdown first, then shows the exact same upcoming/history split
+// as the student view, aggregated across every student in that department
+// at once (each card additionally shows which student it belongs to). See
+// EOS-backend's getUpcomingForDepartment/getHistoryForDepartment.
+function PrincipalPlacementsBody() {
+  const router = useRouter();
+  const navigation = useNavigation();
+
+  // This body renders its own header below, so hide the shared header
+  // (CollegeHeader / the gradient PlacementsHeader other roles use) while
+  // it's focused.
+  useFocusEffect(
+    useCallback(() => {
+      navigation.getParent()?.setOptions({ headerShown: false });
+      return () => {
+        navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
+      };
+    }, [navigation]),
+  );
+
+  const [overview, setOverview] = useState<PrincipalPlacementsOverview | null>(null);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [overviewLoading, setOverviewLoading] = useState(true);
+
+  const loadOverview = useCallback(() => {
+    setOverviewLoading(true);
+    setOverviewError(null);
+    getPrincipalPlacementsOverview()
+      .then(setOverview)
+      .catch((err) => setOverviewError(getApiErrorMessage(err, "Couldn't load the placements overview.")))
+      .finally(() => setOverviewLoading(false));
+  }, []);
+
+  useEffect(() => {
+    loadOverview();
+  }, [loadOverview]);
+
+  const [tab, setTab] = useState<PlacementTab>("upcoming");
+
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
+  const [departmentPickerOpen, setDepartmentPickerOpen] = useState(false);
+
+  const [upcoming, setUpcoming] = useState<DepartmentUpcomingDrive[] | null>(null);
+  const [upcomingLoading, setUpcomingLoading] = useState(false);
+  const [upcomingErrored, setUpcomingErrored] = useState(false);
+  const [upcomingReloadToken, setUpcomingReloadToken] = useState(0);
+
+  const [history, setHistory] = useState<DepartmentDriveHistoryItem[] | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyErrored, setHistoryErrored] = useState(false);
+  const [historyReloadToken, setHistoryReloadToken] = useState(0);
+
+  useEffect(() => {
+    listDepartments()
+      .then(setDepartments)
+      .catch(() => toast.error("Couldn't load the department list"));
+  }, []);
+
+  useEffect(() => {
+    if (!selectedDepartment) {
+      setUpcoming(null);
+      return;
+    }
+    setUpcomingLoading(true);
+    setUpcomingErrored(false);
+    getDepartmentUpcomingDrives(selectedDepartment.id)
+      .then(setUpcoming)
+      .catch(() => setUpcomingErrored(true))
+      .finally(() => setUpcomingLoading(false));
+  }, [selectedDepartment, upcomingReloadToken]);
+
+  useEffect(() => {
+    if (!selectedDepartment) {
+      setHistory(null);
+      return;
+    }
+    setHistoryLoading(true);
+    setHistoryErrored(false);
+    getDepartmentDriveHistory(selectedDepartment.id)
+      .then(setHistory)
+      .catch(() => setHistoryErrored(true))
+      .finally(() => setHistoryLoading(false));
+  }, [selectedDepartment, historyReloadToken]);
+
+  return (
+    <SafeAreaView style={styles.container} edges={["top"]}>
+      <View style={styles.principalHeader}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={8}>
+          <Ionicons name="arrow-back" size={22} color="#fff" />
+        </TouchableOpacity>
+        <View style={styles.principalHeaderTextWrap}>
+          <Text style={styles.principalHeaderTitle}>Placements</Text>
+          <Text style={styles.principalHeaderSubtitle}>
+            {overview
+              ? `Placement season ${overview.season_year} · ${overview.companies} companies, ${overview.offers_released} offers released`
+              : "Loading…"}
+          </Text>
+        </View>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.principalContent} showsVerticalScrollIndicator={false}>
+        {overviewLoading && (
+          <View style={styles.inlineLoading}>
+            <ActivityIndicator color="#2F6FE0" />
+          </View>
+        )}
+
+        {!overviewLoading && overviewError && (
+          <View style={styles.centerState}>
+            <Ionicons name="cloud-offline-outline" size={28} color="#B0B7C3" />
+            <Text style={styles.centerStateText}>{overviewError}</Text>
+            <TouchableOpacity onPress={loadOverview}>
+              <Text style={styles.retryText}>Tap to retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {!overviewLoading && !overviewError && overview && (
+          <>
+            <View style={styles.principalStatsGrid}>
+              <PrincipalStatCard
+                label="Placement percentage"
+                value={overview.placement_pct !== null ? `${overview.placement_pct}%` : "—"}
+                subtitle={
+                  overview.placement_pct_delta !== null
+                    ? `${overview.placement_pct_delta > 0 ? "+" : ""}${overview.placement_pct_delta} vs ${overview.season_year - 1}`
+                    : "No prior season yet"
+                }
+                subtitleTone={
+                  overview.placement_pct_delta === null ? undefined : overview.placement_pct_delta >= 0 ? "green" : "red"
+                }
+              />
+              <PrincipalStatCard
+                label="Highest package"
+                value={overview.highest_package !== null ? `₹${overview.highest_package} LPA` : "—"}
+                subtitle={overview.highest_package_role ?? "—"}
+              />
+              <PrincipalStatCard
+                label="Average package"
+                value={overview.average_package !== null ? `₹${overview.average_package} LPA` : "—"}
+                subtitle="across all offers"
+              />
+              <PrincipalStatCard
+                label="Students placed"
+                value={overview.students_placed.toLocaleString()}
+                subtitle={`of ${overview.applicants.toLocaleString()} applied`}
+              />
+            </View>
+
+            <View style={styles.principalChartCard}>
+              <Text style={styles.principalChartTitle}>Department-wise placement</Text>
+              {overview.departments.length === 0 && (
+                <Text style={styles.centerStateText}>No placement activity recorded this season.</Text>
+              )}
+              {overview.departments.map((dept) => (
+                <View key={dept.code} style={styles.principalChartRow}>
+                  <Text style={styles.principalChartLabel}>{dept.code}</Text>
+                  <View style={styles.principalChartTrack}>
+                    <View
+                      style={[
+                        styles.principalChartFill,
+                        {
+                          width: `${Math.min(dept.placement_pct ?? 0, 100)}%`,
+                          backgroundColor: placementColor(dept.placement_pct),
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.principalChartValue}>
+                    {dept.placement_pct !== null ? `${dept.placement_pct}%` : "—"}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </>
+        )}
+
+        <TouchableOpacity
+          style={styles.classPickerButton}
+          onPress={() => setDepartmentPickerOpen(true)}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="business-outline" size={16} color="#2F6FE0" />
+          <Text style={styles.classPickerButtonText}>
+            {selectedDepartment ? selectedDepartment.name : "Select a department"}
+          </Text>
+          <Ionicons name="chevron-down" size={16} color="#2F6FE0" />
+        </TouchableOpacity>
+
+        <TabSwitch tab={tab} setTab={setTab} />
+
+        {!selectedDepartment ? (
+          <EmptyState icon="business-outline" text="Select a department to view its placement records." />
+        ) : tab === "upcoming" ? (
+          upcomingLoading ? (
+            <LoadingState />
+          ) : upcomingErrored ? (
+            <ErrorState onRetry={() => setUpcomingReloadToken((n) => n + 1)} />
+          ) : upcoming && upcoming.length > 0 ? (
+            dedupeDrivesById(upcoming).map((drive) => (
+              <PrincipalUpcomingCard key={drive.drive_id} drive={drive} />
+            ))
+          ) : (
+            <EmptyState icon="briefcase-outline" text="No drives coming up right now." />
+          )
+        ) : historyLoading ? (
+          <LoadingState />
+        ) : historyErrored ? (
+          <ErrorState onRetry={() => setHistoryReloadToken((n) => n + 1)} />
+        ) : history && history.length > 0 ? (
+          history.map((item) => (
+            <PrincipalHistoryCard key={`${item.drive_id}-${item.student.id}`} item={item} />
+          ))
+        ) : (
+          <EmptyState icon="document-text-outline" text="No placement history yet." />
+        )}
+      </ScrollView>
+
+      <Modal
+        visible={departmentPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDepartmentPickerOpen(false)}
+      >
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setDepartmentPickerOpen(false)}>
+          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
+            <Text style={styles.modalTitle}>Select a department</Text>
+            <ScrollView style={styles.classList} showsVerticalScrollIndicator={false}>
+              {departments.map((dept) => (
+                <TouchableOpacity
+                  key={dept.id}
+                  style={styles.classRow}
+                  onPress={() => {
+                    setSelectedDepartment(dept);
+                    setDepartmentPickerOpen(false);
+                  }}
+                >
+                  <Text style={styles.classRowText}>{dept.name}</Text>
+                  {selectedDepartment?.id === dept.id && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+    </SafeAreaView>
+  );
+}
+
+function placementColor(pct: number | null): string {
+  if (pct === null) return "#D1D5DB";
+  if (pct >= 90) return "#16A34A";
+  if (pct >= 80) return "#D97706";
+  return "#DC2626";
+}
+
+function PrincipalStatCard({
+  label,
+  value,
+  subtitle,
+  subtitleTone,
+}: {
+  label: string;
+  value: string;
+  subtitle: string;
+  subtitleTone?: "green" | "red";
+}) {
+  return (
+    <View style={styles.principalStatCard}>
+      <Text style={styles.principalStatLabel}>{label}</Text>
+      <Text style={styles.principalStatValue}>{value}</Text>
+      <Text
+        style={[
+          styles.principalStatSubtitle,
+          subtitleTone === "green" ? { color: "#3FA66B" } : subtitleTone === "red" ? { color: "#DC2626" } : null,
+        ]}
+      >
+        {subtitle}
+      </Text>
+    </View>
+  );
+}
+
+// Principal's upcoming list is company-level, not per-student - the same
+// drive_id otherwise repeats once per student who's applied to it (that's
+// meaningful for the mentor view, which tracks each student's own outcome,
+// but not here).
+function dedupeDrivesById(drives: DepartmentUpcomingDrive[]): DepartmentUpcomingDrive[] {
+  const seen = new Set<number>();
+  const result: DepartmentUpcomingDrive[] = [];
+  for (const drive of drives) {
+    if (seen.has(drive.drive_id)) continue;
+    seen.add(drive.drive_id);
+    result.push(drive);
+  }
+  return result;
+}
+
+function PrincipalUpcomingCard({ drive }: { drive: DepartmentUpcomingDrive }) {
+  return (
+    <View style={[styles.card, !drive.is_disclosed && styles.cardUndisclosed]}>
+      <View style={styles.cardHeader}>
+        {!drive.is_disclosed && <Ionicons name="lock-closed" size={14} color="#8A93A3" />}
+        <Text style={[styles.company, !drive.is_disclosed && styles.companyUndisclosed]}>{drive.company_name}</Text>
+      </View>
+
+      <View style={styles.metaRow}>
+        <Ionicons name="calendar-outline" size={13} color="#8A93A3" />
+        <Text style={styles.metaText}>Drive on {formatDate(new Date(drive.scheduled_date))}</Text>
+      </View>
+
+      {drive.is_disclosed && drive.company_profile_info && (
+        <Text style={styles.profileInfo}>{drive.company_profile_info}</Text>
+      )}
+
+      {!drive.is_disclosed && (
+        <Text style={styles.revealHint}>
+          {drive.disclosed_reveal_date
+            ? `Company name reveals on ${formatDate(new Date(drive.disclosed_reveal_date))}`
+            : "Company name will be revealed closer to the drive date."}
+        </Text>
+      )}
+    </View>
+  );
+}
+
+function PrincipalHistoryCard({ item }: { item: DepartmentDriveHistoryItem }) {
+  const meta = APPLICATION_STATUS_META[item.application_status];
+
+  return (
+    <View style={styles.card}>
+      <View style={styles.cardHeaderRow}>
+        <Text style={styles.company}>{item.company_name}</Text>
+        <View style={[styles.statusBadge, { backgroundColor: meta.bg }]}>
+          <Text style={[styles.statusBadgeText, { color: meta.text }]}>{historyStatusLabel(item)}</Text>
+        </View>
+      </View>
+
+      <Text style={styles.studentLine}>{studentLineText(item.student)}</Text>
+
+      <View style={styles.metaRow}>
+        <Ionicons name="calendar-outline" size={13} color="#8A93A3" />
+        <Text style={styles.metaText}>Drive on {formatDate(new Date(item.scheduled_date))}</Text>
+      </View>
+    </View>
+  );
+}
+
+function studentLineText(student: { name: string; student_id_no: string; section: string | null }): string {
+  return student.section
+    ? `${student.name} · ${student.student_id_no} · Sec ${student.section}`
+    : `${student.name} · ${student.student_id_no}`;
 }
 
 // ───────────────────────────── Faculty/HoD (mentor) body ─────────────────────────────
@@ -680,6 +1058,12 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     fontFamily: fonts.semibold,
   },
+  studentLine: {
+    fontSize: 12,
+    fontFamily: fonts.semibold,
+    color: "#2F6FE0",
+    marginBottom: 6,
+  },
   metaRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -769,5 +1153,109 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     color: "#2F6FE0",
     marginTop: 4,
+  },
+  inlineLoading: {
+    paddingVertical: 40,
+    alignItems: "center",
+  },
+  principalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: "#2F6FE0",
+  },
+  principalHeaderTextWrap: {
+    flex: 1,
+  },
+  principalHeaderTitle: {
+    fontSize: 18,
+    fontFamily: fonts.bold,
+    color: "#fff",
+  },
+  principalHeaderSubtitle: {
+    fontSize: 11,
+    fontFamily: fonts.regular,
+    color: "#D7E2FA",
+    marginTop: 2,
+  },
+  principalContent: {
+    padding: 16,
+    paddingBottom: 40,
+  },
+  principalStatsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginBottom: 16,
+  },
+  principalStatCard: {
+    width: "48%",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#EEF0F4",
+    padding: 14,
+    gap: 4,
+  },
+  principalStatLabel: {
+    fontSize: 11,
+    fontFamily: fonts.medium,
+    color: "#8A93A3",
+  },
+  principalStatValue: {
+    fontSize: 20,
+    fontFamily: fonts.bold,
+    color: "#111827",
+  },
+  principalStatSubtitle: {
+    fontSize: 10,
+    fontFamily: fonts.regular,
+    color: "#9AA6B2",
+  },
+  principalChartCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#EEF0F4",
+    padding: 16,
+    marginBottom: 16,
+    gap: 10,
+  },
+  principalChartTitle: {
+    fontSize: 15,
+    fontFamily: fonts.bold,
+    color: "#111827",
+    marginBottom: 4,
+  },
+  principalChartRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  principalChartLabel: {
+    width: 40,
+    fontSize: 11,
+    fontFamily: fonts.semibold,
+    color: "#4B5563",
+  },
+  principalChartTrack: {
+    flex: 1,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#F1F3F6",
+    overflow: "hidden",
+  },
+  principalChartFill: {
+    height: 8,
+    borderRadius: 4,
+  },
+  principalChartValue: {
+    width: 40,
+    fontSize: 11,
+    fontFamily: fonts.medium,
+    color: "#9AA6B2",
+    textAlign: "right",
   },
 });

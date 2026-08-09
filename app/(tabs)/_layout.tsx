@@ -2,10 +2,13 @@ import { Tabs, Redirect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { useAuth } from "@/context/AuthContext";
+import { useRole } from "@/hooks/useRole";
 
 // TODO: hide the ERP tab entirely for roles with no ERP access (see src/navigation/rbac)
 export default function TabsLayout() {
   const { token, isLoading } = useAuth();
+  const role = useRole();
+  const isPrincipal = role === "principal";
 
   // Normally app/index.tsx already routes signed-out users to login before
   // they ever reach here, but this guards direct/back navigation into (tabs)
@@ -53,6 +56,12 @@ export default function TabsLayout() {
         name="academics"
         options={{
           title: "Academics",
+          // Principal's tab bar is just Home/ERP/Amenity/Bus - Timetable/
+          // Calendar/Placements for that role now live inside the ERP
+          // dashboard's own sections instead (see
+          // src/features/erp/principal/PrincipalDashboard.tsx). href: null
+          // hides a tab from the bar while keeping the route registered.
+          href: isPrincipal ? null : undefined,
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? "school" : "school-outline"} size={size} color={color} />
           ),

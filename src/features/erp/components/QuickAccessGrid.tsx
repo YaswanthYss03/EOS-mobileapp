@@ -20,9 +20,16 @@ const SIZES = {
 export function QuickAccessGrid({
   items,
   size = "default",
+  gap,
 }: {
   items: QuickAccessItem[];
   size?: keyof typeof SIZES;
+  // Extra breathing room between icons, opt-in per caller (default
+  // unchanged for every existing dashboard). Applied as inner padding
+  // rather than a flex `gap`, so each item's own percentage width - and
+  // therefore how many fit per row - never changes; it just insets the
+  // centered icon+label further from the edge of its own column.
+  gap?: number;
 }) {
   const router = useRouter();
   const { columnWidth, circle, iconSize, materialIconSize } = SIZES[size];
@@ -32,7 +39,7 @@ export function QuickAccessGrid({
       {items.map((item) => (
         <Pressable
           key={item.id}
-          style={[styles.item, { width: columnWidth }]}
+          style={[styles.item, { width: columnWidth }, gap ? { paddingHorizontal: gap / 2 } : null]}
           onPress={item.route ? () => router.push(item.route as never) : undefined}
         >
           <View style={[styles.iconWrap, { width: circle, height: circle, borderRadius: circle / 2 }]}>

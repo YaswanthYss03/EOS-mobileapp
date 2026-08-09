@@ -7,6 +7,7 @@ export const roleAccess: Record<Role, { tabs: string[] }> = {
   parent: { tabs: ["home", "erp", "academics", "bus-tracking"] },
   employee: { tabs: ["home", "erp", "amenity"] },
   admin: { tabs: ["home", "erp"] },
+  principal: { tabs: ["home", "erp", "amenity", "bus-tracking"] },
   iqac: { tabs: ["home", "erp"] },
   warden: { tabs: ["home", "erp"] },
   hod: { tabs: ["home", "erp", "academics"] },

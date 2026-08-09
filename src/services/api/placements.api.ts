@@ -47,3 +47,47 @@ export async function getDriveHistory(): Promise<DriveHistoryItem[]> {
   const { data } = await apiClient.get<{ data: DriveHistoryItem[] }>("/drives/student/history");
   return data.data;
 }
+
+// Principal-only (also Placement Cell/Admin) - same upcoming/history split,
+// aggregated across every student in a caller-chosen department instead of
+// one student's own applications. See
+// EOS-backend/.../drives.service.ts getUpcomingForDepartment/getHistoryForDepartment.
+
+export type PlacementStudentSummary = {
+  id: number;
+  student_id_no: string;
+  name: string;
+  section: string | null;
+};
+
+export type DepartmentUpcomingDrive = UpcomingDrive & { student: PlacementStudentSummary };
+export type DepartmentDriveHistoryItem = DriveHistoryItem & { student: PlacementStudentSummary };
+
+export async function getDepartmentUpcomingDrives(departmentId: number): Promise<DepartmentUpcomingDrive[]> {
+  const { data } = await apiClient.get<{ data: DepartmentUpcomingDrive[] }>(
+    `/drives/department/${departmentId}/upcoming`,
+  );
+  return data.data;
+}
+
+export async function getDepartmentDriveHistory(departmentId: number): Promise<DepartmentDriveHistoryItem[]> {
+  const { data } = await apiClient.get<{ data: DepartmentDriveHistoryItem[] }>(
+    `/drives/department/${departmentId}/history`,
+  );
+  return data.data;
+}
+
+// Principal-only - every real drive's date, institution-wide and
+// status-agnostic, for merging into the Principal's academic calendar (see
+// PrincipalCalendarScreen). No application_status here - unlike every
+// other placements view, this isn't scoped to any one student's outcome.
+export type CalendarDrive = {
+  drive_id: number;
+  company_name: string;
+  scheduled_date: string;
+};
+
+export async function getDrivesForCalendar(): Promise<CalendarDrive[]> {
+  const { data } = await apiClient.get<{ data: CalendarDrive[] }>("/drives/for-calendar");
+  return data.data;
+}
