@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Modal, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -15,24 +15,12 @@ import {
   type BonafideReason,
 } from "@/services/api/bonafide.api";
 
-type CopyType = "signed" | "unsigned";
-
-const copyTypeInfo: Record<CopyType, { label: string; description: string }> = {
-  signed: {
-    label: "Signed copy",
-    description: "Digitally signed by the HoD and the principal · issued as a verified PDF",
-  },
-  unsigned: {
-    label: "Unsigned copy",
-    description: "Plain draft for your review · collect the signed copy from the office",
-  },
-};
-
-// Wired to GET /bonafide-reasons + POST /me/bonafide-requests. "Copy type"
-// has no backing column anywhere in the schema (bonafide_requests only has
-// reason_id/status/issued_at/file_url), so it stays a client-only choice,
-// not sent with the request. Reachable from the Student dashboard's Campus
-// "Bonafide" item.
+// Wired to GET /bonafide-reasons + POST /me/bonafide-requests. Purpose is
+// picked from the real, backend-driven list of reasons — there is no
+// separate "copy type" column anywhere in the schema (bonafide_requests
+// only has reason_id/status/issued_at/file_url), so that concept was
+// dropped entirely rather than faked client-side. Reachable from the
+// Student dashboard's Campus "Bonafide" item.
 export function StudentBonafideScreen() {
   const navigation = useNavigation();
   const router = useRouter();
@@ -41,8 +29,6 @@ export function StudentBonafideScreen() {
   const [reasonsStatus, setReasonsStatus] = useState<"loading" | "success" | "error">("loading");
   const [reasons, setReasons] = useState<BonafideReason[]>([]);
   const [purpose, setPurpose] = useState<BonafideReason | null>(null);
-  const [purposePickerOpen, setPurposePickerOpen] = useState(false);
-  const [copyType, setCopyType] = useState<CopyType>("signed");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const loadReasons = useCallback(() => {
@@ -68,15 +54,6 @@ export function StudentBonafideScreen() {
     }, [navigation]),
   );
 
-  function openPurposePicker() {
-    if (reasonsStatus === "error") {
-      toast.info("Retrying...");
-      loadReasons();
-      return;
-    }
-    setPurposePickerOpen(true);
-  }
-
   function handleRequest() {
     if (!purpose) {
       toast.warning("Select a purpose");
@@ -86,9 +63,8 @@ export function StudentBonafideScreen() {
     setIsSubmitting(true);
     createMyBonafideRequest(purpose.id)
       .then((request) => {
-        toast.success(`${copyTypeInfo[copyType].label} requested for ${request.reason_text.toLowerCase()}`);
+        toast.success(`Bonafide certificate requested for ${request.reason_text.toLowerCase()}`);
         setPurpose(null);
-        setCopyType("signed");
       })
       .catch((err) => toast.error(getApiErrorMessage(err, "Couldn't submit the request.")))
       .finally(() => setIsSubmitting(false));
@@ -114,38 +90,43 @@ export function StudentBonafideScreen() {
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.fieldLabel}>Purpose</Text>
-        <TouchableOpacity
-          style={styles.purposeSelectRow}
-          onPress={openPurposePicker}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.purposeSelectValue}>
-            {purpose?.reason_text ?? (reasonsStatus === "loading" ? "Loading purposes…" : "Select a purpose")}
-          </Text>
-          <Ionicons name="chevron-down" size={18} color="#2F6FE0" />
-        </TouchableOpacity>
 
-        <Text style={[styles.fieldLabel, styles.copyTypeLabel]}>Copy type</Text>
-        {(Object.keys(copyTypeInfo) as CopyType[]).map((type) => {
-          const info = copyTypeInfo[type];
-          const selected = copyType === type;
-          return (
-            <TouchableOpacity
-              key={type}
-              style={[styles.copyCard, selected && styles.copyCardSelected]}
-              onPress={() => setCopyType(type)}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.radio, selected && styles.radioSelected]}>
-                {selected && <View style={styles.radioDot} />}
-              </View>
-              <View style={styles.copyTextWrap}>
-                <Text style={[styles.copyTitle, selected && styles.copyTitleSelected]}>{info.label}</Text>
-                <Text style={styles.copyDescription}>{info.description}</Text>
-              </View>
+        {reasonsStatus === "loading" && <Text style={styles.helperText}>Loading purposes…</Text>}
+
+        {reasonsStatus === "error" && (
+          <View style={styles.helperBlock}>
+            <Text style={styles.helperText}>Couldn't load purposes.</Text>
+            <TouchableOpacity onPress={loadReasons} activeOpacity={0.8}>
+              <Text style={styles.retryText}>Retry</Text>
             </TouchableOpacity>
-          );
-        })}
+          </View>
+        )}
+
+        {reasonsStatus === "success" && reasons.length === 0 && (
+          <Text style={styles.helperText}>No purposes are configured yet.</Text>
+        )}
+
+        {reasonsStatus === "success" &&
+          reasons.map((option) => {
+            const selected = purpose?.id === option.id;
+            return (
+              <TouchableOpacity
+                key={option.id}
+                style={[styles.copyCard, selected && styles.copyCardSelected]}
+                onPress={() => setPurpose(option)}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.radio, selected && styles.radioSelected]}>
+                  {selected && <View style={styles.radioDot} />}
+                </View>
+                <View style={styles.copyTextWrap}>
+                  <Text style={[styles.copyTitle, selected && styles.copyTitleSelected]}>
+                    {option.reason_text}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
 
         <TouchableOpacity
           style={styles.submitButton}
@@ -156,66 +137,7 @@ export function StudentBonafideScreen() {
           <Text style={styles.submitButtonText}>Request certificate</Text>
         </TouchableOpacity>
       </ScrollView>
-
-      <Modal
-        visible={purposePickerOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setPurposePickerOpen(false)}
-      >
-        <TouchableOpacity
-          style={styles.sheetOverlay}
-          activeOpacity={1}
-          onPress={() => setPurposePickerOpen(false)}
-        >
-          <TouchableOpacity style={styles.sheetCard} activeOpacity={1}>
-            <Text style={styles.sheetTitle}>PURPOSE</Text>
-            <ScrollView>
-              <SheetOptionRow
-                label="Select a purpose"
-                selected={purpose === null}
-                onPress={() => {
-                  setPurpose(null);
-                  setPurposePickerOpen(false);
-                }}
-              />
-              {reasons.map((option) => (
-                <SheetOptionRow
-                  key={option.id}
-                  label={option.reason_text}
-                  selected={purpose?.id === option.id}
-                  onPress={() => {
-                    setPurpose(option);
-                    setPurposePickerOpen(false);
-                  }}
-                />
-              ))}
-            </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
     </SafeAreaView>
-  );
-}
-
-function SheetOptionRow({
-  label,
-  selected,
-  onPress,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <TouchableOpacity
-      style={[styles.sheetOptionRow, selected && styles.sheetOptionRowSelected]}
-      onPress={onPress}
-      activeOpacity={0.8}
-    >
-      <Text style={[styles.sheetOptionText, selected && styles.sheetOptionTextSelected]}>{label}</Text>
-      {selected && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
-    </TouchableOpacity>
   );
 }
 
@@ -256,24 +178,20 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     marginBottom: 8,
   },
-  copyTypeLabel: {
-    marginTop: 20,
-  },
-  purposeSelectRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderWidth: 1.5,
-    borderColor: "#2F6FE0",
-    backgroundColor: "#F5F8FE",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-  },
-  purposeSelectValue: {
-    fontSize: 16,
+  helperText: {
+    fontSize: 14,
     fontFamily: fonts.regular,
-    color: "#111827",
+    color: "#6B7280",
+    marginBottom: 12,
+  },
+  helperBlock: {
+    marginBottom: 12,
+  },
+  retryText: {
+    fontSize: 14,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+    marginTop: 4,
   },
   copyCard: {
     flexDirection: "row",
@@ -344,48 +262,5 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontFamily: fonts.bold,
     color: "#fff",
-  },
-  sheetOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.5)",
-    justifyContent: "flex-end",
-  },
-  sheetCard: {
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingTop: 18,
-    paddingHorizontal: 20,
-    maxHeight: "70%",
-  },
-  sheetTitle: {
-    fontSize: 12,
-    fontFamily: fonts.bold,
-    color: "#8A93A3",
-    letterSpacing: 1,
-    textTransform: "uppercase",
-    marginBottom: 8,
-  },
-  sheetOptionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F1F3F6",
-  },
-  sheetOptionRowSelected: {
-    backgroundColor: "#F5F8FE",
-    marginHorizontal: -20,
-    paddingHorizontal: 20,
-  },
-  sheetOptionText: {
-    fontSize: 16,
-    fontFamily: fonts.regular,
-    color: "#111827",
-  },
-  sheetOptionTextSelected: {
-    color: "#2F6FE0",
-    fontFamily: fonts.bold,
   },
 });

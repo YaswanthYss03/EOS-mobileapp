@@ -1,10 +1,33 @@
+import { useCallback } from "react";
 import { View, Text, ScrollView, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { useRouter } from "expo-router";
+import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { QuickAccessGrid } from "../components/QuickAccessGrid";
+import { DashboardHeader } from "../components/DashboardHeader";
 import { quickAccessItems, campusItems } from "./data/mockDashboard";
 
 export function StudentDashboard() {
+  const navigation = useNavigation();
+  const router = useRouter();
+
+  // Swaps the shared CollegeHeader (mounted at the Tabs level, see
+  // app/(tabs)/_layout.tsx) for this screen's own header while it's focused,
+  // restoring the shared one on blur/unmount - same pattern as the ERP
+  // employee/hod dashboards.
+  useFocusEffect(
+    useCallback(() => {
+      navigation.getParent()?.setOptions({
+        header: () => <DashboardHeader subtitle="Student services" onBack={() => router.replace("/(tabs)/home")} />,
+      });
+      return () => {
+        navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
+      };
+    }, [navigation, router]),
+  );
+
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       <ScrollView contentContainerStyle={styles.content}>

@@ -18,7 +18,6 @@ import {
 import { useDispatch, useSelector } from 'react-redux';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { router } from 'expo-router';
 import * as Animatable from 'react-native-animatable';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
@@ -669,10 +668,11 @@ const MenuScreen = ({ navigation }) => {
       {/* Scrollable Content */}
       <View style={styles.scrollableContent}>
         {/* Single collapsible header - hides as you scroll down into the list,
-            reappears the instant you scroll up even slightly. Includes the back
-            button/title block plus the categories, so the whole top section
-            hides and reveals together. Only one copy ever exists, so "two
-            search bars" isn't structurally possible. */}
+            reappears the instant you scroll up even slightly. The old back
+            button/title block ("Order your food now") was removed - the outer
+            EOS-side CraveoScreen now shows its own "Craveo" + back header
+            instead, so this is just the search bar + category chips. Only one
+            copy ever exists, so "two search bars" isn't structurally possible. */}
         <Animated.View
           style={[styles.collapsibleHeader, { transform: [{ translateY: headerTranslateY }] }]}
           renderToHardwareTextureAndroid
@@ -683,19 +683,6 @@ const MenuScreen = ({ navigation }) => {
             }
           }}
         >
-          <View style={styles.header}>
-            <TouchableOpacity
-              onPress={() => router.back()}
-              style={styles.backButton}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <MaterialCommunityIcons name="arrow-left" size={22} color={colors.primary} />
-            </TouchableOpacity>
-            <View style={styles.headerTextBlock}>
-              <Text style={styles.headerTitle}>Order your food now</Text>
-              <Text style={styles.headerSubtitle}>Delicious meals, delivered to you</Text>
-            </View>
-          </View>
           {renderSearchAndCategories()}
         </Animated.View>
 
@@ -752,6 +739,9 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 20,
+    // A small gap below the outer EOS-side "Craveo" header (see
+    // CraveoScreen.tsx) so the category chips don't sit flush against it.
+    paddingTop: spacing.sm,
     backgroundColor: colors.background,
   },
   loadingContainer: {
@@ -766,43 +756,6 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   
-  // Header Styles
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.lg,
-    backgroundColor: colors.background,
-  },
-  backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.white,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 3,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-  },
-  headerTextBlock: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: fontSize.xl,
-    fontFamily: fonts.bold,
-    color: colors.text,
-  },
-  headerSubtitle: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
-    marginTop: 2,
-    fontFamily: fonts.regular,
-  },
-
   // Greeting Styles
   greetingContainer: {
     paddingHorizontal: spacing.md,

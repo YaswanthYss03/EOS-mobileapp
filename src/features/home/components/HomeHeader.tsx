@@ -1,8 +1,10 @@
 import { View, Text, Image, Pressable, StyleSheet } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "@/theme";
+import { useRole } from "@/hooks/useRole";
 
 const logoSource = require("../../../../assets/logo.png");
 
@@ -13,6 +15,11 @@ const logoSource = require("../../../../assets/logo.png");
 // dashboard's header override.
 export function HomeHeader() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const role = useRole();
+  // Every role has a wallet except Parent - see EOSbackend1's wallet
+  // module's @Roles (everything but ROLES.PARENT).
+  const hasWallet = role !== "parent";
 
   return (
     <LinearGradient
@@ -31,9 +38,15 @@ export function HomeHeader() {
           <Ionicons name="notifications-outline" size={18} color="#fff" />
           <View style={styles.badge} />
         </Pressable>
-        <Pressable style={styles.iconButton} hitSlop={8}>
-          <Ionicons name="wallet-outline" size={18} color="#fff" />
-        </Pressable>
+        {hasWallet && (
+          <Pressable
+            style={styles.iconButton}
+            hitSlop={8}
+            onPress={() => router.push("/(tabs)/erp/wallet" as never)}
+          >
+            <Ionicons name="wallet-outline" size={18} color="#fff" />
+          </Pressable>
+        )}
       </View>
     </LinearGradient>
   );

@@ -13,7 +13,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.eos.mobileapp"
@@ -46,13 +48,20 @@
       "expo-web-browser",
       "expo-font",
       [
+        "expo-camera",
+        {
+          "cameraPermission": "EOS needs camera access to scan a wallet QR code when sending money."
+        }
+      ],
+      [
         "expo-notifications",
         {
           "icon": "./src/features/amenity/craveo/app/assets/icon.png",
           "color": "#FF4444",
           "defaultChannel": "alarm-channel"
         }
-      ]
+      ],
+      "expo-asset"
     ]
   }
 }
