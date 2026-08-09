@@ -5,10 +5,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
-<<<<<<< HEAD
-=======
 import { BackHeader } from "@/components/layout/BackHeader";
->>>>>>> 233806c567dab78d458c1b77ea9b1c33f30f2894
 import { fonts } from "@/theme";
 import { useRole } from "@/hooks/useRole";
 
@@ -92,17 +89,25 @@ const principalOptions: PrincipalAmenityOption[] = [
 
 export function AmenityHomeScreen() {
   const router = useRouter();
-<<<<<<< HEAD
   const role = useRole();
   const navigation = useNavigation();
 
-  // Defensively re-claim the shared CollegeHeader on focus - some Amenity
-  // sub-screens (e.g. Placements) swap the parent header for their own and
-  // must restore it on blur, but this guards against any that don't.
+  // Swaps the shared CollegeHeader (mounted at the Tabs level, see
+  // app/(tabs)/_layout.tsx) for a plain "Amenity" + back button while this
+  // screen is focused, restoring the shared one on blur/unmount - same
+  // pattern as the ERP dashboards (see DashboardHeader), just without the
+  // "EOS" branding since this isn't a role dashboard. Applies regardless of
+  // role - the principal branch below only changes which cards render, not
+  // the header treatment.
   useFocusEffect(
     useCallback(() => {
-      navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
-    }, [navigation]),
+      navigation.getParent()?.setOptions({
+        header: () => <BackHeader title="Amenity" onBack={() => router.replace("/(tabs)/home")} />,
+      });
+      return () => {
+        navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
+      };
+    }, [navigation, router]),
   );
 
   if (role === "principal") {
@@ -122,25 +127,6 @@ export function AmenityHomeScreen() {
       </SafeAreaView>
     );
   }
-=======
-  const navigation = useNavigation();
-
-  // Swaps the shared CollegeHeader (mounted at the Tabs level, see
-  // app/(tabs)/_layout.tsx) for a plain "Amenity" + back button while this
-  // screen is focused, restoring the shared one on blur/unmount - same
-  // pattern as the ERP dashboards (see DashboardHeader), just without the
-  // "EOS" branding since this isn't a role dashboard.
-  useFocusEffect(
-    useCallback(() => {
-      navigation.getParent()?.setOptions({
-        header: () => <BackHeader title="Amenity" onBack={() => router.replace("/(tabs)/home")} />,
-      });
-      return () => {
-        navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
-      };
-    }, [navigation, router]),
-  );
->>>>>>> 233806c567dab78d458c1b77ea9b1c33f30f2894
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
