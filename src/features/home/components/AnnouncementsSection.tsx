@@ -28,7 +28,13 @@ export function AnnouncementsSection() {
 
   useEffect(() => {
     getAnnouncements()
-      .then((all) => setAnnouncements(all.slice(0, HOME_CAROUSEL_LIMIT)))
+      // Social posts published by the Media Room render as full post cards in
+      // the feed below (see HomeFeedScreen), so they are excluded here rather
+      // than appearing twice on the same screen. What is left is genuine
+      // notices - faculty/HoD/principal announcements.
+      .then((all) =>
+        setAnnouncements(all.filter((a) => a.social == null).slice(0, HOME_CAROUSEL_LIMIT)),
+      )
       .catch(() => setAnnouncements([])); // a quiet failure here just hides the carousel, not worth a toast on the home feed
   }, []);
 

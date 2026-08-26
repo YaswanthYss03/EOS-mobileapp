@@ -13,4 +13,10 @@ export const employeeSectionItems: QuickAccessItem[] = [
   { id: "payslip", label: "Payslip", icon: "receipt-outline", route: "/(tabs)/erp/payslip-request" },
   { id: "appraisal", label: "Appraisal", icon: "ribbon-outline", route: "/(tabs)/erp/appraisal-request" },
   { id: "library", label: "Library", icon: "library-outline", route: "/(tabs)/erp/library" },
+  // Appended rather than slotted in, so every existing dashboard's grid order
+  // is untouched. HR's dashboard filters this list by id (see
+  // hr-payroll/data/mockDashboard.ts) and does not hide "medical", so HR keeps
+  // it too - the only role that never sees it is Parent, whose dashboard does
+  // not render this list at all.
+  { id: "medical", label: "Medical", icon: "medkit-outline", route: "/(tabs)/erp/medical-appointment" },
 ];

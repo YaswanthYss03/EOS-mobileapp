@@ -31,4 +31,8 @@ export const campusItems: QuickAccessItem[] = [
   { id: "library", label: "Library", icon: "library-outline", route: "/(tabs)/erp/student-library" },
   { id: "feedback", label: "Feedback", icon: "star-outline", route: "/(tabs)/erp/student-feedback" },
   { id: "no-due", label: "No-Due", icon: "shield-checkmark-outline", route: "/(tabs)/erp/student-no-due" },
+  // Same medical appointment booking every staff role gets from the shared
+  // Employee grid (see src/features/erp/data/employeeSectionItems.ts) - it sits
+  // under Campus here because that is where a student's own services live.
+  { id: "medical", label: "Medical", icon: "medkit-outline", route: "/(tabs)/erp/medical-appointment" },
 ];

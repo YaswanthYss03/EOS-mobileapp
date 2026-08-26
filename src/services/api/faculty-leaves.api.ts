@@ -27,6 +27,18 @@ export type MyFacultyLeave = {
     designation: string;
     departments: { id: number; name: string; code: string } | null;
   };
+  /**
+   * Resolved server-side from whichever register holds the requester
+   * (faculty -> non_teaching_staff -> email). ALWAYS read this for display:
+   * `faculty` is genuinely null on a request raised by non-teaching staff
+   * (Secretary / HR Payroll / warden), because faculty_id is nullable.
+   */
+  requester?: {
+    kind: "faculty" | "staff" | "unknown";
+    name: string;
+    designation: string | null;
+    department: string | null;
+  };
 };
 
 export type CreateFacultyLeavePayload = {

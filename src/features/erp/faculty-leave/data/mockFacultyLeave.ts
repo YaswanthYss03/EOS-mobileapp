@@ -1,48 +1,24 @@
+// Row shapes for the HR leave-review cards. Both the Faculty and Others tabs
+// are wired to real data (GET/PATCH /me/faculty-leaves) — faculty_leaves holds
+// teaching and non-teaching requests in one table, keyed by faculty_id or
+// staff_user_id, and the API labels each row with requester.kind.
+//
+// The mock request list that used to live here has been removed: the Others tab
+// was rendering it AND approving into local React state only, so a staff
+// approval never reached the database.
+
 export type FacultyLeaveStatus = "pending" | "approved" | "rejected";
 
 export type FacultyLeaveRequest = {
   id: string;
   name: string;
+  /** Pre-computed display line, e.g. "Associate Professor". */
   subtitle: string;
   fromDate: string;
   toDate: string;
   days: number;
   reason: string;
   status: FacultyLeaveStatus;
+  /** Which register the requester came from — used only to split the two tabs. */
+  kind: "faculty" | "staff" | "unknown";
 };
-
-// The Faculty tab is wired to real data (GET/PATCH /me/faculty-leaves) - see
-// FacultyLeaveScreen.tsx. Only the Others (non-teaching staff) tab still
-// uses this mock data, since no backend module exists for staff leave yet.
-export const mockOtherStaffLeaveRequests: FacultyLeaveRequest[] = [
-  {
-    id: "o1",
-    name: "Mr. G. Venkatesan",
-    subtitle: "Librarian",
-    fromDate: "07 Aug 2026",
-    toDate: "07 Aug 2026",
-    days: 1,
-    reason: "Personal work.",
-    status: "pending",
-  },
-  {
-    id: "o2",
-    name: "Mrs. S. Kalaivani",
-    subtitle: "Lab Assistant · CSE",
-    fromDate: "11 Aug 2026",
-    toDate: "12 Aug 2026",
-    days: 2,
-    reason: "Child's school admission formalities.",
-    status: "pending",
-  },
-  {
-    id: "o3",
-    name: "Mr. R. Muthu",
-    subtitle: "Office Assistant",
-    fromDate: "03 Aug 2026",
-    toDate: "03 Aug 2026",
-    days: 1,
-    reason: "Medical appointment.",
-    status: "approved",
-  },
-];

@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -9,24 +9,33 @@ import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { formatDate } from "@/utils/calendar";
+import { getApiErrorMessage } from "@/services/api/client";
 import {
-  requestCategories,
-  mockHrPayrollTickets,
-  type HrPayrollTicket,
-  type HrPayrollTicketStatus,
-} from "./data/mockHrPayrollRequest";
+  createHrQuery,
+  listMyHrQueries,
+  type HrQuery,
+  type HrQueryStatus,
+} from "@/services/api/hr-queries.api";
+import { requestCategories } from "./data/mockHrPayrollRequest";
 
-const STATUS_META: Record<HrPayrollTicketStatus, { label: string; bg: string; text: string }> = {
-  "under-review": { label: "Under Review", bg: "#EAF0FD", text: "#2F6FE0" },
+// Keyed on the values hr_payroll_requests_status_check actually allows:
+// 'submitted' | 'under_review' | 'resolved'. There is deliberately no
+// "rejected" entry - that state does not exist in the constraint, and the
+// previous "under-review" (hyphen) key never matched a real row either.
+const STATUS_META: Record<HrQueryStatus, { label: string; bg: string; text: string }> = {
+  submitted: { label: "Submitted", bg: "#FFF7ED", text: "#B26A00" },
+  under_review: { label: "Under Review", bg: "#EAF0FD", text: "#2F6FE0" },
   resolved: { label: "Resolved", bg: "#F0FDF4", text: "#16A34A" },
-  rejected: { label: "Rejected", bg: "#FEF2F2", text: "#DC2626" },
 };
 
-// TODO: this is a raise+track ticket UI over mockHrPayrollRequest - wire to a
-// real HR/payroll ticketing backend endpoint once one exists. Reachable from
-// the Employee/HoD dashboards' "HR Payroll" item - not to be confused with
-// erp/hr-payroll/HrPayrollDashboard.tsx, the landing dashboard for the
-// hr-payroll role itself.
+type LoadStatus = "loading" | "success" | "error";
+
+// Raise + track HR help-desk tickets, wired to GET/POST /me/hr-queries (real
+// hr_payroll_requests rows, self-scoped to the caller server-side).
+//
+// Reachable from the Employee/HoD/HR dashboards' "HR Payroll" item - not to be
+// confused with erp/hr-payroll/HrPayrollDashboard.tsx (the landing dashboard for
+// the hr-payroll role), nor with /me/hr-payroll, which is salary_payments.
 export function HrPayrollRequestScreen() {
   const navigation = useNavigation();
   const router = useRouter();
@@ -36,7 +45,28 @@ export function HrPayrollRequestScreen() {
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [subject, setSubject] = useState("");
   const [description, setDescription] = useState("");
-  const [tickets, setTickets] = useState(mockHrPayrollTickets);
+  const [tickets, setTickets] = useState<HrQuery[]>([]);
+  const [status, setStatus] = useState<LoadStatus>("loading");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const loadTickets = useCallback(() => {
+    setStatus("loading");
+    setLoadError(null);
+    listMyHrQueries()
+      .then((rows) => {
+        setTickets(rows);
+        setStatus("success");
+      })
+      .catch((err) => {
+        setLoadError(getApiErrorMessage(err, "Couldn't load your HR requests."));
+        setStatus("error");
+      });
+  }, []);
+
+  useEffect(() => {
+    loadTickets();
+  }, [loadTickets]);
 
   useFocusEffect(
     useCallback(() => {
@@ -70,19 +100,24 @@ export function HrPayrollRequestScreen() {
       toast.warning("Describe your request");
       return;
     }
-    const newTicket: HrPayrollTicket = {
-      id: `local-${tickets.length}-${Date.now()}`,
-      ticketNo: `HRM-2026-${100 + tickets.length + 20}`,
+    // Real POST. This used to build a ticket object locally and unshift it,
+    // so a submitted request vanished on the next app launch and HR never saw
+    // it - the ticket number was invented client-side too.
+    setSubmitting(true);
+    createHrQuery({
       category,
       subject: subject.trim(),
       description: description.trim(),
-      status: "under-review",
-      submittedOn: formatDate(new Date()),
-      hrAssigned: "Unassigned",
-    };
-    setTickets((prev) => [newTicket, ...prev]);
-    toast.success("Request submitted");
-    resetForm();
+    })
+      .then((created) => {
+        setTickets((prev) => [created, ...prev]);
+        toast.success("Request submitted");
+        resetForm();
+      })
+      .catch((err) => {
+        toast.error(getApiErrorMessage(err, "Couldn't submit your request."));
+      })
+      .finally(() => setSubmitting(false));
   }
 
   return (
@@ -142,12 +177,43 @@ export function HrPayrollRequestScreen() {
             <Text style={styles.attachButtonText}>Attach a file (optional)</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.submitButton} onPress={handleSubmit} activeOpacity={0.85}>
-            <Text style={styles.submitButtonText}>Submit Request</Text>
+          <TouchableOpacity
+            style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
+            onPress={handleSubmit}
+            disabled={submitting}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.submitButtonText}>
+              {submitting ? "Submitting…" : "Submit Request"}
+            </Text>
           </TouchableOpacity>
         </View>
 
         <Text style={styles.sectionTitle}>Request Status</Text>
+
+        {status === "loading" && (
+          <View style={styles.listStateBlock}>
+            <ActivityIndicator color="#2F6FE0" />
+          </View>
+        )}
+
+        {status === "error" && (
+          <View style={styles.listStateBlock}>
+            <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+            <Text style={styles.listStateText}>{loadError ?? "Something went wrong."}</Text>
+            <TouchableOpacity onPress={loadTickets} style={styles.retryButton} activeOpacity={0.8}>
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {status === "success" && tickets.length === 0 && (
+          <View style={styles.listStateBlock}>
+            <Ionicons name="documents-outline" size={30} color="#B0B7C3" />
+            <Text style={styles.listStateText}>You haven&apos;t raised any HR requests yet.</Text>
+          </View>
+        )}
+
         {tickets.map((ticket) => (
           <TicketCard key={ticket.id} ticket={ticket} />
         ))}
@@ -183,13 +249,15 @@ export function HrPayrollRequestScreen() {
   );
 }
 
-function TicketCard({ ticket }: { ticket: HrPayrollTicket }) {
-  const meta = STATUS_META[ticket.status];
+function TicketCard({ ticket }: { ticket: HrQuery }) {
+  // Falls back rather than crashing if the API ever returns a status this build
+  // does not know: an unstyled badge beats a white screen.
+  const meta = STATUS_META[ticket.status] ?? STATUS_META.submitted;
 
   return (
     <View style={styles.ticketCard}>
       <View style={styles.ticketHeader}>
-        <Text style={styles.ticketNo}>{ticket.ticketNo}</Text>
+        <Text style={styles.ticketNo}>{ticket.ticket_no}</Text>
         <View style={[styles.statusBadge, { backgroundColor: meta.bg }]}>
           <Text style={[styles.statusBadgeText, { color: meta.text }]}>{meta.label}</Text>
         </View>
@@ -201,11 +269,11 @@ function TicketCard({ ticket }: { ticket: HrPayrollTicket }) {
       <View style={styles.metaRow}>
         <View style={styles.metaCol}>
           <Text style={styles.metaLabel}>SUBMITTED</Text>
-          <Text style={styles.metaValue}>{ticket.submittedOn}</Text>
+          <Text style={styles.metaValue}>{formatDate(new Date(ticket.created_at))}</Text>
         </View>
         <View style={styles.metaCol}>
           <Text style={styles.metaLabel}>HR ASSIGNED</Text>
-          <Text style={styles.metaValue}>{ticket.hrAssigned}</Text>
+          <Text style={styles.metaValue}>{ticket.assigned_to_name ?? "Unassigned"}</Text>
         </View>
       </View>
     </View>
@@ -314,6 +382,35 @@ const styles = StyleSheet.create({
   attachButtonText: {
     fontSize: 13,
     fontFamily: fonts.semibold,
+    color: "#2F6FE0",
+  },
+  submitButtonDisabled: {
+    opacity: 0.6,
+  },
+  listStateBlock: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 28,
+  },
+  listStateText: {
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    color: "#6B7280",
+    textAlign: "center",
+    paddingHorizontal: 24,
+  },
+  retryButton: {
+    marginTop: 2,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
     color: "#2F6FE0",
   },
   submitButton: {

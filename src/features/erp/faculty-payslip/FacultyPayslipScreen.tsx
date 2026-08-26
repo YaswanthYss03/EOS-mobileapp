@@ -16,11 +16,7 @@ import {
   type MyPayslipRequest,
 } from "@/services/api/payslip-requests.api";
 import { months } from "../payslip-request/data/mockPayslipRequest";
-import {
-  mockOtherStaffPayslipRequests,
-  type PayslipRequestCard,
-  type PayslipCardStatus,
-} from "./data/mockFacultyPayslip";
+import { type PayslipRequestCard } from "./data/mockFacultyPayslip";
 
 type Tab = "faculty" | "others";
 type StatusFilter = "pending" | "processed" | "rejected" | "all";
@@ -73,23 +69,36 @@ export function FacultyPayslipScreen() {
   const [facultyRequests, setFacultyRequests] = useState<PayslipRequestCard[]>([]);
   const [actingOnId, setActingOnId] = useState<string | null>(null);
 
-  const [otherRequests, setOtherRequests] = useState(mockOtherStaffPayslipRequests);
+  // Both tabs come from ONE fetch. payslip_requests stores teaching and
+  // non-teaching requests side by side (faculty_id vs staff_user_id) and the
+  // API labels each row with requester.kind, so "Others" is a filter over real
+  // data rather than a second, mocked list.
+  const [staffRequests, setStaffRequests] = useState<PayslipRequestCard[]>([]);
 
   const loadFacultyRequests = useCallback(() => {
     setFacultyStatus("loading");
     setFacultyError(null);
     listPayslipRequestsForReview()
       .then((rows: MyPayslipRequest[]) => {
-        setFacultyRequests(
-          rows.map((row) => ({
-            id: String(row.id),
-            name: `${row.faculty.first_name} ${row.faculty.last_name}`,
-            subtitle: row.faculty.designation,
-            month: monthLabelFor(row.month),
-            purpose: row.purpose ?? "",
-            status: row.status,
-          })),
-        );
+        const cards = rows.map((row) => ({
+          id: String(row.id),
+          // faculty is NULL for a request raised by non-teaching staff
+          // (payslip_requests.faculty_id is nullable). `requester` is resolved
+          // server-side for every row, whichever register applies.
+          name: row.requester?.name ?? "Unknown",
+          subtitle: row.requester?.designation ?? row.faculty?.designation ?? "",
+          month: monthLabelFor(row.month),
+          purpose: row.purpose ?? "",
+          status: row.status,
+          // Which register this request came from, used only to split the tabs.
+          kind: row.requester?.kind ?? (row.faculty ? "faculty" : "staff"),
+        }));
+
+        // Teaching staff on the Faculty tab, everyone else on Others. A row
+        // whose register could not be resolved is shown under Others rather
+        // than dropped — an unreviewable request is worse than an odd tab.
+        setFacultyRequests(cards.filter((c) => c.kind === "faculty"));
+        setStaffRequests(cards.filter((c) => c.kind !== "faculty"));
         setFacultyStatus("success");
       })
       .catch((err) => {
@@ -111,7 +120,7 @@ export function FacultyPayslipScreen() {
     }, [navigation]),
   );
 
-  const requests = tab === "faculty" ? facultyRequests : otherRequests;
+  const requests = tab === "faculty" ? facultyRequests : staffRequests;
 
   const counts = useMemo(
     () => ({
@@ -128,17 +137,10 @@ export function FacultyPayslipScreen() {
     [requests, statusFilter],
   );
 
-  function updateOtherStatus(id: string, status: PayslipCardStatus) {
-    setOtherRequests((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
-  }
-
+  // Both tabs go through the same real endpoints. The Others tab used to
+  // mutate local state only, so approving or rejecting a non-teaching staff
+  // member's payslip looked like it worked and never reached the database.
   function handleReject(id: string) {
-    if (tab === "others") {
-      updateOtherStatus(id, "rejected");
-      toast.info("Payslip request rejected");
-      return;
-    }
-
     setActingOnId(id);
     rejectPayslipRequestAsHr(Number(id))
       .then(() => {
@@ -152,12 +154,6 @@ export function FacultyPayslipScreen() {
   }
 
   function handleApprove(id: string) {
-    if (tab === "others") {
-      updateOtherStatus(id, "processed");
-      toast.success("Payslip request approved");
-      return;
-    }
-
     setActingOnId(id);
     approvePayslipRequestAsHr(Number(id))
       .then(() => {
@@ -228,11 +224,11 @@ export function FacultyPayslipScreen() {
           ))}
         </View>
 
-        {tab === "faculty" && facultyStatus === "loading" ? (
+        {facultyStatus === "loading" ? (
           <View style={styles.inlineLoading}>
             <ActivityIndicator color="#2F6FE0" />
           </View>
-        ) : tab === "faculty" && facultyStatus === "error" ? (
+        ) : facultyStatus === "error" ? (
           <View style={styles.emptyState}>
             <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
             <Text style={styles.emptyStateText}>{facultyError ?? "Something went wrong."}</Text>

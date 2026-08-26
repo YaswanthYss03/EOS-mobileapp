@@ -16,6 +16,17 @@ export type MyPayslipRequest = {
   requested_at: string;
   purpose: string | null;
   faculty: { id: number; first_name: string; last_name: string; designation: string };
+  /**
+   * Resolved server-side (faculty -> non_teaching_staff -> email). ALWAYS read
+   * this for display: `faculty` is null for a request raised by non-teaching
+   * staff, because payslip_requests.faculty_id is nullable.
+   */
+  requester?: {
+    kind: "faculty" | "staff" | "unknown";
+    name: string;
+    designation: string | null;
+    department: string | null;
+  };
 };
 
 export type CreatePayslipRequestPayload = {

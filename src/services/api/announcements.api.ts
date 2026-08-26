@@ -41,6 +41,30 @@ export type AnnouncementRole = {
 
 export type AnnouncementStatus = "draft" | "published";
 
+export type AnnouncementCategory = "academic" | "department" | "emergency" | "event" | "general";
+
+/**
+ * Extra fields a post published through the Media Room's social publishing
+ * screen carries. Absent (not an empty object) on an ordinary announcement,
+ * so the two can be told apart - see toResponseShape in the backend service.
+ */
+export type SocialPostDetails = {
+  /** Real stored values are "text" | "link" | "image" - do not assume the web constant list. */
+  format: string | null;
+  link_url: string | null;
+  expires_at: string | null;
+  is_pinned: boolean;
+  allow_comments: boolean;
+};
+
+export type AnnouncementAuthor = {
+  /** faculty -> non_teaching_staff -> email, resolved server-side. */
+  name: string;
+  role: string;
+  designation: string | null;
+  department: string | null;
+};
+
 export type Announcement = {
   id: number;
   title: string;
@@ -53,6 +77,14 @@ export type Announcement = {
   file_url: string | null;
   file_name: string | null;
   created_at: string;
+  category: AnnouncementCategory | null;
+  /** When this was scheduled to publish; the backend cron flips it live at this time. */
+  scheduled_at: string | null;
+  /** Only present on the read endpoints (findAll/findOne), which include the poster relation. */
+  posted_by?: AnnouncementAuthor;
+  social?: SocialPostDetails;
+  /** Ordered carousel items. Empty/absent on a post with no media. */
+  media?: AnnouncementMedia[];
 };
 
 export type AttachmentUpload = {
@@ -247,3 +279,70 @@ export async function getMyDraftAnnouncements(): Promise<Announcement[]> {
 export async function deleteAnnouncement(id: number): Promise<void> {
   await apiClient.delete(`/announcements/${id}`);
 }
+
+// ── Comments on a published post ────────────────────────────────────────────
+//
+// Backed by announcement_comments via
+// GET/POST/DELETE /announcements/:id/comments. The Home feed uses these so a
+// Media Room social post behaves like a post rather than a read-only notice.
+// Whether commenting is offered at all is the post's own
+// social.allow_comments flag, which the publishing screen sets.
+
+export type AnnouncementComment = {
+  id: number;
+  announcement_id: number;
+  commented_by_user_id: number;
+  comment_text: string;
+  parent_comment_id: number | null;
+  created_at: string;
+  /** faculty -> non_teaching_staff -> email, resolved server-side. */
+  commenter_name: string | null;
+};
+
+/** GET /announcements/:id/comments */
+export async function getAnnouncementComments(
+  announcementId: number,
+): Promise<AnnouncementComment[]> {
+  const { data } = await apiClient.get<{ data: AnnouncementComment[] }>(
+    `/announcements/${announcementId}/comments`,
+  );
+  return data.data;
+}
+
+/** POST /announcements/:id/comments */
+export async function addAnnouncementComment(
+  announcementId: number,
+  commentText: string,
+): Promise<AnnouncementComment> {
+  const { data } = await apiClient.post<{ data: AnnouncementComment }>(
+    `/announcements/${announcementId}/comments`,
+    { comment_text: commentText },
+  );
+  return data.data;
+}
+
+// ── Carousel media on a social post ─────────────────────────────────────────
+//
+// Backed by announcement_media. Several photos/videos per post, ordered by
+// sequence_no, shown as a swipeable carousel.
+
+export type AnnouncementMediaType = "photo" | "video";
+
+export type AnnouncementMedia = {
+  id: number;
+  media_type: AnnouncementMediaType;
+  /** Derived server-side from the storage key on every read, so it never expires. */
+  url: string;
+  /** Poster frame, videos only. */
+  thumbnail_url: string | null;
+  /**
+   * Intrinsic pixel size, captured at upload. Used to reserve the correct
+   * aspect ratio BEFORE the file downloads, so the feed does not jump as each
+   * photo loads. Null on older posts uploaded before dimensions were recorded -
+   * those fall back to measuring on load.
+   */
+  width: number | null;
+  height: number | null;
+  duration_seconds: number | null;
+  sequence_no: number;
+};

@@ -11,7 +11,7 @@ import { toast } from "@/utils/toast";
 import { formatDate } from "@/utils/calendar";
 import { getApiErrorMessage } from "@/services/api/client";
 import { listFacultyOdForReview, reviewFacultyOdAsHr } from "@/services/api/faculty-od.api";
-import { mockOtherStaffOdRequests, type FacultyOdRequest, type FacultyOdStatus } from "./data/mockFacultyOd";
+import { type FacultyOdRequest } from "./data/mockFacultyOd";
 
 type Tab = "faculty" | "others";
 type StatusFilter = "pending" | "approved" | "rejected" | "all";
@@ -68,28 +68,39 @@ export function FacultyOdScreen() {
   const [facultyRequests, setFacultyRequests] = useState<FacultyOdRequest[]>([]);
   const [actingOnId, setActingOnId] = useState<string | null>(null);
 
-  const [otherRequests, setOtherRequests] = useState(mockOtherStaffOdRequests);
+  // Both tabs come from ONE fetch. faculty_od stores teaching and
+  // non-teaching requests side by side (faculty_id vs staff_user_id) and the
+  // API labels each row with requester.kind, so "Others" is a filter over real
+  // data rather than a second, mocked list.
+  const [staffRequests, setStaffRequests] = useState<FacultyOdRequest[]>([]);
 
   const loadFacultyRequests = useCallback(() => {
     setFacultyStatus("loading");
     setFacultyError(null);
     listFacultyOdForReview()
       .then((rows) => {
-        setFacultyRequests(
-          rows.map((row) => ({
-            id: String(row.id),
-            // faculty is typed optional on the shared type (absent on the
-            // self-service list) but listFacultyOdForReview's own doc
-            // comment guarantees it's always populated here.
-            name: `${row.faculty!.first_name} ${row.faculty!.last_name}`,
-            subtitle: row.faculty!.designation,
-            fromDate: formatDate(new Date(row.from_date)),
-            toDate: formatDate(new Date(row.to_date)),
-            days: daysBetweenInclusive(row.from_date, row.to_date),
-            reason: combineReason(row.place, row.purpose),
-            status: row.overall_status,
-          })),
-        );
+        const cards = rows.map((row) => ({
+          id: String(row.id),
+          // faculty is NULL for a request raised by non-teaching staff
+          // (faculty_od.faculty_id is nullable). `requester` is resolved
+          // server-side for every row, whichever register applies.
+          name: row.requester?.name ?? "Unknown",
+          subtitle:
+            row.requester?.designation ?? row.faculty?.designation ?? "",
+          fromDate: formatDate(new Date(row.from_date)),
+          toDate: formatDate(new Date(row.to_date)),
+          days: daysBetweenInclusive(row.from_date, row.to_date),
+          reason: combineReason(row.place, row.purpose),
+          status: row.overall_status,
+          // Which register this request came from, used only to split the tabs.
+          kind: row.requester?.kind ?? (row.faculty ? "faculty" : "staff"),
+        }));
+
+        // Teaching staff on the Faculty tab, everyone else on Others. A row
+        // whose register could not be resolved is shown under Others rather
+        // than dropped — an unreviewable request is worse than an odd tab.
+        setFacultyRequests(cards.filter((c) => c.kind === "faculty"));
+        setStaffRequests(cards.filter((c) => c.kind !== "faculty"));
         setFacultyStatus("success");
       })
       .catch((err) => {
@@ -111,7 +122,7 @@ export function FacultyOdScreen() {
     }, [navigation]),
   );
 
-  const requests = tab === "faculty" ? facultyRequests : otherRequests;
+  const requests = tab === "faculty" ? facultyRequests : staffRequests;
 
   const counts = useMemo(
     () => ({
@@ -128,17 +139,10 @@ export function FacultyOdScreen() {
     [requests, statusFilter],
   );
 
-  function updateOtherStatus(id: string, status: FacultyOdStatus) {
-    setOtherRequests((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
-  }
-
+  // Both tabs go through the same real endpoint. The Others tab used to mutate
+  // local state only, so approving a non-teaching staff member's OD looked like
+  // it worked and never reached the database.
   function handleApprove(id: string) {
-    if (tab === "others") {
-      updateOtherStatus(id, "approved");
-      toast.success("On-duty request approved");
-      return;
-    }
-
     setActingOnId(id);
     reviewFacultyOdAsHr(Number(id), "approved")
       .then(() => {
@@ -152,12 +156,6 @@ export function FacultyOdScreen() {
   }
 
   function handleReject(id: string) {
-    if (tab === "others") {
-      updateOtherStatus(id, "rejected");
-      toast.info("On-duty request rejected");
-      return;
-    }
-
     setActingOnId(id);
     reviewFacultyOdAsHr(Number(id), "rejected")
       .then(() => {
@@ -228,11 +226,11 @@ export function FacultyOdScreen() {
           ))}
         </View>
 
-        {tab === "faculty" && facultyStatus === "loading" ? (
+        {facultyStatus === "loading" ? (
           <View style={styles.inlineLoading}>
             <ActivityIndicator color="#2F6FE0" />
           </View>
-        ) : tab === "faculty" && facultyStatus === "error" ? (
+        ) : facultyStatus === "error" ? (
           <View style={styles.emptyState}>
             <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
             <Text style={styles.emptyStateText}>{facultyError ?? "Something went wrong."}</Text>

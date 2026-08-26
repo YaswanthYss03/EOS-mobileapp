@@ -1,40 +1,24 @@
+// Row shapes for the HR payslip review cards. Both the Faculty and Others tabs
+// are wired to real data (GET/PATCH /me/payslip-requests) — payslip_requests
+// holds teaching and non-teaching requests in one table, keyed by faculty_id or
+// staff_user_id, and the API labels each row with requester.kind.
+//
+// The mock request list that used to live here has been removed: the Others tab
+// was rendering it AND approving/rejecting into local React state only, so a
+// staff decision never reached the database.
+
+// Mirrors payslip_requests.status.
 export type PayslipCardStatus = "pending" | "processed" | "rejected";
 
 export type PayslipRequestCard = {
   id: string;
   name: string;
+  /** Pre-computed display line, e.g. "Associate Professor". */
   subtitle: string;
+  /** Display label for the requested month, e.g. "Aug 2026". */
   month: string;
   purpose: string;
   status: PayslipCardStatus;
+  /** Which register the requester came from — used only to split the two tabs. */
+  kind: "faculty" | "staff" | "unknown";
 };
-
-// There is no non-teaching-staff payslip request module in the backend at
-// all (same gap as the Others tab on the sibling Leave/OD/Attendance
-// screens), so this tab stays on static mock data for now.
-export const mockOtherStaffPayslipRequests: PayslipRequestCard[] = [
-  {
-    id: "o1",
-    name: "Mr. G. Venkatesan",
-    subtitle: "Librarian",
-    month: "July 2026",
-    purpose: "",
-    status: "pending",
-  },
-  {
-    id: "o2",
-    name: "Mrs. S. Kalaivani",
-    subtitle: "Lab Assistant · CSE",
-    month: "July 2026",
-    purpose: "Bank loan documentation",
-    status: "pending",
-  },
-  {
-    id: "o3",
-    name: "Mr. R. Muthu",
-    subtitle: "Office Assistant",
-    month: "June 2026",
-    purpose: "",
-    status: "processed",
-  },
-];
