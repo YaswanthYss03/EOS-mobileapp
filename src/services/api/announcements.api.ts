@@ -61,6 +61,19 @@ export type AttachmentUpload = {
   url: string;
 };
 
+/**
+ * GET /announcements (no status param) - every "published" announcement
+ * actually visible to the caller's own role/class/department, already
+ * fully self-scoped server-side (see AnnouncementsService.
+ * buildVisibilityQuery) - this is the read side used by the Home tab's
+ * Announcements carousel/"View All" list, as opposed to every other
+ * function in this file, which backs the ERP compose/manage screen.
+ */
+export async function getAnnouncements(): Promise<Announcement[]> {
+  const { data } = await apiClient.get<{ data: Announcement[] }>("/announcements");
+  return data.data;
+}
+
 export async function getMyAssignedClasses(): Promise<AnnouncementClass[]> {
   const { data } = await apiClient.get<{ data: AnnouncementClass[] }>(
     "/announcements/lookup/assigned-classes",

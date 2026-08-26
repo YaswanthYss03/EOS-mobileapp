@@ -31,6 +31,23 @@ export function formatDate(date: Date): string {
   return `${String(date.getDate()).padStart(2, "0")} ${MONTH_NAMES[date.getMonth()].slice(0, 3)} ${date.getFullYear()}`;
 }
 
+// "2h ago"-style label for a timestamp coming straight off the backend
+// (e.g. an achievement post's created_at) - falls back to formatDate once
+// it's more than a week old, since "12d ago" stops being a useful measure.
+export function formatRelativeTime(isoTimestamp: string): string {
+  const then = new Date(isoTimestamp).getTime();
+  const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
+
+  if (seconds < 60) return "Just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return formatDate(new Date(isoTimestamp));
+}
+
 // YYYY-MM-DD from the date's own local year/month/day - NOT date.toISOString()
 // (which converts to UTC first and can shift the calendar day backwards for
 // any timezone ahead of UTC, e.g. IST). Picker dates are always constructed

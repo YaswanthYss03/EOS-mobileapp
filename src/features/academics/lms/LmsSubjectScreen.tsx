@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { useRole } from "@/hooks/useRole";
 import { getMyTeachingSubjects, type LmsTeachingSubject } from "@/services/api/lms.api";
@@ -44,9 +46,29 @@ export function LmsSubjectScreen({
   subjectCode?: string;
 }) {
   const router = useRouter();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const role = useRole();
   const isTeaching = role === "employee" || role === "hod";
+
+  // This screen renders its own full header above, so hide the shared
+  // CollegeHeader (mounted at the Tabs level) while focused, restoring it
+  // on blur - same pattern as the other custom-header ERP screens. The
+  // "hide" call is deferred a tick so it reliably wins if this screen was
+  // reached from another screen that also hides this shared header (see
+  // StudentAttendanceScreen/EnrollFacesScreen's own doc comment for the
+  // exact race this avoids).
+  useFocusEffect(
+    useCallback(() => {
+      const timer = setTimeout(() => {
+        navigation.getParent()?.setOptions({ headerShown: false });
+      }, 50);
+      return () => {
+        clearTimeout(timer);
+        navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
+      };
+    }, [navigation]),
+  );
 
   const [tab, setTab] = useState<TabKey>("material");
   const [classes, setClasses] = useState<{ class_id: number; label: string }[]>([]);

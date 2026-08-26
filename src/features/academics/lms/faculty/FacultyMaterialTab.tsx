@@ -7,7 +7,6 @@ import {
   Modal,
   TextInput,
   ActivityIndicator,
-  Alert,
   StyleSheet,
 } from "react-native";
 import { useRouter } from "expo-router";
@@ -15,6 +14,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
+import { confirm } from "@/utils/confirm";
 import { getApiErrorMessage } from "@/services/api/client";
 import {
   getFacultyFolders,
@@ -87,15 +87,15 @@ export function FacultyMaterialTab({ subjectId, classId }: { subjectId: number; 
       .finally(() => setSaving(false));
   }
 
-  function handleDelete(folder: LmsFacultyFolder) {
-    Alert.alert("Delete folder", `Delete "${folder.title}" and everything inside it?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: () => deleteFolder(folder.id).then(load).catch(() => toast.error("Couldn't delete the folder")),
-      },
-    ]);
+  async function handleDelete(folder: LmsFacultyFolder) {
+    const ok = await confirm({
+      title: "Delete folder",
+      message: `Delete "${folder.title}" and everything inside it?`,
+      confirmText: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
+    deleteFolder(folder.id).then(load).catch(() => toast.error("Couldn't delete the folder"));
   }
 
   if (status === "loading") {

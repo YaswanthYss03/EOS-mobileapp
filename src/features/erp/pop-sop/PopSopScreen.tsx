@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
+import { confirm } from "@/utils/confirm";
 import { formatDate } from "@/utils/calendar";
 import {
   listPurchaseRequestsForHodReview,
@@ -209,18 +210,23 @@ export function PopSopScreen() {
     }
   }
 
-  function handleApproveAndForward(order: DisplayOrder) {
-    Alert.alert("Approve & forward?", `"${order.title}" will move to Finance for review.`, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Approve", onPress: () => submitReview(order, "approved") },
-    ]);
+  async function handleApproveAndForward(order: DisplayOrder) {
+    const ok = await confirm({
+      title: "Approve & forward?",
+      message: `"${order.title}" will move to Finance for review.`,
+      confirmText: "Approve",
+    });
+    if (ok) submitReview(order, "approved");
   }
 
-  function handleSendBack(order: DisplayOrder) {
-    Alert.alert("Send back?", `"${order.title}" will be rejected and closed out. This can't be undone.`, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Send back", style: "destructive", onPress: () => submitReview(order, "rejected") },
-    ]);
+  async function handleSendBack(order: DisplayOrder) {
+    const ok = await confirm({
+      title: "Send back?",
+      message: `"${order.title}" will be rejected and closed out. This can't be undone.`,
+      confirmText: "Send back",
+      destructive: true,
+    });
+    if (ok) submitReview(order, "rejected");
   }
 
   const meta = TYPE_META[type];

@@ -7,13 +7,13 @@ import {
   Modal,
   TextInput,
   ActivityIndicator,
-  Alert,
   StyleSheet,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
+import { confirm } from "@/utils/confirm";
 import { getApiErrorMessage } from "@/services/api/client";
 import {
   getFacultyLessonPlan,
@@ -100,15 +100,15 @@ export function FacultyLessonPlanTab({ subjectId, classId }: { subjectId: number
       .catch(() => toast.error("Couldn't update the session"));
   }
 
-  function handleDelete(session: LmsLessonSession) {
-    Alert.alert("Remove session", `Remove "${session.topic}"?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Remove",
-        style: "destructive",
-        onPress: () => deleteLessonSession(session.id).then(load).catch(() => toast.error("Couldn't remove the session")),
-      },
-    ]);
+  async function handleDelete(session: LmsLessonSession) {
+    const ok = await confirm({
+      title: "Remove session",
+      message: `Remove "${session.topic}"?`,
+      confirmText: "Remove",
+      destructive: true,
+    });
+    if (!ok) return;
+    deleteLessonSession(session.id).then(load).catch(() => toast.error("Couldn't remove the session"));
   }
 
   if (status === "loading") {

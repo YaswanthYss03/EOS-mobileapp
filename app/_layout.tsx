@@ -3,6 +3,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from "@expo-google-fonts/inter";
 import { AuthProvider } from "@/context/AuthContext";
 import { ToastHost } from "@/components/ui/ToastHost";
+import { ConfirmHost } from "@/components/ui/ConfirmHost";
 import { OfflineBanner } from "@/components/ui/OfflineBanner";
 
 // TODO: also wrap with RBACProvider, QueryClientProvider, ThemeProvider (see src/store)
@@ -24,6 +25,7 @@ export default function RootLayout() {
         <Slot />
         <OfflineBanner />
         <ToastHost />
+        <ConfirmHost />
       </SafeAreaProvider>
     </AuthProvider>
   );

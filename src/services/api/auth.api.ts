@@ -24,7 +24,22 @@ export async function login(email: string, password: string): Promise<LoginRespo
   return data.data;
 }
 
-export async function getMe(): Promise<unknown> {
-  const { data } = await apiClient.get<{ data: unknown }>("/auth/me");
+// `name` is resolved server-side (see AuthService.resolveDisplayName):
+// Faculty/HoD's own first_name/last_name, a Student's soa_applications
+// name, or the account's email as a last resort for anyone with no name
+// stored anywhere (Parent, HR, Finance, ...). Never derive a "name" from
+// the email locally instead - that's what this replaced.
+export type MyProfile = {
+  id: number;
+  email: string;
+  name: string;
+  phone: string | null;
+  status: string;
+  created_at: string;
+  roles: { id: number; name: string; description: string | null };
+};
+
+export async function getMe(): Promise<MyProfile> {
+  const { data } = await apiClient.get<{ data: MyProfile }>("/auth/me");
   return data.data;
 }

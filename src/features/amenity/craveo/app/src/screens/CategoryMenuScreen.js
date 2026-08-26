@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, FlatList, RefreshControl, Alert, StyleSheet } from 'react-native';
+import { View, FlatList, RefreshControl, StyleSheet } from 'react-native';
 import {
   Text,
   Button,
@@ -60,12 +60,12 @@ const CategoryMenuScreen = ({ route, navigation }) => {
         setDishes(categoryDishes);
       } else {
         console.error('Failed to fetch dishes:', response.error);
-        Alert.alert('Error', response.error || 'Failed to load dishes');
+        setSnackbar({ visible: true, message: response.error || 'Failed to load dishes', type: 'error' });
         setDishes([]);
       }
     } catch (error) {
       console.error('Fetch category dishes error:', error);
-      Alert.alert('Error', 'Failed to load dishes. Please check your connection.');
+      setSnackbar({ visible: true, message: 'Failed to load dishes. Please check your connection.', type: 'error' });
       setDishes([]);
     } finally {
       setLoading(false);
@@ -76,38 +76,39 @@ const CategoryMenuScreen = ({ route, navigation }) => {
   const handleAddToCart = useCallback((dish, quantity = 1) => {
     // Check ordering time restriction for Girls Hostellers (user_type = 3)
     if (user?.user_type === 3 && isAfter7PMIST()) {
-      Alert.alert(
-        'Ordering Closed', 
-        'Girls Hostellers can only order until 7:00 PM IST. Ordering is currently closed.',
-        [{ text: 'OK', style: 'default' }]
-      );
+      setSnackbar({
+        visible: true,
+        message: 'Girls Hostellers can only order until 7:00 PM IST. Ordering is currently closed.',
+        type: 'warning',
+      });
       return;
     }
 
     if (!inventoryAvailable) {
-      Alert.alert('Booking Unavailable', ERROR_MESSAGES.INVENTORY_UNAVAILABLE);
+      setSnackbar({ visible: true, message: ERROR_MESSAGES.INVENTORY_UNAVAILABLE, type: 'warning' });
       return;
     }
 
     if (dish.quantity <= 0) {
-      Alert.alert('Sold Out', ERROR_MESSAGES.ITEM_OUT_OF_STOCK);
+      setSnackbar({ visible: true, message: ERROR_MESSAGES.ITEM_OUT_OF_STOCK, type: 'warning' });
       return;
     }
 
     if (quantity > dish.quantity) {
-      Alert.alert('Insufficient Quantity', `Only ${dish.quantity} items available`);
+      setSnackbar({ visible: true, message: `Only ${dish.quantity} items available`, type: 'warning' });
       return;
     }
 
     // Check current cart quantity for this item
     const currentCartItem = (cartItems || []).find(item => item.dish.dish_id === dish.dish_id);
     const currentCartQuantity = currentCartItem ? currentCartItem.quantity : 0;
-    
+
     if ((currentCartQuantity + quantity) > dish.quantity) {
-      Alert.alert(
-        'Insufficient Quantity', 
-        `You already have ${currentCartQuantity} in cart. Only ${dish.quantity - currentCartQuantity} more available.`
-      );
+      setSnackbar({
+        visible: true,
+        message: `You already have ${currentCartQuantity} in cart. Only ${dish.quantity - currentCartQuantity} more available.`,
+        type: 'warning',
+      });
       return;
     }
 

@@ -1,8 +1,10 @@
+import { useEffect, useState } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { fonts } from "@/theme";
 import { useAuth } from "@/context/AuthContext";
+import { getMe } from "@/services/api/auth.api";
 
 function greetingNameFromEmail(email: string) {
   const localPart = email.split("@")[0] ?? email;
@@ -14,7 +16,17 @@ function greetingNameFromEmail(email: string) {
 export function TopBar() {
   const router = useRouter();
   const { user } = useAuth();
-  const name = user ? greetingNameFromEmail(user.email) : "there";
+  // Shown instantly while the real name loads, so the greeting is never
+  // blank - GET /auth/me resolves the caller's actual name server-side
+  // (faculty/student profile, or email as a last resort - see
+  // AuthService.resolveDisplayName) and replaces this guess once it's back.
+  const [name, setName] = useState(user ? greetingNameFromEmail(user.email) : "there");
+
+  useEffect(() => {
+    getMe()
+      .then((me) => setName(me.name))
+      .catch(() => {}); // keep the email-derived guess if this fails
+  }, []);
 
   return (
     <View style={styles.container}>

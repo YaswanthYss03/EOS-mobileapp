@@ -7,20 +7,21 @@ import {
   Modal,
   TextInput,
   ActivityIndicator,
-  Alert,
   StyleSheet,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import * as DocumentPicker from "expo-document-picker";
 import * as Linking from "expo-linking";
 import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
+import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { useRole } from "@/hooks/useRole";
 import { toast } from "@/utils/toast";
+import { confirm } from "@/utils/confirm";
 import { getApiErrorMessage } from "@/services/api/client";
 import {
   getFolderResources,
@@ -37,6 +38,7 @@ const fileIcon: Record<string, keyof typeof Ionicons.glyphMap> = {
 
 export function FolderResourcesScreen({ folderId, title }: { folderId: number; title?: string }) {
   const router = useRouter();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const role = useRole();
   const canManage = role === "employee" || role === "hod";
@@ -65,6 +67,23 @@ export function FolderResourcesScreen({ folderId, title }: { folderId: number; t
     useCallback(() => {
       load();
     }, [load]),
+  );
+
+  // This screen renders its own full header below, so hide the shared
+  // CollegeHeader (mounted at the Tabs level) while focused, restoring it
+  // on blur. Deferred a tick so it reliably wins over a sibling screen's
+  // own blur cleanup - see StudentAttendanceScreen's doc comment for the
+  // exact race this avoids.
+  useFocusEffect(
+    useCallback(() => {
+      const timer = setTimeout(() => {
+        navigation.getParent()?.setOptions({ headerShown: false });
+      }, 50);
+      return () => {
+        clearTimeout(timer);
+        navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
+      };
+    }, [navigation]),
   );
 
   function handleUploadFile() {
@@ -106,19 +125,17 @@ export function FolderResourcesScreen({ folderId, title }: { folderId: number; t
       .finally(() => setSaving(false));
   }
 
-  function handleDelete(resource: LmsResource) {
-    Alert.alert("Remove item", `Remove "${resource.title}"?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Remove",
-        style: "destructive",
-        onPress: () => {
-          deleteResource(resource.id)
-            .then(load)
-            .catch(() => toast.error("Couldn't remove the item"));
-        },
-      },
-    ]);
+  async function handleDelete(resource: LmsResource) {
+    const ok = await confirm({
+      title: "Remove item",
+      message: `Remove "${resource.title}"?`,
+      confirmText: "Remove",
+      destructive: true,
+    });
+    if (!ok) return;
+    deleteResource(resource.id)
+      .then(load)
+      .catch(() => toast.error("Couldn't remove the item"));
   }
 
   function handleOpen(resource: LmsResource) {

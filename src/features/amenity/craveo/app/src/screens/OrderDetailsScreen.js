@@ -3,7 +3,6 @@ import {
   View,
   StyleSheet,
   ScrollView,
-  Alert,
   TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
@@ -13,6 +12,7 @@ import { useSelector } from 'react-redux';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { orderAPI } from '../services/api';
+import { confirm } from '../../../../../../utils/confirm';
 import { formatCurrency, formatDate, formatTime } from '../utils/helpers';
 import { colors, spacing, fontSize, borderRadius } from '../constants/theme';
 import { fonts } from '../../../../../../theme';
@@ -174,19 +174,14 @@ const OrderDetailsScreen = ({ navigation, route }) => {
     }
   };
 
-  const handleTrackOrder = () => {
+  const handleTrackOrder = async () => {
     if (order?.order_status === 'pending') {
-      Alert.alert(
-        'Track Order',
-        'Use the QR Scanner to track your order at the canteen pickup counter.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Open QR Scanner',
-            onPress: () => navigation.navigate('QR Scanner'),
-          },
-        ]
-      );
+      const ok = await confirm({
+        title: 'Track Order',
+        message: 'Use the QR Scanner to track your order at the canteen pickup counter.',
+        confirmText: 'Open QR Scanner',
+      });
+      if (ok) navigation.navigate('QR Scanner');
     }
   };
 

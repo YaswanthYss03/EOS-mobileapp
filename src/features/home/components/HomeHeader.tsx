@@ -1,10 +1,12 @@
+import { useCallback, useEffect, useState } from "react";
 import { View, Text, Image, Pressable, StyleSheet } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "@/theme";
 import { useRole } from "@/hooks/useRole";
+import { getUnreadCount } from "@/services/api/notifications.api";
 
 const logoSource = require("../../../../assets/logo.png");
 
@@ -20,6 +22,20 @@ export function HomeHeader() {
   // Every role has a wallet except Parent - see EOSbackend1's wallet
   // module's @Roles (everything but ROLES.PARENT).
   const hasWallet = role !== "parent";
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Re-fetches every time Home regains focus (e.g. coming back from the
+  // notifications screen after marking some read) - cheap enough for a
+  // single count query to not need a dedicated refresh trigger.
+  useFocusEffect(
+    useCallback(() => {
+      getUnreadCount()
+        .then(setUnreadCount)
+        .catch(() => {
+          // Best-effort - a stale/missing badge count isn't worth surfacing an error for.
+        });
+    }, []),
+  );
 
   return (
     <LinearGradient
@@ -34,9 +50,13 @@ export function HomeHeader() {
       </Text>
 
       <View style={styles.actions}>
-        <Pressable style={styles.iconButton} hitSlop={8}>
+        <Pressable
+          style={styles.iconButton}
+          hitSlop={8}
+          onPress={() => router.push("/(tabs)/home/notifications" as never)}
+        >
           <Ionicons name="notifications-outline" size={18} color="#fff" />
-          <View style={styles.badge} />
+          {unreadCount > 0 && <View style={styles.badge} />}
         </Pressable>
         {hasWallet && (
           <Pressable

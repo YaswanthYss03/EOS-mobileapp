@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "13898220194",
+    "project_id": "eos-notification-service",
+    "storage_bucket": "eos-notification-service.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:13898220194:android:a08a1a538dcb4cb3554dfb",
+        "android_client_info": {
+          "package_name": "com.eos.mobileapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDBjmNHj8GDz3BGyTRKX4b-0b489_ha9kk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

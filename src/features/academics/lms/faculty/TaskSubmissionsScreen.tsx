@@ -3,9 +3,10 @@ import { View, Text, FlatList, TouchableOpacity, TextInput, ActivityIndicator, S
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import * as Linking from "expo-linking";
 import { Ionicons } from "@expo/vector-icons";
+import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -13,6 +14,7 @@ import { getTaskSubmissions, gradeSubmission, type LmsSubmission } from "@/servi
 
 export function TaskSubmissionsScreen({ taskId, title }: { taskId: number; title?: string }) {
   const router = useRouter();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [submissions, setSubmissions] = useState<LmsSubmission[]>([]);
@@ -33,6 +35,23 @@ export function TaskSubmissionsScreen({ taskId, title }: { taskId: number; title
     useCallback(() => {
       load();
     }, [load]),
+  );
+
+  // This screen renders its own full header below, so hide the shared
+  // CollegeHeader (mounted at the Tabs level) while focused, restoring it
+  // on blur. Deferred a tick so it reliably wins over a sibling screen's
+  // own blur cleanup - see StudentAttendanceScreen's doc comment for the
+  // exact race this avoids.
+  useFocusEffect(
+    useCallback(() => {
+      const timer = setTimeout(() => {
+        navigation.getParent()?.setOptions({ headerShown: false });
+      }, 50);
+      return () => {
+        clearTimeout(timer);
+        navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
+      };
+    }, [navigation]),
   );
 
   function handleGrade(submission: LmsSubmission) {

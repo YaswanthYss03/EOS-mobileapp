@@ -1,29 +1,52 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { View, Text, FlatList, TouchableOpacity, Dimensions, StyleSheet } from "react-native";
+import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "@/theme";
-import { mockAnnouncements, type Announcement } from "../data/mockAnnouncements";
+import { formatRelativeTime } from "@/utils/calendar";
+import { getAnnouncements, type Announcement } from "@/services/api/announcements.api";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const CARD_WIDTH = SCREEN_WIDTH - 16 * 2 - 24; // leaves a peek of the next card
 const CARD_SPACING = 12;
+const HOME_CAROUSEL_LIMIT = 3;
+const NEW_BADGE_WINDOW_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
 
+function isRecent(isoTimestamp: string): boolean {
+  return Date.now() - new Date(isoTimestamp).getTime() < NEW_BADGE_WINDOW_MS;
+}
+
+// GET /announcements is already fully scoped server-side to whatever this
+// caller's role/class/department actually makes visible (see
+// AnnouncementsService.buildVisibilityQuery) - this just shows the most
+// recent few here, and the rest behind "View All"
+// (app/(tabs)/home/announcements.tsx).
 export function AnnouncementsSection() {
+  const router = useRouter();
   const [activeIndex, setActiveIndex] = useState(0);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+
+  useEffect(() => {
+    getAnnouncements()
+      .then((all) => setAnnouncements(all.slice(0, HOME_CAROUSEL_LIMIT)))
+      .catch(() => setAnnouncements([])); // a quiet failure here just hides the carousel, not worth a toast on the home feed
+  }, []);
+
+  if (announcements.length === 0) return null;
 
   return (
     <View style={styles.section}>
       <View style={styles.header}>
         <Ionicons name="megaphone-outline" size={16} color="#111827" />
         <Text style={styles.title}>Announcements</Text>
-        <TouchableOpacity hitSlop={8}>
+        <TouchableOpacity hitSlop={8} onPress={() => router.push("/(tabs)/home/announcements" as never)}>
           <Text style={styles.viewAll}>View All</Text>
         </TouchableOpacity>
       </View>
 
       <FlatList
-        data={mockAnnouncements}
-        keyExtractor={(item) => item.id}
+        data={announcements}
+        keyExtractor={(item) => String(item.id)}
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.list}
@@ -33,11 +56,16 @@ export function AnnouncementsSection() {
           const index = Math.round(e.nativeEvent.contentOffset.x / (CARD_WIDTH + CARD_SPACING));
           setActiveIndex(index);
         }}
-        renderItem={({ item }) => <AnnouncementCard announcement={item} />}
+        renderItem={({ item }) => (
+          <AnnouncementCard
+            announcement={item}
+            onPress={() => router.push("/(tabs)/home/announcements" as never)}
+          />
+        )}
       />
 
       <View style={styles.dots}>
-        {mockAnnouncements.map((item, index) => (
+        {announcements.map((item, index) => (
           <View key={item.id} style={[styles.dot, index === activeIndex && styles.dotActive]} />
         ))}
       </View>
@@ -45,33 +73,35 @@ export function AnnouncementsSection() {
   );
 }
 
-function AnnouncementCard({ announcement }: { announcement: Announcement }) {
+function AnnouncementCard({ announcement, onPress }: { announcement: Announcement; onPress: () => void }) {
   return (
-    <View style={[styles.card, { width: CARD_WIDTH }]}>
-      <View style={styles.badge}>
-        <Text style={styles.badgeText}>{announcement.badge}</Text>
-      </View>
+    <TouchableOpacity style={[styles.card, { width: CARD_WIDTH }]} onPress={onPress} activeOpacity={0.9}>
+      {isRecent(announcement.created_at) && (
+        <View style={styles.badgeRow}>
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>NEW</Text>
+          </View>
+        </View>
+      )}
 
       <View style={styles.cardBody}>
         <View style={styles.cardTextWrap}>
-          <Text style={styles.cardTitle}>{announcement.title}</Text>
-          <Text style={styles.cardDescription}>{announcement.description}</Text>
-          <Text style={styles.cardMeta}>{announcement.meta}</Text>
-
-          <TouchableOpacity style={styles.cta} activeOpacity={0.85}>
-            <Text style={styles.ctaText}>{announcement.ctaLabel}</Text>
-          </TouchableOpacity>
+          <Text style={styles.cardTitle} numberOfLines={1}>
+            {announcement.title}
+          </Text>
+          <Text style={styles.cardDescription} numberOfLines={2}>
+            {announcement.content}
+          </Text>
+          <Text style={styles.cardMeta}>{formatRelativeTime(announcement.created_at)}</Text>
         </View>
 
         <View style={styles.decoration}>
           <View style={styles.decorationBox}>
-            <Ionicons name="code-slash-outline" size={16} color="#2F6FE0" />
+            <Ionicons name="chevron-forward" size={16} color="#2F6FE0" />
           </View>
-          <View style={styles.decorationLine} />
-          <View style={styles.decorationCircle} />
         </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -107,12 +137,13 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 16,
     marginRight: CARD_SPACING,
-    minHeight: 150,
+    minHeight: 130,
+  },
+  badgeRow: {
+    flexDirection: "row",
+    marginBottom: 8,
   },
   badge: {
-    position: "absolute",
-    top: 14,
-    left: 16,
     backgroundColor: "#1A3D8F",
     borderRadius: 6,
     paddingHorizontal: 8,
@@ -126,7 +157,6 @@ const styles = StyleSheet.create({
   },
   cardBody: {
     flexDirection: "row",
-    marginTop: 26,
   },
   cardTextWrap: {
     flex: 1,
@@ -140,53 +170,27 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: fonts.regular,
     color: "#4B5563",
-    marginTop: 2,
+    marginTop: 4,
+    lineHeight: 18,
   },
   cardMeta: {
     fontSize: 12,
     fontFamily: fonts.medium,
     color: "#4B5563",
-    marginTop: 4,
-  },
-  cta: {
-    alignSelf: "flex-start",
-    backgroundColor: "#1A3D8F",
-    borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    marginTop: 12,
-  },
-  ctaText: {
-    fontSize: 12,
-    fontFamily: fonts.bold,
-    color: "#fff",
-  },
-  decoration: {
-    width: 56,
-    alignItems: "flex-end",
-  },
-  decorationBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: "rgba(47,111,224,0.35)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  decorationLine: {
-    width: 28,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "rgba(47,111,224,0.25)",
     marginTop: 8,
   },
-  decorationCircle: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: "rgba(47,111,224,0.18)",
-    marginTop: 10,
+  decoration: {
+    width: 40,
+    alignItems: "flex-end",
+    justifyContent: "flex-end",
+  },
+  decorationBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(47,111,224,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   dots: {
     flexDirection: "row",

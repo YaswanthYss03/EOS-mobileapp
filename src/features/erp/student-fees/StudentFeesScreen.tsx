@@ -4,13 +4,17 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
+import RazorpayCheckout from "react-native-razorpay";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
+import { useAuth } from "@/context/AuthContext";
 import { getApiErrorMessage } from "@/services/api/client";
 import {
   getMyFees,
+  createFeePaymentOrder,
+  verifyFeePayment,
   type FeeStatus,
   type MyFeeDemand,
   type MyFeePayment,
@@ -35,6 +39,7 @@ const PAYMENT_MODE_LABEL: Record<PaymentMode, string> = {
   upi: "UPI",
   dd: "DD",
   netbanking: "Net banking",
+  razorpay: "Online",
 };
 
 const AMOUNT_STEP = 100;
@@ -56,13 +61,15 @@ function demandSubtitle(demand: MyFeeDemand): string {
 }
 
 // Wired to GET /me/fees (real student_fee_demand_mapping + fee_payments
-// rows). Payment collection itself has no gateway wired up yet - "Pay now"
-// stays a stub. Reachable from the Student dashboard's "Fees" quick-access
-// item.
+// rows). "Pay now" runs one Razorpay checkout per selected demand,
+// sequentially (a payment is always scoped to one demand mapping
+// server-side) - see fees.api.ts's createFeePaymentOrder/verifyFeePayment.
+// Reachable from the Student dashboard's "Fees" quick-access item.
 export function StudentFeesScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
 
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -73,6 +80,10 @@ export function StudentFeesScreen() {
   const [amountInputs, setAmountInputs] = useState<Record<number, string>>({});
   const [semester, setSemester] = useState(1);
   const [semesterPickerOpen, setSemesterPickerOpen] = useState(false);
+  // "Paying 2 of 3..." - one Razorpay checkout per selected demand, run
+  // sequentially (a single order/payment is always scoped to one demand
+  // mapping server-side - see FeePaymentService.createGatewayOrder).
+  const [payingProgress, setPayingProgress] = useState<{ index: number; total: number } | null>(null);
 
   const load = useCallback(() => {
     setStatus("loading");
@@ -170,12 +181,68 @@ export function StudentFeesScreen() {
     setAmountInputs((prev) => ({ ...prev, [feeId]: String(due) }));
   }
 
-  function handlePay() {
-    if (payingNowTotal === 0) {
+  async function handlePay() {
+    const toPay = demands
+      .filter((fee) => selectedIds.has(fee.id))
+      .map((fee) => ({ fee, amount: parseInt(amountInputs[fee.id] ?? "", 10) || 0 }))
+      .filter(({ amount }) => amount > 0);
+
+    if (toPay.length === 0) {
       toast.warning("Select at least one fee and enter an amount");
       return;
     }
-    toast.info("Payment gateway integration is coming soon");
+
+    let paidCount = 0;
+    try {
+      for (let i = 0; i < toPay.length; i++) {
+        const { fee, amount } = toPay[i];
+        setPayingProgress({ index: i + 1, total: toPay.length });
+
+        const order = await createFeePaymentOrder(fee.id, amount);
+
+        const checkoutResult = await RazorpayCheckout.open({
+          key: order.key_id,
+          order_id: order.order_id,
+          amount: Math.round(order.amount * 100),
+          currency: order.currency,
+          name: "EOS Fee Payment",
+          description: fee.fee_structure_name,
+          prefill: user?.email ? { email: user.email } : undefined,
+          theme: { color: "#2F6FE0" },
+        });
+
+        await verifyFeePayment({
+          razorpay_order_id: checkoutResult.razorpay_order_id,
+          razorpay_payment_id: checkoutResult.razorpay_payment_id,
+          razorpay_signature: checkoutResult.razorpay_signature,
+        });
+
+        paidCount++;
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(fee.id);
+          return next;
+        });
+      }
+
+      toast.success(
+        toPay.length === 1 ? "Payment successful" : `${paidCount} of ${toPay.length} payments successful`,
+      );
+    } catch (err: any) {
+      // RazorpayCheckout's own cancel/failure rejection shape ({code,
+      // description}) is distinct from our axios error shape - only the
+      // latter has getApiErrorMessage's expected response.data.message.
+      if (err?.response) {
+        toast.error(getApiErrorMessage(err, "Payment verification failed"));
+      } else if (err?.description) {
+        toast.info(paidCount > 0 ? `Stopped after ${paidCount} payment(s): ${err.description}` : err.description);
+      } else {
+        toast.error(paidCount > 0 ? `Stopped after ${paidCount} payment(s) - one didn't go through` : "Payment didn't go through");
+      }
+    } finally {
+      setPayingProgress(null);
+      if (paidCount > 0) load();
+    }
   }
 
   function handleDownloadReceipt(payment: MyFeePayment) {
@@ -287,15 +354,25 @@ export function StudentFeesScreen() {
 
                 <View style={styles.payFooter}>
                   <View>
-                    <Text style={styles.payFooterLabel}>Paying now</Text>
+                    <Text style={styles.payFooterLabel}>
+                      {payingProgress ? `Paying ${payingProgress.index} of ${payingProgress.total}...` : "Paying now"}
+                    </Text>
                     <Text style={styles.payFooterValue}>{formatRupees(payingNowTotal)}</Text>
                   </View>
                   <TouchableOpacity
-                    style={[styles.payNowButton, payingNowTotal === 0 && styles.payNowButtonDisabled]}
+                    style={[
+                      styles.payNowButton,
+                      (payingNowTotal === 0 || payingProgress !== null) && styles.payNowButtonDisabled,
+                    ]}
                     onPress={handlePay}
+                    disabled={payingNowTotal === 0 || payingProgress !== null}
                     activeOpacity={0.85}
                   >
-                    <Text style={styles.payNowButtonText}>Pay now</Text>
+                    {payingProgress ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text style={styles.payNowButtonText}>Pay now</Text>
+                    )}
                   </TouchableOpacity>
                 </View>
               </>

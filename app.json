@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "EOS",
-    "slug": "eos-mobileapp",
+    "slug": "sece",
     "scheme": "eos",
     "version": "0.1.0",
     "orientation": "portrait",
@@ -22,6 +22,7 @@
     },
     "android": {
       "package": "com.eos.mobileapp",
+      "googleServicesFile": "./google-services.json",
       "edgeToEdgeEnabled": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/icons/adaptive-icon.png",
@@ -32,7 +33,9 @@
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE",
         "USE_FULL_SCREEN_INTENT",
-        "WAKE_LOCK"
+        "WAKE_LOCK",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "notification": {
@@ -62,6 +65,13 @@
         }
       ],
       "expo-asset"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "147d471c-0441-4b94-b706-4d7aa78b2f87"
+      }
+    },
+    "owner": "eos-seces-team"
   }
 }

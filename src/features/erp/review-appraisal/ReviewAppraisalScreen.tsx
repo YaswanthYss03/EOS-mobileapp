@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Linking,
-  Alert,
   StyleSheet,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -17,6 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
+import { confirm } from "@/utils/confirm";
 import { formatDate } from "@/utils/calendar";
 import { getApiErrorMessage } from "@/services/api/client";
 import {
@@ -128,22 +128,17 @@ export function ReviewAppraisalScreen() {
   // HoD's own) - safe to read it off the first one for the header subtitle.
   const departmentLabel = requests && requests.length > 0 ? requests[0].faculty.department_name : null;
 
-  function handleDecision(request: MyAppraisalRequest, decision: "hod_reviewed" | "rejected") {
+  async function handleDecision(request: MyAppraisalRequest, decision: "hod_reviewed" | "rejected") {
     const facultyName = `${request.faculty.first_name} ${request.faculty.last_name}`;
     const action = decision === "hod_reviewed" ? "forward this appraisal to HR" : "send this appraisal back";
 
-    Alert.alert(
-      decision === "hod_reviewed" ? "Forward to HR?" : "Send back?",
-      `This will ${action} for ${facultyName}. This can't be undone.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: decision === "hod_reviewed" ? "Forward" : "Send back",
-          style: decision === "rejected" ? "destructive" : "default",
-          onPress: () => doReview(request.id, decision),
-        },
-      ],
-    );
+    const ok = await confirm({
+      title: decision === "hod_reviewed" ? "Forward to HR?" : "Send back?",
+      message: `This will ${action} for ${facultyName}. This can't be undone.`,
+      confirmText: decision === "hod_reviewed" ? "Forward" : "Send back",
+      destructive: decision === "rejected",
+    });
+    if (ok) doReview(request.id, decision);
   }
 
   function doReview(id: number, decision: "hod_reviewed" | "rejected") {

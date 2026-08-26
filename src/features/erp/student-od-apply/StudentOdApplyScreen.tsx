@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   Modal,
   ActivityIndicator,
-  Alert,
   StyleSheet,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -18,6 +17,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
+import { confirm } from "@/utils/confirm";
 import { getApiErrorMessage } from "@/services/api/client";
 import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, formatDate, toIsoDate } from "@/utils/calendar";
 import {
@@ -234,7 +234,7 @@ export function StudentOdApplyScreen() {
       .finally(() => setJoining(false));
   }
 
-  function handleSubmitRequest() {
+  async function handleSubmitRequest() {
     if (!activeTeam) return;
     if (!fromDateObj || !toDateObj) {
       toast.warning("Select a start and end date");
@@ -254,14 +254,14 @@ export function StudentOdApplyScreen() {
       activeTeam.member_count <= 1
         ? "You're still the only member. "
         : `Only ${activeTeam.member_count} ${activeTeam.member_count === 1 ? "member" : "members"} have joined so far. `;
-    Alert.alert(
-      "Submit OD request?",
-      `${soloWarning}Submitting locks the team - no one else will be able to join with the code after this.`,
-      [
-        { text: "Wait, not yet", style: "cancel" },
-        { text: "Submit", style: "destructive", onPress: doSubmitRequest },
-      ],
-    );
+    const ok = await confirm({
+      title: "Submit OD request?",
+      message: `${soloWarning}Submitting locks the team - no one else will be able to join with the code after this.`,
+      confirmText: "Submit",
+      cancelText: "Wait, not yet",
+      destructive: true,
+    });
+    if (ok) doSubmitRequest();
   }
 
   function doSubmitRequest() {

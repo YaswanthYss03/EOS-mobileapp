@@ -1,7 +1,8 @@
-import { Alert, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { RAZORPAY_KEY_ID, COMPANY_NAME, CURRENCY } from '../constants/razorpay';
 import { generateTransactionId } from '../utils/helpers';
+import { confirm } from '../../../../../../utils/confirm';
 
 // Try to import native Razorpay, fallback to null if not available
 let RazorpayCheckout = null;
@@ -391,43 +392,35 @@ export class RazorpayService {
       // For web mode, we prompt user for payment status
       return new Promise((resolve) => {
         setTimeout(() => {
-          Alert.alert(
-            'Payment Status',
-            'Did you complete the payment successfully?',
-            [
-              {
-                text: 'Payment Failed',
-                style: 'destructive',
-                onPress: () => {
-                  console.log('❌ User indicated payment failed');
-                  resolve({
-                    success: false,
-                    error: 'Payment failed or was cancelled by user',
-                  });
-                },
+          confirm({
+            title: 'Payment Status',
+            message: 'Did you complete the payment successfully?',
+            confirmText: 'Payment Successful',
+            cancelText: 'Payment Failed',
+          }).then((paymentSuccessful) => {
+            if (!paymentSuccessful) {
+              console.log('❌ User indicated payment failed');
+              resolve({
+                success: false,
+                error: 'Payment failed or was cancelled by user',
+              });
+              return;
+            }
+
+            const paymentId = `pay_${generateTransactionId()}`;
+            console.log('✅ User confirmed payment success:', paymentId);
+            resolve({
+              success: true,
+              paymentId,
+              orderId,
+              signature: `sig_${generateTransactionId()}`,
+              data: {
+                razorpay_payment_id: paymentId,
+                razorpay_order_id: orderId,
+                razorpay_signature: `sig_${generateTransactionId()}`,
               },
-              {
-                text: 'Payment Successful',
-                style: 'default',
-                onPress: () => {
-                  const paymentId = `pay_${generateTransactionId()}`;
-                  console.log('✅ User confirmed payment success:', paymentId);
-                  resolve({
-                    success: true,
-                    paymentId,
-                    orderId,
-                    signature: `sig_${generateTransactionId()}`,
-                    data: {
-                      razorpay_payment_id: paymentId,
-                      razorpay_order_id: orderId,
-                      razorpay_signature: `sig_${generateTransactionId()}`,
-                    },
-                  });
-                },
-              },
-            ],
-            { cancelable: false }
-          );
+            });
+          });
         }, 1000);
       });
       

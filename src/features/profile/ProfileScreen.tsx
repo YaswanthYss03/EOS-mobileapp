@@ -5,7 +5,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
-  Alert,
   Modal,
   TextInput,
   ActivityIndicator,
@@ -21,6 +20,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "@/theme";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/utils/toast";
+import { confirm } from "@/utils/confirm";
 import { getApiErrorMessage } from "@/services/api/client";
 import {
   getMyProfile,
@@ -89,18 +89,16 @@ export function ProfileScreen() {
     }, [load]),
   );
 
-  function handleLogout() {
-    Alert.alert("Log out", "Are you sure you want to log out?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Log out",
-        style: "destructive",
-        onPress: async () => {
-          await logout();
-          router.replace("/(auth)/login");
-        },
-      },
-    ]);
+  async function handleLogout() {
+    const ok = await confirm({
+      title: "Log out",
+      message: "Are you sure you want to log out?",
+      confirmText: "Log out",
+      destructive: true,
+    });
+    if (!ok) return;
+    await logout();
+    router.replace("/(auth)/login");
   }
 
   async function handleUploadResume() {
@@ -151,23 +149,22 @@ export function ProfileScreen() {
       .finally(() => setSavingLink(false));
   }
 
-  function handleRemoveLink(link: SocialLink) {
-    Alert.alert("Remove link", `Remove "${link.title}"?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Remove",
-        style: "destructive",
-        onPress: () => {
-          setProfile((prev) =>
-            prev ? { ...prev, social_links: prev.social_links.filter((l) => l.id !== link.id) } : prev,
-          );
-          removeMySocialLink(link.id).catch(() => {
-            toast.error("Couldn't remove the link");
-            load();
-          });
-        },
-      },
-    ]);
+  async function handleRemoveLink(link: SocialLink) {
+    const ok = await confirm({
+      title: "Remove link",
+      message: `Remove "${link.title}"?`,
+      confirmText: "Remove",
+      destructive: true,
+    });
+    if (!ok) return;
+
+    setProfile((prev) =>
+      prev ? { ...prev, social_links: prev.social_links.filter((l) => l.id !== link.id) } : prev,
+    );
+    removeMySocialLink(link.id).catch(() => {
+      toast.error("Couldn't remove the link");
+      load();
+    });
   }
 
   return (

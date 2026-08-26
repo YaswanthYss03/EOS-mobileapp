@@ -7,7 +7,6 @@ import {
   Modal,
   TextInput,
   ActivityIndicator,
-  Alert,
   StyleSheet,
 } from "react-native";
 import { useRouter } from "expo-router";
@@ -15,6 +14,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
+import { confirm } from "@/utils/confirm";
 import { getApiErrorMessage } from "@/services/api/client";
 import {
   getFacultyTasks,
@@ -114,15 +114,15 @@ export function FacultyTaskTab({ subjectId, classId }: { subjectId: number; clas
       .finally(() => setSaving(false));
   }
 
-  function handleDelete(task: LmsFacultyTask) {
-    Alert.alert("Delete task", `Delete "${task.title}" and all its submissions?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: () => deleteTask(task.id).then(load).catch(() => toast.error("Couldn't delete the task")),
-      },
-    ]);
+  async function handleDelete(task: LmsFacultyTask) {
+    const ok = await confirm({
+      title: "Delete task",
+      message: `Delete "${task.title}" and all its submissions?`,
+      confirmText: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
+    deleteTask(task.id).then(load).catch(() => toast.error("Couldn't delete the task"));
   }
 
   if (status === "loading") {

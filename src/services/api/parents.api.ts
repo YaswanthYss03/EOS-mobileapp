@@ -5,6 +5,11 @@ import type { MyFeesResponse } from "./fees.api";
 import type { MyTimetableDay } from "./current-semester.api";
 import type { MyAcademicCalendar } from "./academic-calendar.api";
 import type { UpcomingDrive, DriveHistoryItem } from "./placements.api";
+import type {
+  FeePaymentOrder,
+  FeePaymentVerifyResult,
+  VerifyFeePaymentPayload,
+} from "./fees.api";
 
 // Mirrors EOS-backend's parent-facing endpoints (see
 // EOS-backend/src/modules/parents/parents.service.ts). A parent can be
@@ -88,6 +93,33 @@ export async function getChildUpcomingDrives(studentId: number): Promise<Upcomin
 export async function getChildPlacementHistory(studentId: number): Promise<DriveHistoryItem[]> {
   const { data } = await apiClient.get<{ data: DriveHistoryItem[] }>(
     `/me/children/${studentId}/placement-history`,
+  );
+  return data.data;
+}
+
+// Same shape/flow as the student's own createFeePaymentOrder/verifyFeePayment
+// (see fees.api.ts) - just scoped through the parent-child link. Ownership
+// of `studentId` is checked server-side both times (assertOwnChild), same
+// as every other child-scoped call above.
+export async function createChildFeePaymentOrder(
+  studentId: number,
+  demandId: number,
+  amount: number,
+): Promise<FeePaymentOrder> {
+  const { data } = await apiClient.post<{ data: FeePaymentOrder }>(
+    `/me/children/${studentId}/fees/demands/${demandId}/payment-order`,
+    { amount },
+  );
+  return data.data;
+}
+
+export async function verifyChildFeePayment(
+  studentId: number,
+  payload: VerifyFeePaymentPayload,
+): Promise<FeePaymentVerifyResult> {
+  const { data } = await apiClient.post<{ data: FeePaymentVerifyResult }>(
+    `/me/children/${studentId}/fees/payment-order/verify`,
+    payload,
   );
   return data.data;
 }

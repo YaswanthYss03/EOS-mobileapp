@@ -1,38 +1,33 @@
 import React, { useState, useEffect } from 'react';
 import {
   View,
+  Text,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
-  ScrollView,
-  Dimensions,
   StatusBar,
   Image,
-  TouchableOpacity,
-} from 'react-native';
-import {
-  Text,
   TextInput,
-  Button,
-  Card,
-  Title,
+  TouchableOpacity,
   ActivityIndicator,
-  HelperText,
-  IconButton,
-} from 'react-native-paper';
+} from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { login, clearError } from '../redux/slices/authSlice';
-import { colors, spacing, fontSize } from '../constants/theme';
 import { showToast, handleError } from '../utils/toastUtils';
 import PasswordSetupModal from '../components/PasswordSetupModal';
 import { authAPI } from '../services/backendAPI';
 import { fonts } from '../../../../../../theme';
 
-const { width, height } = Dimensions.get('window');
-
+// Same blue-gradient/plain-field look as the main EOS login screen (see
+// src/features/auth/LoginScreen.tsx), styled to sit directly beneath the
+// "← Craveo" header CraveoScreen.tsx always renders above this whole
+// nested app - so no back button or "Craveo" title here (that header
+// already has both; a second one duplicated it). This hero is just a
+// welcome banner: logo + tagline, no title text, no navigation. Every
+// field/validation/login handler below is unchanged from before - only
+// the JSX/styling changed.
 const ImprovedLoginScreen = ({ navigation }) => {
   const [formData, setFormData] = useState({
     username: '',
@@ -205,160 +200,81 @@ const ImprovedLoginScreen = ({ navigation }) => {
 
   return (
     <>
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <StatusBar barStyle="light-content" backgroundColor="#667eea" />
-      <LinearGradient
-        colors={['#667eea', '#764ba2']}
-        style={styles.gradient}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-      >
-        <SafeAreaView style={styles.safeArea}>
-          <ScrollView 
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
+      <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <StatusBar barStyle="light-content" backgroundColor="#1A3D8F" />
+
+        {/* No title text or back button here - CraveoScreen.tsx already
+            renders a "← Craveo" header above this entire nested app, on
+            every screen including this one. This is just a welcome
+            banner (logo + tagline), same gradient as that header so the
+            two read as one continuous blue area. */}
+        <LinearGradient
+          colors={['#2F6FE0', '#1A3D8F']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.hero}
+        >
+          <View style={styles.logoWrapper}>
+            <Image source={require('../../assets/icon.png')} style={styles.logoImage} resizeMode="cover" />
+          </View>
+          <Text style={styles.tagline}>Your campus food, just a tap away</Text>
+        </LinearGradient>
+
+        <View style={styles.formSection}>
+          <Text style={styles.welcomeText}>Welcome back</Text>
+          <Text style={styles.welcomeSubtext}>Sign in to order from the canteen</Text>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.fieldLabel}>Username</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Enter your username"
+              placeholderTextColor="#9CA3AF"
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!loading}
+              value={formData.username}
+              onChangeText={(value) => handleInputChange('username', value)}
+            />
+            {errors.username ? <Text style={styles.fieldError}>{errors.username}</Text> : null}
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.fieldLabel}>Password</Text>
+            <View style={styles.passwordRow}>
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="Enter your password"
+                placeholderTextColor="#9CA3AF"
+                secureTextEntry={!showPassword}
+                editable={!loading}
+                value={formData.password}
+                onChangeText={(value) => handleInputChange('password', value)}
+              />
+              <TouchableOpacity onPress={() => setShowPassword((prev) => !prev)} hitSlop={8}>
+                <Ionicons name={showPassword ? 'eye-outline' : 'eye-off-outline'} size={20} color="#9CA3AF" />
+              </TouchableOpacity>
+            </View>
+            {errors.password ? <Text style={styles.fieldError}>{errors.password}</Text> : null}
+          </View>
+
+          <TouchableOpacity
+            style={[styles.button, loading && styles.buttonDisabled]}
+            onPress={handleLogin}
+            activeOpacity={0.85}
+            disabled={loading}
           >
-            {/* Logo Section */}
-            <View style={styles.logoContainer}>
-              <View style={styles.logoWrapper}>
-                <Image 
-                  source={require('../../assets/icon.png')} 
-                  style={styles.logo}
-                  resizeMode="cover"
-                />
-              </View>
-              <Title style={styles.appTitle}>Fortune Flavours</Title>
-              <Text style={styles.subtitle}>Welcome back! Please sign in to continue</Text>
-            </View>
+            {loading ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.buttonText}>Sign In</Text>}
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
 
-            {/* Login Card */}
-            <Card style={styles.loginCard} elevation={8}>
-              <Card.Content style={styles.cardContent}>
-                <View style={styles.headerContainer}>
-                  <MaterialCommunityIcons 
-                    name="account-circle" 
-                    size={40} 
-                    color={colors.primary} 
-                  />
-                  <Title style={styles.cardTitle}>Sign In</Title>
-                </View>
-
-                {/* Username Input */}
-                <View style={styles.inputContainer}>
-                  <TextInput
-                    label="Username"
-                    value={formData.username}
-                    onChangeText={(value) => handleInputChange('username', value)}
-                    mode="outlined"
-                    style={styles.input}
-                    theme={{
-                      colors: { 
-                        primary: colors.primary,
-                        outline: errors.username ? colors.error : colors.lightGray,
-                      }
-                    }}
-                    left={
-                      <TextInput.Icon 
-                        icon="account" 
-                        color={colors.primary}
-                      />
-                    }
-                    error={!!errors.username}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                  {errors.username && (
-                    <HelperText type="error" style={styles.errorText}>
-                      {errors.username}
-                    </HelperText>
-                  )}
-                </View>
-
-                {/* Password Input */}
-                <View style={styles.inputContainer}>
-                  <TextInput
-                    label="Password"
-                    value={formData.password}
-                    onChangeText={(value) => handleInputChange('password', value)}
-                    mode="outlined"
-                    secureTextEntry={!showPassword}
-                    style={styles.input}
-                    theme={{
-                      colors: { 
-                        primary: colors.primary,
-                        outline: errors.password ? colors.error : colors.lightGray,
-                      }
-                    }}
-                    left={
-                      <TextInput.Icon 
-                        icon="lock" 
-                        color={colors.primary}
-                      />
-                    }
-                    right={
-                      <TextInput.Icon
-                        icon={showPassword ? "eye-off" : "eye"}
-                        color={colors.primary}
-                        onPress={() => setShowPassword(!showPassword)}
-                      />
-                    }
-                    error={!!errors.password}
-                  />
-                  {errors.password && (
-                    <HelperText type="error" style={styles.errorText}>
-                      {errors.password}
-                    </HelperText>
-                  )}
-                </View>
-
-                {/* Login Button */}
-                <Button
-                  mode="contained"
-                  onPress={handleLogin}
-                  style={styles.loginButton}
-                  contentStyle={styles.loginButtonContent}
-                  labelStyle={styles.loginButtonText}
-                  disabled={loading}
-                  theme={{ colors: { primary: colors.primary } }}
-                >
-                  {loading ? (
-                    <ActivityIndicator size="small" color="white" />
-                  ) : (
-                    'Sign In'
-                  )}
-                </Button>
-
-                {/* Sign Up Link */}
-                {/* <View style={styles.signupContainer}>
-                  <Text style={styles.signupText}>Don't have an account?</Text>
-                  <TouchableOpacity onPress={() => navigation.navigate('Signup')}>
-                    <Text style={styles.signupLink}>Sign Up</Text>
-                  </TouchableOpacity>
-                </View> */}
-              </Card.Content>
-            </Card>
-
-            {/* Footer */}
-            <View style={styles.footer}>
-              <Text style={styles.footerText}>
-                Your campus Food, just a tap away
-              </Text>
-            </View>
-          </ScrollView>
-        </SafeAreaView>
-      </LinearGradient>
-    </KeyboardAvoidingView>
-
-    <PasswordSetupModal
-      visible={showPasswordSetupModal}
-      userInfo={currentUserInfo}
-      loading={passwordSetupLoading}
-      onPasswordSet={handlePasswordSetup}
-    />
+      <PasswordSetupModal
+        visible={showPasswordSetupModal}
+        userInfo={currentUserInfo}
+        loading={passwordSetupLoading}
+        onPasswordSet={handlePasswordSetup}
+      />
     </>
   );
 };
@@ -366,132 +282,118 @@ const ImprovedLoginScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#fff',
   },
-  gradient: {
-    flex: 1,
-  },
-  safeArea: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    padding: spacing.lg,
-    minHeight: height * 0.8,
-  },
-  logoContainer: {
+  hero: {
+    width: '100%',
     alignItems: 'center',
-    marginBottom: spacing.xl,
+    justifyContent: 'center',
+    paddingVertical: 32,
+    paddingHorizontal: 24,
+    borderBottomLeftRadius: 40,
+    borderBottomRightRadius: 40,
   },
   logoWrapper: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    justifyContent: 'center',
+    width: 132,
+    height: 132,
+    borderRadius: 32,
+    backgroundColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center',
-    marginBottom: spacing.md,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    justifyContent: 'center',
+    overflow: 'hidden',
+    marginBottom: 16,
   },
-  logo: {
-    width: 90,
-    height: 90,
-    borderRadius: 45, // Make it circular to fit the icon better
+  logoImage: {
+    width: 132,
+    height: 132,
   },
-  appTitle: {
-    fontSize: fontSize.xxl,
+  tagline: {
+    color: '#D7E2FA',
+    fontSize: 13,
+    fontFamily: fonts.semibold,
+    textAlign: 'center',
+    paddingHorizontal: 12,
+  },
+  formSection: {
+    flex: 1,
+    paddingHorizontal: 28,
+    paddingTop: 36,
+  },
+  welcomeText: {
+    fontSize: 22,
     fontFamily: fonts.bold,
-    color: 'white',
-    marginBottom: spacing.xs,
-    textAlign: 'center',
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 3,
+    color: '#111827',
   },
-  subtitle: {
-    fontSize: fontSize.md,
-    color: 'rgba(255, 255, 255, 0.9)',
-    textAlign: 'center',
+  welcomeSubtext: {
+    fontSize: 14,
     fontFamily: fonts.regular,
+    color: '#6B7280',
+    marginTop: 4,
+    marginBottom: 28,
   },
-  loginCard: {
-    borderRadius: 20,
-    marginBottom: spacing.lg,
-    backgroundColor: 'white',
+  fieldGroup: {
+    marginBottom: 18,
   },
-  cardContent: {
-    padding: spacing.xl,
-  },
-  headerContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.lg,
-  },
-  cardTitle: {
-    fontSize: fontSize.xl,
-    fontFamily: fonts.bold,
-    color: colors.primary,
-    marginLeft: spacing.sm,
-  },
-  inputContainer: {
-    marginBottom: spacing.md,
+  fieldLabel: {
+    fontSize: 13,
+    fontFamily: fonts.semibold,
+    color: '#374151',
+    marginBottom: 6,
   },
   input: {
-    backgroundColor: 'white',
-    fontSize: fontSize.md,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 15,
     fontFamily: fonts.regular,
+    color: '#111827',
   },
-  errorText: {
-    fontSize: fontSize.sm,
-    marginTop: spacing.xs,
+  passwordRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+  },
+  passwordInput: {
+    flex: 1,
+    paddingVertical: 14,
+    fontSize: 15,
     fontFamily: fonts.regular,
+    color: '#111827',
   },
-  loginButton: {
-    marginTop: spacing.lg,
-    borderRadius: 30,
-    elevation: 4,
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
+  fieldError: {
+    color: '#DC2626',
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    marginTop: 6,
+  },
+  button: {
+    backgroundColor: '#235EAA',
+    borderRadius: 999,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 8,
+    elevation: 3,
+    shadowColor: '#235EAA',
+    shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
   },
-  loginButtonContent: {
-    height: 50,
+  buttonDisabled: {
+    backgroundColor: '#7A9BC4',
+    elevation: 0,
+    shadowOpacity: 0,
   },
-  loginButtonText: {
-    fontSize: fontSize.lg,
+  buttonText: {
+    color: '#fff',
     fontFamily: fonts.bold,
-  },
-  signupContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: spacing.lg,
-  },
-  signupText: {
-    color: colors.darkGray,
-    fontSize: fontSize.md,
-  },
-  signupLink: {
-    color: colors.primary,
-    fontSize: fontSize.md,
-    fontWeight: 'bold',
-    marginLeft: spacing.xs,
-  },
-  footer: {
-    alignItems: 'center',
-    marginTop: spacing.lg,
-  },
-  footerText: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: fontSize.sm,
-    textAlign: 'center',
-    fontFamily: fonts.regular,
+    fontSize: 16,
   },
 });
 

@@ -32,6 +32,13 @@ yarn-error.*
 .env.local
 .env*.local
 
+# Firebase service-account keys (FCM v1 push credentials, etc.) - always
+# named like this by Firebase's own "generate new private key" download,
+# never meant to be committed. NOT google-services.json - that one IS
+# needed inside the EAS Build upload (app.json's android.googleServicesFile
+# references it by path), and EAS skips anything gitignored.
+*firebase-adminsdk*.json
+
 # macOS
 .DS_Store
 *.pem
