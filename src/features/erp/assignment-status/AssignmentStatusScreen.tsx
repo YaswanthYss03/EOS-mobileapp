@@ -635,8 +635,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   submitToggleActive: {
-    backgroundColor: "#16A34A",
-    borderColor: "#16A34A",
+    backgroundColor: "#2F6FE0",
+    borderColor: "#2F6FE0",
   },
   submitToggleText: {
     fontSize: 11,

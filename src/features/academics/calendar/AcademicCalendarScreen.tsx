@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { useRole } from "@/hooks/useRole";
+import { getApiErrorMessage } from "@/services/api/client";
 import {
   getMyAcademicCalendar,
   getMyAcademicCalendarAsFaculty,
@@ -90,15 +91,20 @@ function AcademicCalendarHeader({ onBack, calendar }: { onBack: () => void; cale
 
 // Wired to GET /me/academic-calendar for STUDENTS (real calendar_events for
 // the student's own batch + current semester), GET
-// /me/faculty-academic-calendar for Faculty/HoD app users, who reach this
-// exact same screen (see AcademicsChooserScreen - "same for hod, faculty and
-// student"), and GET /me/academic-calendar-institution for HR Payroll (who
-// has no "own" batch/semester at all, so gets every calendar merged
-// institution-wide instead - see getInstitutionAcademicCalendar). A faculty
-// member can teach into several distinct batch+semester calendars at once,
-// so their events are merged/deduped server-side too - see
-// getMergedAcademicCalendarForFaculty. Only "holiday"/"event" types exist in
-// the schema - there is no "review"/"exam" category to show.
+// /me/faculty-academic-calendar for plain Faculty (a faculty member can
+// teach into several distinct batch+semester calendars at once, so their
+// events are merged/deduped server-side - see
+// getMergedAcademicCalendarForFaculty), and GET
+// /me/academic-calendar-institution for HR Payroll AND HoD (both have no
+// single "own" batch/semester to scope to - a HoD is mostly an
+// administrator, not necessarily teaching any class themselves this term,
+// so the per-personally-taught-classes faculty merge above would often come
+// back empty for them; the backend's own doc comment on
+// getInstitutionAcademicCalendar explicitly calls this out: "HR Payroll
+// (and HoD, browsing outside their own department)" - see
+// me-faculty-timetable-roster.controller.ts's @Roles on that endpoint,
+// which grants HOD access precisely for this). Only "holiday"/"event" types
+// exist in the schema - there is no "review"/"exam" category to show.
 export function AcademicCalendarScreen() {
   const router = useRouter();
   const navigation = useNavigation();
@@ -110,13 +116,15 @@ export function AcademicCalendarScreen() {
 
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [calendar, setCalendar] = useState<MyAcademicCalendar | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setStatus("loading");
+    setLoadError(null);
     const request =
       role === "student"
         ? getMyAcademicCalendar()
-        : role === "hr-payroll"
+        : role === "hr-payroll" || role === "hod"
           ? getInstitutionAcademicCalendar()
           : getMyAcademicCalendarAsFaculty();
     request
@@ -124,7 +132,10 @@ export function AcademicCalendarScreen() {
         setCalendar(response);
         setStatus("success");
       })
-      .catch(() => setStatus("error"));
+      .catch((error) => {
+        setLoadError(getApiErrorMessage(error, "Couldn't load the academic calendar."));
+        setStatus("error");
+      });
   }, [role]);
 
   useEffect(() => {
@@ -185,7 +196,7 @@ export function AcademicCalendarScreen() {
       {status === "error" && (
         <View style={styles.errorNotice}>
           <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
-          <Text style={styles.errorNoticeText}>Couldn't load the academic calendar.</Text>
+          <Text style={styles.errorNoticeText}>{loadError ?? "Couldn't load the academic calendar."}</Text>
           <TouchableOpacity onPress={load} style={styles.retryButton} activeOpacity={0.8}>
             <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>

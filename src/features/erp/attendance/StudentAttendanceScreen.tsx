@@ -472,9 +472,9 @@ function ClassPickerModal({
   );
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalSheet}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={onClose}>
+        <TouchableOpacity style={styles.modalSheet} activeOpacity={1}>
           <View style={styles.modalHandleRow}>
             <Text style={styles.modalTitle}>Choose a class</Text>
             <TouchableOpacity onPress={onClose} hitSlop={8}>
@@ -507,8 +507,8 @@ function ClassPickerModal({
               )}
             </ScrollView>
           )}
-        </View>
-      </View>
+        </TouchableOpacity>
+      </TouchableOpacity>
     </Modal>
   );
 }
@@ -944,13 +944,13 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(15,23,42,0.5)",
-    justifyContent: "flex-end",
+    justifyContent: "center",
+    padding: 20,
   },
   modalSheet: {
     backgroundColor: "#fff",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: "80%",
+    borderRadius: 20,
+    maxHeight: "75%",
     paddingTop: 16,
   },
   modalHandleRow: {

@@ -5,6 +5,16 @@ import { apiClient } from "./client";
 // - mirrors purchase-requests.api.ts exactly, see its own comment for the
 // full rationale. Backed by service_indents/service_order_proposals/
 // service_orders.
+//
+// Routes live at /me/procurement-service-requests, NOT /me/service-requests
+// - that path was already claimed by an unrelated Secretary-only feature
+// (src/modules/secretary/service-requests/service-requests.controller.ts,
+// its own secretary_service_requests tables) and was silently shadowing
+// this module for every caller. The backend renamed this module's routes
+// to get out from under that collision (2026-08-21) - this file has to
+// match, or every call here 403s for HoD (wrong role on the shadowing
+// controller) or silently writes/reads the wrong tables for Secretary
+// (who happens to be allowed on both).
 
 export type ServiceRequestStatus =
   | "pending_hod"
@@ -51,12 +61,12 @@ export type CreateServiceRequestPayload = {
 export async function createServiceRequest(
   payload: CreateServiceRequestPayload,
 ): Promise<ServiceRequest> {
-  const { data } = await apiClient.post<{ data: ServiceRequest }>("/me/service-requests", payload);
+  const { data } = await apiClient.post<{ data: ServiceRequest }>("/me/procurement-service-requests", payload);
   return data.data;
 }
 
 export async function listMyServiceRequests(): Promise<ServiceRequest[]> {
-  const { data } = await apiClient.get<{ data: { data: ServiceRequest[] } }>("/me/service-requests", {
+  const { data } = await apiClient.get<{ data: { data: ServiceRequest[] } }>("/me/procurement-service-requests", {
     params: { page: 1, limit: 100 },
   });
   return data.data.data;
@@ -65,7 +75,7 @@ export async function listMyServiceRequests(): Promise<ServiceRequest[]> {
 // ───────────────────────────── HoD review queue ─────────────────────────────
 
 export async function listServiceRequestsForHodReview(): Promise<ServiceRequest[]> {
-  const { data } = await apiClient.get<{ data: { data: ServiceRequest[] } }>("/me/service-requests", {
+  const { data } = await apiClient.get<{ data: { data: ServiceRequest[] } }>("/me/procurement-service-requests", {
     params: { page: 1, limit: 100 },
   });
   return data.data.data;
@@ -77,7 +87,7 @@ export async function hodReviewServiceRequest(
   remarks?: string,
 ): Promise<ServiceRequest> {
   const { data } = await apiClient.patch<{ data: ServiceRequest }>(
-    `/me/service-requests/${id}/hod-review`,
+    `/me/procurement-service-requests/${id}/hod-review`,
     { decision, remarks },
   );
   return data.data;

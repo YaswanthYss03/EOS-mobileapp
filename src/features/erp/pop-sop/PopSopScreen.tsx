@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Modal } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -10,6 +10,7 @@ import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { confirm } from "@/utils/confirm";
 import { formatDate } from "@/utils/calendar";
+import { getApiErrorMessage } from "@/services/api/client";
 import {
   listPurchaseRequestsForHodReview,
   hodReviewPurchaseRequest,
@@ -24,7 +25,7 @@ import {
 } from "@/services/api/service-requests.api";
 
 type PopSopType = "pop" | "sop";
-type StatusFilter = "pending" | "forwarded" | "rejected" | "all";
+type StatusFilter = "pending" | "history";
 type Stage = "secretary" | "hod" | "finance";
 
 // Both request types share the exact same 6-value derived status union (see
@@ -85,12 +86,16 @@ function fromServiceRequest(r: ServiceRequest): DisplayOrder {
   };
 }
 
-const STATUS_FILTERS: StatusFilter[] = ["pending", "forwarded", "rejected", "all"];
+// Just the two tabs a HoD actually needs: what's waiting on them right now,
+// and everything they've already acted on (forwarded to Finance or
+// rejected) plus whatever Finance has since done with it - a HoD has no
+// further action past their own review, so there's no reason to split
+// "forwarded"/"rejected"/"all" into separate tabs the way a multi-stage
+// reviewer (e.g. Finance or Admin) might need.
+const STATUS_FILTERS: StatusFilter[] = ["pending", "history"];
 const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
   pending: "Pending",
-  forwarded: "Forwarded",
-  rejected: "Rejected",
-  all: "All",
+  history: "History",
 };
 const STAGE_ORDER: Stage[] = ["secretary", "hod", "finance"];
 const STAGE_LABELS: Record<Stage, string> = { secretary: "Secretary", hod: "HOD", finance: "Finance" };
@@ -100,10 +105,8 @@ const TYPE_META: Record<PopSopType, { tabLabel: string; headerTitle: string; hea
   sop: { tabLabel: "SOP · Service", headerTitle: "Service Orders", headerSubtitle: "SOP · raised by the dept secretary" },
 };
 
-function toFilterBucket(status: PurchaseRequestStatus): Exclude<StatusFilter, "all"> {
-  if (status === "pending_hod") return "pending";
-  if (status === "rejected_by_hod" || status === "rejected_by_finance") return "rejected";
-  return "forwarded"; // pending_finance | approved | converted
+function toFilterBucket(status: PurchaseRequestStatus): StatusFilter {
+  return status === "pending_hod" ? "pending" : "history";
 }
 
 function toStage(status: PurchaseRequestStatus): Stage {
@@ -128,10 +131,14 @@ export function PopSopScreen() {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseRequest[]>([]);
   const [serviceOrders, setServiceOrders] = useState<ServiceRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [reviewingIds, setReviewingIds] = useState<Set<number>>(new Set());
+  const [rejectingOrder, setRejectingOrder] = useState<DisplayOrder | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
 
   const loadOrders = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [pop, sop] = await Promise.all([
         listPurchaseRequestsForHodReview(),
@@ -139,8 +146,14 @@ export function PopSopScreen() {
       ]);
       setPurchaseOrders(pop);
       setServiceOrders(sop);
-    } catch {
-      toast.error("Couldn't load POP/SOP requests");
+    } catch (error) {
+      // Surface the real backend message (e.g. "Faculty profile not found
+      // for the authenticated user") rather than a fixed generic string -
+      // every other ERP screen does this via getApiErrorMessage, this one
+      // previously swallowed the actual error entirely.
+      const message = getApiErrorMessage(error, "Couldn't load POP/SOP requests");
+      setLoadError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -170,16 +183,13 @@ export function PopSopScreen() {
   const counts = useMemo(
     () => ({
       pending: ordersOfType.filter((o) => toFilterBucket(o.status) === "pending").length,
-      forwarded: ordersOfType.filter((o) => toFilterBucket(o.status) === "forwarded").length,
-      rejected: ordersOfType.filter((o) => toFilterBucket(o.status) === "rejected").length,
-      all: ordersOfType.length,
+      history: ordersOfType.filter((o) => toFilterBucket(o.status) === "history").length,
     }),
     [ordersOfType],
   );
 
   const filteredOrders = useMemo(
-    () =>
-      statusFilter === "all" ? ordersOfType : ordersOfType.filter((o) => toFilterBucket(o.status) === statusFilter),
+    () => ordersOfType.filter((o) => toFilterBucket(o.status) === statusFilter),
     [ordersOfType, statusFilter],
   );
 
@@ -188,19 +198,19 @@ export function PopSopScreen() {
     setStatusFilter("pending");
   }
 
-  async function submitReview(order: DisplayOrder, decision: "approved" | "rejected") {
+  async function submitReview(order: DisplayOrder, decision: "approved" | "rejected", remarks?: string) {
     setReviewingIds((prev) => new Set(prev).add(order.id));
     try {
       if (order.type === "pop") {
-        const updated = await hodReviewPurchaseRequest(order.id, decision);
+        const updated = await hodReviewPurchaseRequest(order.id, decision, remarks);
         setPurchaseOrders((prev) => prev.map((o) => (o.id === order.id ? updated : o)));
       } else {
-        const updated = await hodReviewServiceRequest(order.id, decision);
+        const updated = await hodReviewServiceRequest(order.id, decision, remarks);
         setServiceOrders((prev) => prev.map((o) => (o.id === order.id ? updated : o)));
       }
       toast.success(decision === "approved" ? "Approved and forwarded to Finance" : "Request sent back");
-    } catch {
-      toast.error("Couldn't submit your review. Please try again");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Couldn't submit your review. Please try again"));
     } finally {
       setReviewingIds((prev) => {
         const next = new Set(prev);
@@ -219,14 +229,20 @@ export function PopSopScreen() {
     if (ok) submitReview(order, "approved");
   }
 
-  async function handleSendBack(order: DisplayOrder) {
-    const ok = await confirm({
-      title: "Send back?",
-      message: `"${order.title}" will be rejected and closed out. This can't be undone.`,
-      confirmText: "Send back",
-      destructive: true,
-    });
-    if (ok) submitReview(order, "rejected");
+  function openRejectModal(order: DisplayOrder) {
+    setRejectingOrder(order);
+    setRejectReason("");
+  }
+
+  async function submitReject() {
+    if (!rejectingOrder) return;
+    if (!rejectReason.trim()) {
+      toast.warning("Add a reason for rejecting this request");
+      return;
+    }
+    const order = rejectingOrder;
+    setRejectingOrder(null);
+    await submitReview(order, "rejected", rejectReason.trim());
   }
 
   const meta = TYPE_META[type];
@@ -271,33 +287,41 @@ export function PopSopScreen() {
         </TouchableOpacity>
       </View>
 
+      <View style={styles.statusTabSwitch}>
+        {STATUS_FILTERS.map((status) => (
+          <TouchableOpacity
+            key={status}
+            style={[styles.statusTabButton, statusFilter === status && styles.statusTabButtonActive]}
+            onPress={() => setStatusFilter(status)}
+          >
+            <Text style={[styles.statusTabText, statusFilter === status && styles.statusTabTextActive]}>
+              {STATUS_FILTER_LABELS[status]} ({counts[status]})
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       {loading ? (
         <View style={styles.emptyState}>
           <ActivityIndicator color="#2F6FE0" size="small" />
         </View>
+      ) : loadError ? (
+        <View style={styles.emptyState}>
+          <Ionicons name="cloud-offline-outline" size={32} color="#B0B7C3" />
+          <Text style={styles.emptyStateText}>{loadError}</Text>
+          <TouchableOpacity onPress={loadOrders} style={styles.retryButton} activeOpacity={0.8}>
+            <Text style={styles.retryButtonText}>Tap to retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <View style={styles.statusRow}>
-            {STATUS_FILTERS.map((status) => (
-              <TouchableOpacity
-                key={status}
-                style={[styles.statusPill, statusFilter === status && styles.statusPillActive]}
-                onPress={() => setStatusFilter(status)}
-              >
-                <Text style={[styles.statusPillText, statusFilter === status && styles.statusPillTextActive]}>
-                  {STATUS_FILTER_LABELS[status]} ({counts[status]})
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
           {filteredOrders.map((order) => (
             <OrderCard
               key={order.id}
               order={order}
               reviewing={reviewingIds.has(order.id)}
               onApproveAndForward={() => handleApproveAndForward(order)}
-              onSendBack={() => handleSendBack(order)}
+              onSendBack={() => openRejectModal(order)}
             />
           ))}
 
@@ -309,6 +333,44 @@ export function PopSopScreen() {
           )}
         </ScrollView>
       )}
+
+      <Modal
+        visible={rejectingOrder !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRejectingOrder(null)}
+      >
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setRejectingOrder(null)}>
+          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
+            <Text style={styles.modalTitle}>Reject request</Text>
+            <Text style={styles.modalSubtitle}>
+              {rejectingOrder ? `"${rejectingOrder.title}" will be rejected and closed out. This can't be undone.` : ""}
+            </Text>
+            <Text style={styles.modalFieldLabel}>Reason</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="e.g. Budget not available this quarter"
+              placeholderTextColor="#9AA6B2"
+              value={rejectReason}
+              onChangeText={setRejectReason}
+              multiline
+              autoFocus
+            />
+            <View style={styles.modalActionsRow}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setRejectingOrder(null)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.modalCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalRejectButton} onPress={submitReject} activeOpacity={0.85}>
+                <Text style={styles.modalRejectButtonText}>Reject</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -501,33 +563,33 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 32,
   },
-  statusRow: {
+  statusTabSwitch: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 14,
+    backgroundColor: "#F1F3F6",
+    marginHorizontal: 16,
+    marginTop: 10,
+    borderRadius: 11,
+    padding: 3,
+    gap: 3,
   },
-  statusPill: {
-    flexGrow: 1,
+  statusTabButton: {
+    flex: 1,
     alignItems: "center",
-    borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
+    justifyContent: "center",
+    borderRadius: 8,
+    paddingVertical: 9,
   },
-  statusPillActive: {
-    borderColor: "#2F6FE0",
-    borderWidth: 1.5,
+  statusTabButtonActive: {
+    backgroundColor: "#2F6FE0",
   },
-  statusPillText: {
-    fontSize: 11,
+  statusTabText: {
+    fontSize: 12,
     fontFamily: fonts.semibold,
-    color: "#4B5563",
+    color: "#6B7280",
   },
-  statusPillTextActive: {
-    color: "#2F6FE0",
+  statusTabTextActive: {
+    color: "#fff",
+    fontFamily: fonts.bold,
   },
   card: {
     backgroundColor: "#fff",
@@ -707,11 +769,101 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 40,
+    paddingHorizontal: 24,
     gap: 8,
   },
   emptyStateText: {
     fontSize: 13,
     fontFamily: fonts.medium,
     color: "#9AA6B2",
+    textAlign: "center",
+  },
+  retryButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.5)",
+    justifyContent: "center",
+    padding: 20,
+  },
+  modalCard: {
+    backgroundColor: "#fff",
+    borderRadius: 18,
+    padding: 18,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontFamily: fonts.bold,
+    color: "#111827",
+    marginBottom: 6,
+  },
+  modalSubtitle: {
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
+    lineHeight: 17,
+    marginBottom: 16,
+  },
+  modalFieldLabel: {
+    fontSize: 12,
+    fontFamily: fonts.semibold,
+    color: "#374151",
+    marginBottom: 6,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#F9FAFB",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    fontFamily: fonts.regular,
+    color: "#111827",
+    minHeight: 80,
+    textAlignVertical: "top",
+  },
+  modalActionsRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 18,
+  },
+  modalCancelButton: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "#E5E7EB",
+    paddingVertical: 12,
+  },
+  modalCancelButtonText: {
+    fontSize: 13,
+    fontFamily: fonts.bold,
+    color: "#4B5563",
+  },
+  modalRejectButton: {
+    flex: 1.4,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    backgroundColor: "#DC2626",
+    paddingVertical: 12,
+  },
+  modalRejectButtonText: {
+    fontSize: 13,
+    fontFamily: fonts.bold,
+    color: "#fff",
   },
 });

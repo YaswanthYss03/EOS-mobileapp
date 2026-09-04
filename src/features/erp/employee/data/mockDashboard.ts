@@ -34,4 +34,13 @@ export const studentSectionItems: QuickAccessItem[] = [
     route: "/(tabs)/erp/announcements?audience=faculty",
   },
   { id: "class-result", label: "Class Result", icon: "bar-chart-outline", route: "/(tabs)/erp/class-result" },
+  // Screen/backend already exist and are shared with students (see
+  // src/features/academics/calendar/AcademicCalendarScreen.tsx - GET
+  // /me/faculty-academic-calendar) - this dashboard just never linked to it.
+  {
+    id: "academic-calendar",
+    label: "Academic Calendar",
+    icon: "calendar-outline",
+    route: "/(tabs)/academics/calendar",
+  },
 ];

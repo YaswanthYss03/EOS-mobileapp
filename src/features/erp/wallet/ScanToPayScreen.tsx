@@ -1,12 +1,10 @@
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from "expo-camera";
-import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -36,9 +34,10 @@ function ScanHeader({ onBack }: { onBack: () => void }) {
 
 // The "scan receiver's QR, enter amount, enter PIN" flow, reachable from
 // WalletScreen's "Scan & Send Money" button (only once a PIN is set - see
-// WalletScreen.openSendMoney). See @/services/api/wallet.api.ts.
+// WalletScreen.openSendMoney). See @/services/api/wallet.api.ts. Root-level
+// route (app/wallet/scan.tsx), same reasoning as WalletScreen - renders its
+// own header inline rather than borrowing the Tabs navigator's.
 export function ScanToPayScreen() {
-  const navigation = useNavigation();
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
 
@@ -51,17 +50,6 @@ export function ScanToPayScreen() {
   // re-runs its autofocus) after a wrong PIN, rather than just sitting
   // there unfocused - see handlePinComplete's catch block.
   const [pinAttempt, setPinAttempt] = useState(0);
-
-  useFocusEffect(
-    useCallback(() => {
-      navigation.getParent()?.setOptions({
-        header: () => <ScanHeader onBack={() => router.back()} />,
-      });
-      return () => {
-        navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
-      };
-    }, [navigation, router]),
-  );
 
   async function handleScanned(result: BarcodeScanningResult) {
     if (stage !== "scanning") return; // ignore extra fires while already resolving
@@ -105,7 +93,7 @@ export function ScanToPayScreen() {
       const result = await transferWalletFunds(qrToken, numericAmount, enteredPin);
       toast.success(`Sent ₹${numericAmount.toLocaleString("en-IN")} to ${receiverEmail}`);
       router.replace({
-        pathname: "/(tabs)/erp/wallet" as never,
+        pathname: "/wallet" as never,
         params: { newBalance: String(result.balance) },
       });
     } catch (error) {
@@ -120,6 +108,7 @@ export function ScanToPayScreen() {
     if (!permission) {
       return (
         <SafeAreaView style={styles.container} edges={[]}>
+          <ScanHeader onBack={() => router.back()} />
           <View style={styles.centerState}>
             <ActivityIndicator color="#2F6FE0" />
           </View>
@@ -130,6 +119,7 @@ export function ScanToPayScreen() {
     if (!permission.granted) {
       return (
         <SafeAreaView style={styles.container} edges={[]}>
+          <ScanHeader onBack={() => router.back()} />
           <View style={styles.centerState}>
             <Ionicons name="camera-outline" size={40} color="#B0B7C3" />
             <Text style={styles.permissionText}>Camera access is needed to scan a wallet QR code</Text>
@@ -143,18 +133,21 @@ export function ScanToPayScreen() {
 
     return (
       <View style={styles.container}>
-        <CameraView
-          style={styles.camera}
-          facing="back"
-          barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-          onBarcodeScanned={handleScanned}
-        />
-        <View style={styles.scanOverlay}>
-          <View style={styles.scanFrame} />
-          <Text style={styles.scanHint}>
-            {stage === "resolving" ? "Checking QR code..." : "Point your camera at the receiver's wallet QR"}
-          </Text>
-          {stage === "resolving" && <ActivityIndicator color="#fff" style={{ marginTop: 12 }} />}
+        <ScanHeader onBack={() => router.back()} />
+        <View style={styles.cameraWrap}>
+          <CameraView
+            style={styles.camera}
+            facing="back"
+            barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+            onBarcodeScanned={handleScanned}
+          />
+          <View style={styles.scanOverlay}>
+            <View style={styles.scanFrame} />
+            <Text style={styles.scanHint}>
+              {stage === "resolving" ? "Checking QR code..." : "Point your camera at the receiver's wallet QR"}
+            </Text>
+            {stage === "resolving" && <ActivityIndicator color="#fff" style={{ marginTop: 12 }} />}
+          </View>
         </View>
       </View>
     );
@@ -163,6 +156,7 @@ export function ScanToPayScreen() {
   // stage === "confirm" | "sending"
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <ScanHeader onBack={() => router.back()} />
       <View style={styles.confirmWrap}>
         <View style={styles.receiverCard}>
           <View style={styles.receiverAvatar}>
@@ -294,6 +288,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: fonts.bold,
     color: "#fff",
+  },
+  cameraWrap: {
+    flex: 1,
   },
   camera: {
     flex: 1,

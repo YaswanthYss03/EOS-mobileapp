@@ -1,4 +1,5 @@
-import { apiClient } from "./client";
+import { Directory, File, Paths } from "expo-file-system";
+import { apiClient, getAuthToken } from "./client";
 
 // Mirrors EOS-backend's GET /me/fees response (see
 // EOS-backend/src/modules/admissions/students/me-profile/me-fees.service.ts).
@@ -89,4 +90,32 @@ export async function verifyFeePayment(
     payload,
   );
   return data.data;
+}
+
+/**
+ * GET /me/fees/payments/:paymentId/receipt — downloads the real, backend-
+ * rendered PDF receipt (see EOSbackend1's me-profile.controller.ts +
+ * receipt-pdf.util.ts) to local storage and returns the saved File.
+ *
+ * This one endpoint returns a raw PDF, not the { data } envelope every
+ * other call here gets, and needs the auth header set directly since it
+ * goes through expo-file-system's native downloader rather than apiClient -
+ * see client.ts's getAuthToken.
+ */
+export async function downloadFeeReceipt(paymentId: number, receiptNo: string) {
+  const token = getAuthToken();
+  const directory = new Directory(Paths.cache, "receipts");
+  if (!directory.exists) {
+    directory.create({ intermediates: true, idempotent: true });
+  }
+  // Legacy receipt numbers don't all follow the current RCP### pattern (see
+  // FeePaymentService's receipt_no generation) - strip anything that isn't
+  // filesystem-safe rather than assume a clean value.
+  const safeName = receiptNo.replace(/[^a-zA-Z0-9_-]/g, "_") || String(paymentId);
+  const destination = new File(directory, `${safeName}.pdf`);
+
+  return File.downloadFileAsync(`${apiClient.defaults.baseURL}/me/fees/payments/${paymentId}/receipt`, destination, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    idempotent: true,
+  });
 }

@@ -38,6 +38,15 @@ export const studentSectionItems: QuickAccessItem[] = [
     icon: "person-add-outline",
     route: "/(tabs)/erp/assign-faculty",
   },
+  // Screen/backend already exist and are shared with students/faculty (see
+  // src/features/academics/calendar/AcademicCalendarScreen.tsx - GET
+  // /me/faculty-academic-calendar) - this dashboard just never linked to it.
+  {
+    id: "academic-calendar",
+    label: "Academic Calendar",
+    icon: "calendar-outline",
+    route: "/(tabs)/academics/calendar",
+  },
 ];
 
 // Shared with employee/data/mockDashboard.ts and secretary/data/mockDashboard.ts -

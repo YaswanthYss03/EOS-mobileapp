@@ -260,6 +260,7 @@ function HistoryCard({ item }: { item: DriveHistoryItem }) {
 function PrincipalPlacementsBody() {
   const router = useRouter();
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
 
   // This body renders its own header below, so hide the shared header
   // (CollegeHeader / the gradient PlacementsHeader other roles use) while
@@ -339,8 +340,13 @@ function PrincipalPlacementsBody() {
   }, [selectedDepartment, historyReloadToken]);
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      <View style={styles.principalHeader}>
+    <SafeAreaView style={styles.container} edges={[]}>
+      <LinearGradient
+        colors={["#2F6FE0", "#1A3D8F"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[styles.principalHeader, { paddingTop: insets.top + 10 }]}
+      >
         <TouchableOpacity onPress={() => router.back()} hitSlop={8}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
@@ -352,7 +358,7 @@ function PrincipalPlacementsBody() {
               : "Loading…"}
           </Text>
         </View>
-      </View>
+      </LinearGradient>
 
       <ScrollView contentContainerStyle={styles.principalContent} showsVerticalScrollIndicator={false}>
         {overviewLoading && (
@@ -1163,8 +1169,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 12,
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#2F6FE0",
+    paddingBottom: 14,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
   },
   principalHeaderTextWrap: {
     flex: 1,

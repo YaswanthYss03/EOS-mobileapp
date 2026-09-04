@@ -27,6 +27,34 @@ export type OdTeam = {
   created_at: string;
   has_request: boolean;
   od_request_id: number | null;
+  // Nullable at the type level to match the DB column (od_teams.team_name
+  // etc. are all nullable, see prisma/schema.prisma) even though the
+  // current CreateOdTeamDto always sets them on every new team - a team
+  // created before that DTO existed could still have nulls here.
+  team_name: string | null;
+  reason: string | null;
+  venue: string | null;
+  from_date: string | null;
+  to_date: string | null;
+  from_time: string | null;
+  to_time: string | null;
+  faculty_guide_id: number | null;
+  faculty_guide_name: string | null;
+};
+
+// POST /me/od-teams now takes the full event brief up front (see
+// CreateOdTeamDto) - team_name/reason/venue/dates/times/faculty_guide_id
+// are all required at creation time, not just at the later lock-and-submit
+// step (submitOdRequest below).
+export type CreateOdTeamPayload = {
+  team_name: string;
+  reason: string;
+  venue: string;
+  from_date: string;
+  to_date: string;
+  from_time: string;
+  to_time: string;
+  faculty_guide_id: number;
 };
 
 export type OdRequestSummary = {
@@ -53,24 +81,35 @@ export async function getMyOdTeams(): Promise<OdTeam[]> {
   return data.data.data;
 }
 
-export async function createOdTeam(): Promise<OdTeam> {
+export async function createOdTeam(payload: CreateOdTeamPayload): Promise<OdTeam> {
   const { data } = await apiClient.post<{
-    data: { id: number; unique_code: string; is_locked: boolean; created_at: string };
-  }>("/me/od-teams", {});
+    data: {
+      id: number;
+      unique_code: string;
+      is_locked: boolean;
+      created_at: string;
+      team_name: string;
+      reason: string;
+      venue: string;
+      from_date: string;
+      to_date: string;
+      from_time: string | null;
+      to_time: string | null;
+      faculty_guide_id: number;
+      faculty_guide_name: string;
+    };
+  }>("/me/od-teams", payload);
   // The create response doesn't echo a member list (nothing to enrich - the
   // creator is the only member so far); synthesize the one entry the client
   // already knows rather than round-tripping to GET /me/od-teams just to
   // display it. A subsequent teamsReloadToken refetch (on join, etc.) will
   // replace this with the real server-resolved name.
   return {
-    id: data.data.id,
-    unique_code: data.data.unique_code,
-    is_locked: data.data.is_locked,
+    ...data.data,
     is_creator: true,
     member_count: 1,
     members: [{ student_id: -1, name: "You", is_creator: true, joined_at: data.data.created_at }],
     joined_at: data.data.created_at,
-    created_at: data.data.created_at,
     has_request: false,
     od_request_id: null,
   };

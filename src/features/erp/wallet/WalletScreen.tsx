@@ -12,12 +12,10 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import QRCode from "react-native-qrcode-svg";
 import RazorpayCheckout from "react-native-razorpay";
-import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { formatDate } from "@/utils/calendar";
@@ -63,12 +61,17 @@ function WalletHeader({ onBack }: { onBack: () => void }) {
 }
 
 // Wired to EOS-backend's wallet module - see
-// @/services/api/wallet.api.ts. Reachable from the Student/Faculty/HoD
-// dashboards only ("Wallet is applicable for Student and faculty/HoD
-// only") - every other role's dashboard simply doesn't have this tile, and
-// the backend 403s regardless if somehow reached.
+// @/services/api/wallet.api.ts. Reachable only from the Home header's
+// wallet icon (see HomeHeader) - Wallet is applicable for Student and
+// faculty/HoD only ("every other role's dashboard simply doesn't have this
+// tile, and the backend 403s regardless if somehow reached"), and lives as
+// a root-level route (app/wallet/index.tsx) rather than nested under the
+// ERP tab, precisely so opening it from Home never flips the bottom tab
+// bar's active tab to ERP - see id-card.tsx/profile.tsx for the same
+// standalone-route pattern. That also means it renders its own header
+// inline below rather than borrowing the Tabs navigator's header slot via
+// navigation.getParent() the way every ERP-tab-nested screen does.
 export function WalletScreen() {
-  const navigation = useNavigation();
   const router = useRouter();
   const { user } = useAuth();
 
@@ -99,17 +102,6 @@ export function WalletScreen() {
     load();
   }, [load]);
 
-  useFocusEffect(
-    useCallback(() => {
-      navigation.getParent()?.setOptions({
-        header: () => <WalletHeader onBack={() => router.back()} />,
-      });
-      return () => {
-        navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
-      };
-    }, [navigation, router]),
-  );
-
   function onRefresh() {
     setRefreshing(true);
     load();
@@ -121,7 +113,7 @@ export function WalletScreen() {
       setPinModalOpen(true);
       return;
     }
-    router.push("/(tabs)/erp/wallet/scan" as never);
+    router.push("/wallet/scan" as never);
   }
 
   function openTopup() {
@@ -179,6 +171,7 @@ export function WalletScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={[]}>
+        <WalletHeader onBack={() => router.back()} />
         <View style={styles.centerState}>
           <ActivityIndicator color="#2F6FE0" />
         </View>
@@ -188,6 +181,7 @@ export function WalletScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WalletHeader onBack={() => router.back()} />
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#2F6FE0" />}

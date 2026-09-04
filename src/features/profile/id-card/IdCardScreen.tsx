@@ -8,9 +8,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { Asset } from "expo-asset";
 import { File } from "expo-file-system";
 import * as Print from "expo-print";
-import * as Sharing from "expo-sharing";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
+import { downloadPdf } from "@/utils/pdfDownload";
 import { getApiErrorMessage } from "@/services/api/client";
 import { getMyIdCard, issueMyIdCard, type MyIdCard } from "@/services/api/profile.api";
 import { FlippableIdCard } from "./FlippableIdCard";
@@ -74,16 +74,9 @@ export function IdCardScreen() {
       const html = buildIdCardHtml(card, logoDataUri);
       const { uri } = await Print.printToFileAsync({ html, width: PAGE_WIDTH, height: PAGE_HEIGHT });
 
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        await Sharing.shareAsync(uri, {
-          mimeType: "application/pdf",
-          dialogTitle: "Save your ID card",
-          UTI: "com.adobe.pdf",
-        });
-      } else {
-        toast.success("ID card saved to " + uri);
-      }
+      const result = await downloadPdf(uri, card.secondary_id || "id-card", "Save your ID card");
+      if (result === "downloaded") toast.success("ID card downloaded");
+      else if (result === "unavailable") toast.success("ID card saved to " + uri);
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Couldn't generate the PDF."));
     } finally {

@@ -1,6 +1,9 @@
-import type { QuickAccessItem } from "../../types";
+import type { StatCardConfig, CampusItemConfig } from "../types";
 
-export const quickAccessItems: QuickAccessItem[] = [
+// Icon/label/route only - no numbers here. See useStudentDashboardData for
+// where the real value/subtitle/progress each of these gets merged with
+// comes from.
+export const statCardConfigs: StatCardConfig[] = [
   {
     id: "attendance",
     label: "Attendance",
@@ -8,16 +11,11 @@ export const quickAccessItems: QuickAccessItem[] = [
     library: "material",
     route: "/(tabs)/erp/student-attendance",
   },
-  {
-    id: "performance",
-    label: "Performance",
-    icon: "stats-chart-outline",
-    route: "/(tabs)/erp/student-performance",
-  },
+  { id: "performance", label: "Performance", icon: "stats-chart-outline", route: "/(tabs)/erp/student-performance" },
   { id: "fees", label: "Fees", icon: "card-outline", route: "/(tabs)/erp/student-fees" },
 ];
 
-export const campusItems: QuickAccessItem[] = [
+export const campusConfigs: CampusItemConfig[] = [
   { id: "od", label: "OD", icon: "people-outline", route: "/(tabs)/erp/student-od-apply" },
   { id: "leave", label: "Leave", icon: "log-out-outline", route: "/(tabs)/erp/student-leave-apply" },
   {

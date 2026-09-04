@@ -16,6 +16,13 @@ export function setAuthToken(token: string | null) {
   authToken = token;
 }
 
+// For the rare request that can't go through this axios instance (e.g. a
+// native file download that needs the header set directly - see
+// fees.api.ts's downloadFeeReceipt).
+export function getAuthToken(): string | null {
+  return authToken;
+}
+
 apiClient.interceptors.request.use((config) => {
   if (authToken) {
     config.headers.set("Authorization", `Bearer ${authToken}`);

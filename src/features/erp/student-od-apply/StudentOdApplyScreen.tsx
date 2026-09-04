@@ -58,6 +58,8 @@ export function StudentOdApplyScreen() {
   const [teamsReloadToken, setTeamsReloadToken] = useState(0);
 
   const [creating, setCreating] = useState(false);
+  const [teamName, setTeamName] = useState("");
+  const [venue, setVenue] = useState("");
   const [teamCode, setTeamCode] = useState("");
   const [joining, setJoining] = useState(false);
 
@@ -208,8 +210,42 @@ export function StudentOdApplyScreen() {
   }
 
   function handleCreateTeam() {
+    if (!teamName.trim()) {
+      toast.warning("Enter a team name");
+      return;
+    }
+    if (!reason.trim()) {
+      toast.warning("Add the event");
+      return;
+    }
+    if (!venue.trim()) {
+      toast.warning("Add the venue");
+      return;
+    }
+    if (!fromDateObj || !toDateObj) {
+      toast.warning("Select a start and end date");
+      return;
+    }
+    if (!fromTime || !toTime) {
+      toast.warning("Select a start and end time");
+      return;
+    }
+    if (!facultyGuide) {
+      toast.warning("Select a faculty guide");
+      return;
+    }
+
     setCreating(true);
-    createOdTeam()
+    createOdTeam({
+      team_name: teamName.trim(),
+      reason: reason.trim(),
+      venue: venue.trim(),
+      from_date: toIsoDate(fromDateObj),
+      to_date: toIsoDate(toDateObj),
+      from_time: fromTime,
+      to_time: toTime,
+      faculty_guide_id: facultyGuide.id,
+    })
       .then((team) => {
         toast.success(`Team created - share code ${team.unique_code} with your teammates`);
         setTeams((prev) => [team, ...(prev ?? [])]);
@@ -357,6 +393,36 @@ export function StudentOdApplyScreen() {
                     ? "Share this code with your teammates and wait for everyone to join - submitting the request below locks the team and no one else will be able to join afterwards."
                     : "You've joined this team. Only the team creator can submit the OD request."}
                 </Text>
+
+                {activeTeam.team_name && (
+                  <View style={styles.eventSummary}>
+                    <Text style={styles.eventSummaryTitle}>{activeTeam.team_name}</Text>
+                    {activeTeam.reason && <Text style={styles.eventSummaryLine}>{activeTeam.reason}</Text>}
+                    {activeTeam.venue && (
+                      <View style={styles.eventSummaryRow}>
+                        <Ionicons name="location-outline" size={13} color="#6B7280" />
+                        <Text style={styles.eventSummaryRowText}>{activeTeam.venue}</Text>
+                      </View>
+                    )}
+                    {activeTeam.from_date && activeTeam.to_date && (
+                      <View style={styles.eventSummaryRow}>
+                        <Ionicons name="calendar-outline" size={13} color="#6B7280" />
+                        <Text style={styles.eventSummaryRowText}>
+                          {activeTeam.from_date} to {activeTeam.to_date}
+                          {activeTeam.from_time &&
+                            activeTeam.to_time &&
+                            ` · ${timeLabel(activeTeam.from_time)} - ${timeLabel(activeTeam.to_time)}`}
+                        </Text>
+                      </View>
+                    )}
+                    {activeTeam.faculty_guide_name && (
+                      <View style={styles.eventSummaryRow}>
+                        <Ionicons name="person-outline" size={13} color="#6B7280" />
+                        <Text style={styles.eventSummaryRowText}>{activeTeam.faculty_guide_name}</Text>
+                      </View>
+                    )}
+                  </View>
+                )}
 
                 {activeTeam.members.length > 0 && (
                   <View style={styles.membersList}>
@@ -510,9 +576,108 @@ export function StudentOdApplyScreen() {
               {mode === "create" ? (
                 <View style={styles.card}>
                   <Text style={styles.codeHint}>
-                    Create a team to get a shareable code. Add your teammates, then submit the OD request with
-                    the dates and reason - anyone on the team can view its status.
+                    Create a team to get a shareable code. Everyone on the team sees the same event
+                    brief below - fill it in now, then share the code with your teammates.
                   </Text>
+
+                  <Text style={styles.fieldLabel}>Team name</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. IEEE Conference Squad"
+                    placeholderTextColor="#9AA6B2"
+                    value={teamName}
+                    onChangeText={setTeamName}
+                  />
+
+                  <Text style={styles.fieldLabel}>Event</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. IEEE paper presentation at SSN College"
+                    placeholderTextColor="#9AA6B2"
+                    value={reason}
+                    onChangeText={setReason}
+                    multiline
+                  />
+
+                  <Text style={styles.fieldLabel}>Venue</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. SSN College of Engineering, Chennai"
+                    placeholderTextColor="#9AA6B2"
+                    value={venue}
+                    onChangeText={setVenue}
+                  />
+
+                  <View style={styles.rowFields}>
+                    <View style={styles.rowField}>
+                      <Text style={styles.fieldLabel}>From date</Text>
+                      <TouchableOpacity
+                        style={styles.pickerButton}
+                        onPress={() => setDatePickerFor("from")}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="calendar-outline" size={14} color="#2F6FE0" />
+                        <Text style={[styles.pickerButtonText, !fromDateObj && styles.pickerButtonPlaceholder]}>
+                          {fromDateObj ? formatDate(fromDateObj) : "Select date"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.rowField}>
+                      <Text style={styles.fieldLabel}>To date</Text>
+                      <TouchableOpacity
+                        style={styles.pickerButton}
+                        onPress={() => setDatePickerFor("to")}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="calendar-outline" size={14} color="#2F6FE0" />
+                        <Text style={[styles.pickerButtonText, !toDateObj && styles.pickerButtonPlaceholder]}>
+                          {toDateObj ? formatDate(toDateObj) : "Select date"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  <View style={styles.rowFields}>
+                    <View style={styles.rowField}>
+                      <Text style={styles.fieldLabel}>From time</Text>
+                      <TouchableOpacity
+                        style={styles.pickerButton}
+                        onPress={() => setTimePickerFor("from")}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="time-outline" size={14} color="#2F6FE0" />
+                        <Text style={[styles.pickerButtonText, !fromTime && styles.pickerButtonPlaceholder]}>
+                          {fromTime ? timeSlots.find((s) => s.value === fromTime)?.label ?? fromTime : "Select"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.rowField}>
+                      <Text style={styles.fieldLabel}>To time</Text>
+                      <TouchableOpacity
+                        style={styles.pickerButton}
+                        onPress={() => setTimePickerFor("to")}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="time-outline" size={14} color="#2F6FE0" />
+                        <Text style={[styles.pickerButtonText, !toTime && styles.pickerButtonPlaceholder]}>
+                          {toTime ? timeSlots.find((s) => s.value === toTime)?.label ?? toTime : "Select"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  <Text style={styles.fieldLabel}>Faculty guide</Text>
+                  <TouchableOpacity
+                    style={[styles.pickerButton, styles.inputLast]}
+                    onPress={() => setFacultyPickerOpen(true)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="person-outline" size={14} color="#2F6FE0" />
+                    <Text style={[styles.pickerButtonText, !facultyGuide && styles.pickerButtonPlaceholder]}>
+                      {facultyGuide ? facultyGuide.name : "Select faculty"}
+                    </Text>
+                  </TouchableOpacity>
+
                   <TouchableOpacity
                     style={[styles.submitButton, creating && styles.submitButtonDisabled]}
                     onPress={handleCreateTeam}
@@ -938,6 +1103,30 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: fonts.semibold,
     color: "#2F6FE0",
+  },
+  eventSummary: {
+    marginTop: 10,
+    gap: 6,
+  },
+  eventSummaryTitle: {
+    fontSize: 14,
+    fontFamily: fonts.bold,
+    color: "#111827",
+  },
+  eventSummaryLine: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#4B5563",
+  },
+  eventSummaryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  eventSummaryRowText: {
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
   },
   membersList: {
     marginTop: 14,

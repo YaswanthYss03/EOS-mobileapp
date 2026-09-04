@@ -40,7 +40,15 @@ export function QuickAccessGrid({
         <Pressable
           key={item.id}
           style={[styles.item, { width: columnWidth }, gap ? { paddingHorizontal: gap / 2 } : null]}
-          onPress={item.route ? () => router.push(item.route as never) : undefined}
+          // navigate (not push) - most items stay within their own tab's
+          // stack either way, but some (e.g. the Employee/HoD dashboards'
+          // "Academic Calendar" tile) cross into a different tab's nested
+          // route entirely. `push` always stacks a fresh instance even when
+          // one already exists, which on that exact cross-tab shape has
+          // been observed leaving the destination detached from the Tabs
+          // navigator's own back-stack - see HomeHeader's wallet button fix
+          // for the same root cause.
+          onPress={item.route ? () => router.navigate(item.route as never) : undefined}
         >
           <View style={[styles.iconWrap, { width: circle, height: circle, borderRadius: circle / 2 }]}>
             {item.library === "material" ? (

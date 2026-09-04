@@ -10,7 +10,8 @@ import {
   Modal,
   StyleSheet,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -32,6 +33,7 @@ const YEARS = [1, 2, 3, 4];
 export function PrincipalStudentsScreen() {
   const router = useRouter();
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
 
   // This screen renders its own header below, so hide the shared
   // CollegeHeader (logo/college name) while it's focused - same pattern as
@@ -144,8 +146,13 @@ export function PrincipalStudentsScreen() {
   const sectionTitle = isFiltered ? `Results${result ? ` (${result.total})` : ""}` : "Recent lookups";
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      <View style={styles.header}>
+    <SafeAreaView style={styles.container} edges={[]}>
+      <LinearGradient
+        colors={["#2F6FE0", "#1A3D8F"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[styles.header, { paddingTop: insets.top + 10 }]}
+      >
         <Pressable onPress={() => router.back()} hitSlop={8}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </Pressable>
@@ -156,7 +163,7 @@ export function PrincipalStudentsScreen() {
             number instead of browsing the roll
           </Text>
         </View>
-      </View>
+      </LinearGradient>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         {/* Search bar */}
@@ -481,8 +488,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 12,
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#2F6FE0",
+    paddingBottom: 14,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
   },
   headerTextWrap: { flex: 1 },
   title: { fontSize: 18, fontFamily: fonts.bold, color: "#fff" },

@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
+import {
+  ActivityIndicator,
+  View,
+  Text,
+  ScrollView,
+  TextInput,
+  TouchableOpacity,
+  Modal,
+  StyleSheet,
+} from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -9,12 +18,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
+import { downloadPdf } from "@/utils/pdfDownload";
 import { useAuth } from "@/context/AuthContext";
 import { getApiErrorMessage } from "@/services/api/client";
 import {
   getMyFees,
   createFeePaymentOrder,
   verifyFeePayment,
+  downloadFeeReceipt,
   type FeeStatus,
   type MyFeeDemand,
   type MyFeePayment,
@@ -84,6 +95,7 @@ export function StudentFeesScreen() {
   // sequentially (a single order/payment is always scoped to one demand
   // mapping server-side - see FeePaymentService.createGatewayOrder).
   const [payingProgress, setPayingProgress] = useState<{ index: number; total: number } | null>(null);
+  const [downloadingReceiptId, setDownloadingReceiptId] = useState<number | null>(null);
 
   const load = useCallback(() => {
     setStatus("loading");
@@ -245,8 +257,19 @@ export function StudentFeesScreen() {
     }
   }
 
-  function handleDownloadReceipt(payment: MyFeePayment) {
-    toast.info(`Downloading receipt ${payment.receipt_no} is coming soon`);
+  async function handleDownloadReceipt(payment: MyFeePayment) {
+    if (downloadingReceiptId !== null) return;
+    setDownloadingReceiptId(payment.id);
+    try {
+      const file = await downloadFeeReceipt(payment.id, payment.receipt_no);
+      const result = await downloadPdf(file.uri, payment.receipt_no, `Receipt ${payment.receipt_no}`);
+      if (result === "downloaded") toast.success(`Receipt ${payment.receipt_no} downloaded`);
+      else if (result === "unavailable") toast.success(`Receipt saved to ${file.uri}`);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Couldn't download the receipt."));
+    } finally {
+      setDownloadingReceiptId(null);
+    }
   }
 
   return (
@@ -384,7 +407,12 @@ export function StudentFeesScreen() {
             </View>
           ) : (
             payments.map((payment) => (
-              <PaymentCard key={payment.id} payment={payment} onDownload={() => handleDownloadReceipt(payment)} />
+              <PaymentCard
+                key={payment.id}
+                payment={payment}
+                downloading={downloadingReceiptId === payment.id}
+                onDownload={() => handleDownloadReceipt(payment)}
+              />
             ))
           )}
         </ScrollView>
@@ -517,7 +545,15 @@ function FeeCard({
   );
 }
 
-function PaymentCard({ payment, onDownload }: { payment: MyFeePayment; onDownload: () => void }) {
+function PaymentCard({
+  payment,
+  downloading,
+  onDownload,
+}: {
+  payment: MyFeePayment;
+  downloading: boolean;
+  onDownload: () => void;
+}) {
   return (
     <View style={styles.paymentCard}>
       <View style={styles.paymentIconWrap}>
@@ -534,9 +570,20 @@ function PaymentCard({ payment, onDownload }: { payment: MyFeePayment; onDownloa
       </View>
       <View style={styles.paymentRight}>
         <Text style={styles.paymentAmount}>{formatRupees(payment.amount_paid)}</Text>
-        <TouchableOpacity style={styles.receiptButton} onPress={onDownload} activeOpacity={0.85}>
-          <Ionicons name="download-outline" size={14} color="#2F6FE0" />
-          <Text style={styles.receiptButtonText}>Receipt</Text>
+        <TouchableOpacity
+          style={styles.receiptButton}
+          onPress={onDownload}
+          disabled={downloading}
+          activeOpacity={0.85}
+        >
+          {downloading ? (
+            <ActivityIndicator size="small" color="#2F6FE0" />
+          ) : (
+            <>
+              <Ionicons name="download-outline" size={14} color="#2F6FE0" />
+              <Text style={styles.receiptButtonText}>Receipt</Text>
+            </>
+          )}
         </TouchableOpacity>
       </View>
     </View>

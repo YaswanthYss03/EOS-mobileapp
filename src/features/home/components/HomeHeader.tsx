@@ -62,7 +62,11 @@ export function HomeHeader() {
           <Pressable
             style={styles.iconButton}
             hitSlop={8}
-            onPress={() => router.push("/(tabs)/erp/wallet" as never)}
+            // Wallet is a root-level route (app/wallet/index.tsx), a
+            // sibling of (tabs) rather than nested inside the ERP tab -
+            // opening it from here must not flip the bottom tab bar's
+            // active tab to ERP, same reasoning as id-card.tsx/profile.tsx.
+            onPress={() => router.push("/wallet" as never)}
           >
             <Ionicons name="wallet-outline" size={18} color="#fff" />
           </Pressable>

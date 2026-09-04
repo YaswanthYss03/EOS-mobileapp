@@ -10,8 +10,10 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { getApiErrorMessage } from "@/services/api/client";
 import { formatRelativeTime } from "@/utils/calendar";
@@ -54,6 +56,7 @@ function iconForType(type: string | null): keyof typeof Ionicons.glyphMap {
 // "Bell icon" destination from HomeHeader - every role's own inbox (no
 // role-specific variant needed, GET /notifications is already self-scoped).
 export function NotificationsScreen() {
+  const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [status, setStatus] = useState<LoadStatus>("loading");
@@ -82,6 +85,20 @@ export function NotificationsScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // This screen renders its own gradient header below, in place of the
+  // Tabs-level CollegeHeader ("Sri Eshwar College of Engineering" branding)
+  // shown by default - without this, both stack: the shared header on top,
+  // pushing this screen's own header (and its back button) further down -
+  // same pattern as StudentAttendanceOverviewScreen/StudentPerformanceScreen.
+  useFocusEffect(
+    useCallback(() => {
+      navigation.getParent()?.setOptions({ headerShown: false });
+      return () => {
+        navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
+      };
+    }, [navigation]),
+  );
 
   function handlePress(notification: NotificationItem) {
     if (!notification.is_read) {

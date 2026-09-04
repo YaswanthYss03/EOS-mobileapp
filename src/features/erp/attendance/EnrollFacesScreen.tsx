@@ -248,9 +248,13 @@ export function EnrollFacesScreen() {
         )}
       </ScrollView>
 
-      <Modal visible={pickerVisible} transparent animationType="slide" onRequestClose={() => setPickerVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalSheet}>
+      <Modal visible={pickerVisible} transparent animationType="fade" onRequestClose={() => setPickerVisible(false)}>
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setPickerVisible(false)}
+        >
+          <TouchableOpacity style={styles.modalSheet} activeOpacity={1}>
             <View style={styles.modalHandleRow}>
               <Text style={styles.modalTitle}>Choose a class</Text>
               <TouchableOpacity onPress={() => setPickerVisible(false)} hitSlop={8}>
@@ -281,8 +285,8 @@ export function EnrollFacesScreen() {
                 </TouchableOpacity>
               ))}
             </ScrollView>
-          </View>
-        </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
     </SafeAreaView>
   );
@@ -448,13 +452,13 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(15,23,42,0.5)",
-    justifyContent: "flex-end",
+    justifyContent: "center",
+    padding: 20,
   },
   modalSheet: {
     backgroundColor: "#fff",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: "80%",
+    borderRadius: 20,
+    maxHeight: "75%",
     paddingTop: 16,
   },
   modalHandleRow: {
