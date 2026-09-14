@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, Pressable, ActivityIndicator, StyleSheet } from "react-native";
+import { View, Text, ScrollView, Pressable, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { formatDate } from "@/utils/calendar";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -65,11 +66,7 @@ export function HigherEducationScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-        {status === "loading" && (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#2F6FE0" />
-          </View>
-        )}
+        {status === "loading" && <SkeletonListRows count={4} />}
 
         {status === "error" && <ErrorState message={error ?? "Something went wrong."} onRetry={load} />}
 
@@ -167,10 +164,6 @@ const styles = StyleSheet.create({
   list: {
     padding: 16,
     paddingBottom: 32,
-  },
-  inlineLoading: {
-    paddingVertical: 60,
-    alignItems: "center",
   },
   card: {
     backgroundColor: "#fff",

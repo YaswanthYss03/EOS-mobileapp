@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Modal, ActivityIndicator, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, Modal, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonDetailBlock, SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -106,11 +107,7 @@ export function ParentPerformanceScreen() {
       </LinearGradient>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {childrenStatus === "loading" && (
-          <View style={styles.loadingState}>
-            <ActivityIndicator size="small" color="#2F6FE0" />
-          </View>
-        )}
+        {childrenStatus === "loading" && <SkeletonDetailBlock />}
 
         {childrenStatus === "error" && (
           <View style={styles.emptyState}>
@@ -165,10 +162,7 @@ export function ParentPerformanceScreen() {
             </View>
 
             {loading ? (
-              <View style={styles.loadingState}>
-                <ActivityIndicator size="small" color="#2F6FE0" />
-                <Text style={styles.loadingStateText}>Loading results...</Text>
-              </View>
+              <SkeletonListRows count={3} />
             ) : errored ? (
               <View style={styles.emptyState}>
                 <Ionicons name="cloud-offline-outline" size={32} color="#B0B7C3" />
@@ -352,8 +346,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -432,16 +424,6 @@ const styles = StyleSheet.create({
   tabButtonTextActive: {
     color: "#2F6FE0",
     fontFamily: fonts.bold,
-  },
-  loadingState: {
-    alignItems: "center",
-    paddingVertical: 48,
-    gap: 10,
-  },
-  loadingStateText: {
-    fontSize: 13,
-    fontFamily: fonts.regular,
-    color: "#9AA6B2",
   },
   internalCard: {
     backgroundColor: "#fff",

@@ -11,6 +11,12 @@ const ICON_COLOR = "#2F6FE0";
 const SIZES = {
   default: { columnWidth: "25%" as const, circle: 60, iconSize: 24, materialIconSize: 26 },
   large: { columnWidth: "33.33%" as const, circle: 76, iconSize: 30, materialIconSize: 32 },
+  // Same 3-per-row layout as "large", but the exact circle/icon size as
+  // CampusIconGrid (the student Class tab's own Campus grid - see
+  // src/features/erp/student/components/CampusIconGrid.tsx) - used by the
+  // Academics screen inside the student's Campus tab so its icons match the
+  // Class tab's icons instead of looking oversized next to them.
+  campus: { columnWidth: "33.33%" as const, circle: 60, iconSize: 24, materialIconSize: 26 },
 };
 
 // Shared across all ERP role dashboards (student, employee, ...) - each

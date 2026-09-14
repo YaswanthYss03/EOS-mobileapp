@@ -12,6 +12,7 @@ import {
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { confirm } from "@/utils/confirm";
@@ -99,11 +100,7 @@ export function FacultyMaterialTab({ subjectId, classId }: { subjectId: number; 
   }
 
   if (status === "loading") {
-    return (
-      <View style={styles.centerFill}>
-        <ActivityIndicator color="#2F6FE0" />
-      </View>
-    );
+    return <SkeletonListRows count={4} style={styles.list} />;
   }
 
   if (status === "error") {

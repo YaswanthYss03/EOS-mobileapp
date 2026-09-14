@@ -35,7 +35,17 @@ export function StudentDashboard() {
     "no-due": data.noDue,
     medical: data.medical,
   };
-  const campusItems: CampusItem[] = campusConfigs.map((cfg) => ({ ...cfg, value: campusStats[cfg.id].value }));
+  // Hostel is only relevant to hostel residents - a dayscholar never sees
+  // the tile at all, not just a "Not allotted" value. Held back while
+  // isHostelResident is still unresolved (null) so it doesn't flash in
+  // for a dayscholar before disappearing again.
+  const campusItems: CampusItem[] = campusConfigs
+    .filter((cfg) => cfg.id !== "hostel" || data.isHostelResident === true)
+    // Tiles moved in from the old Class tab (Timetable, Calendar, ...) have
+    // no matching entry in campusStats - they're pure navigation shortcuts,
+    // not stats, so they simply render with no value line (see CampusItem's
+    // now-optional `value` and CampusIconGrid's conditional render).
+    .map((cfg) => ({ ...cfg, value: campusStats[cfg.id]?.value }));
 
   // Swaps the shared CollegeHeader (mounted at the Tabs level, see
   // app/(tabs)/_layout.tsx) for this screen's own header while it's focused,
@@ -44,7 +54,7 @@ export function StudentDashboard() {
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({
-        header: () => <DashboardHeader subtitle="Student services" onBack={() => router.replace("/(tabs)/home")} />,
+        header: () => <DashboardHeader onBack={() => router.replace("/(tabs)/home")} />,
       });
       return () => {
         navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
@@ -56,10 +66,6 @@ export function StudentDashboard() {
     <SafeAreaView style={styles.container} edges={[]}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Quick Access</Text>
-            {data.classSection ? <Text style={styles.sectionMeta}>{data.classSection}</Text> : null}
-          </View>
           <QuickAccessStatCards items={statCards} />
         </View>
 
@@ -80,7 +86,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   content: {
-    padding: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 6,
   },
   section: {
     marginBottom: 16,
@@ -97,12 +104,5 @@ const styles = StyleSheet.create({
     color: "#8A93A3",
     letterSpacing: 1,
     textTransform: "uppercase",
-  },
-  sectionMeta: {
-    fontSize: 11,
-    fontFamily: fonts.medium,
-    color: "#B0B7C3",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
   },
 });

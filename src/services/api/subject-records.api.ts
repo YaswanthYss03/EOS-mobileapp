@@ -33,6 +33,19 @@ export type SubjectRecordMapping = {
   entered_count: number;
 };
 
+// class.label has no separately-exposed batch/section fields - only this
+// composed string, built server-side as `${courses.code}-${section}
+// (${batches.name})` (see EOS-backend's subject-records.service.ts's own
+// classLabel()). Parsed back apart here purely for client-side filtering
+// (Batch/Section dropdowns) - if that server-side format ever changes this
+// degrades to showing the raw label as both "batch" and "section" rather
+// than throwing.
+export function parseClassLabel(label: string): { batchName: string; section: string } {
+  const match = label.match(/^.+-([^\s()-]+)\s*\((.+)\)$/);
+  if (!match) return { batchName: label, section: label };
+  return { section: match[1], batchName: match[2] };
+}
+
 export type GradeCount = {
   grade: string;
   count: number;

@@ -6,6 +6,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -227,9 +228,7 @@ export function AssignmentStatusScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.fieldLabel}>Class &amp; subject</Text>
         {classesLoading ? (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator size="small" color="#2F6FE0" />
-          </View>
+          <SkeletonListRows count={1} />
         ) : classesErrored ? (
           <Text style={styles.errorText}>Couldn't load your classes.</Text>
         ) : classes && classes.length === 0 ? (
@@ -251,9 +250,7 @@ export function AssignmentStatusScreen() {
           <>
             <Text style={styles.fieldLabel}>Assignment</Text>
             {assignmentsLoading ? (
-              <View style={styles.inlineLoading}>
-                <ActivityIndicator size="small" color="#2F6FE0" />
-              </View>
+              <SkeletonListRows count={1} />
             ) : assignmentsErrored ? (
               <Text style={styles.errorText}>Couldn't load assignments.</Text>
             ) : assignments && assignments.length === 0 ? (
@@ -287,10 +284,7 @@ export function AssignmentStatusScreen() {
         {selectedAssignment && (
           <>
             {studentsLoading ? (
-              <View style={styles.centerState}>
-                <ActivityIndicator size="small" color="#2F6FE0" />
-                <Text style={styles.centerStateText}>Loading students...</Text>
-              </View>
+              <SkeletonListRows count={4} />
             ) : studentsErrored ? (
               <View style={styles.centerState}>
                 <Ionicons name="cloud-offline-outline" size={32} color="#B0B7C3" />
@@ -473,8 +467,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -545,10 +537,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: fonts.semibold,
     color: "#111827",
-  },
-  inlineLoading: {
-    paddingVertical: 16,
-    alignItems: "center",
   },
   errorText: {
     fontSize: 13,

@@ -84,11 +84,15 @@ export type MarkClassAttendanceResult = {
   class_id: number;
   attendance_date: string;
   marked: number;
+  is_published: boolean;
 };
 
 // POST /me/classes/:class_id/attendance (Faculty/HoD mapped to teach this
-// subject/class) - the real, persisting commit. Unmodified by the AI
-// feature; the recognize step above only ever feeds this call's `records`.
+// subject/class) - persists attendance as a draft (is_published: false,
+// see EOSbackend1's AttendanceService.markForClass). Not yet visible to
+// students/parents/advisors via the role-scoped GET /attendance until
+// publishClassAttendance is called - re-saving before that just replaces
+// the draft rows, so this can be called repeatedly while still reviewing.
 export async function markClassAttendance(
   classId: number,
   subjectId: number,
@@ -98,6 +102,30 @@ export async function markClassAttendance(
   const { data } = await apiClient.post<{ data: MarkClassAttendanceResult }>(
     `/me/classes/${classId}/attendance`,
     { subject_id: subjectId, attendance_date: attendanceDate, records },
+  );
+  return data.data;
+}
+
+export type PublishClassAttendanceResult = {
+  class_id: number;
+  subject_id: number;
+  attendance_date: string;
+  published: number;
+  published_at: string;
+};
+
+// POST /me/classes/:class_id/attendance/publish - flips a previously-saved
+// draft to is_published: true, the exact moment it becomes visible to
+// students/parents/advisors. 404s with ATTENDANCE_DRAFT_NOT_FOUND if
+// markClassAttendance was never called for this class/subject/date first.
+export async function publishClassAttendance(
+  classId: number,
+  subjectId: number,
+  attendanceDate: string,
+): Promise<PublishClassAttendanceResult> {
+  const { data } = await apiClient.post<{ data: PublishClassAttendanceResult }>(
+    `/me/classes/${classId}/attendance/publish`,
+    { subject_id: subjectId, attendance_date: attendanceDate },
   );
   return data.data;
 }

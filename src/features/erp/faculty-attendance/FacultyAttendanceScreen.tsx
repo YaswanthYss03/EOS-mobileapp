@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { MONTH_NAMES } from "@/utils/calendar";
 import { toast } from "@/utils/toast";
@@ -73,14 +74,27 @@ export function FacultyAttendanceScreen() {
     loadFacultyRows();
   }, [loadFacultyRows]);
 
+  // No restore-on-blur here on purpose. This screen and its own detail
+  // screen (FacultyAttendanceDetailScreen) both hide the shared header, and
+  // pushing forward into the detail screen blurs this one - a plain
+  // restore-on-cleanup used to race the detail screen's own hide-on-focus
+  // (React runs child effects before ancestor/blur effects, so which one
+  // "wins" isn't guaranteed), intermittently leaving CollegeHeader shown
+  // above the detail screen's own header. beforeRemove instead only fires
+  // when this screen is actually being popped (back/swipe-back), never when
+  // something is merely pushed on top of it - see OnlineClassScreen's
+  // identical comment for the same fix applied to the same class of race.
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({ headerShown: false });
-      return () => {
-        navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
-      };
     }, [navigation]),
   );
+
+  useEffect(() => {
+    return navigation.addListener("beforeRemove", () => {
+      navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
+    });
+  }, [navigation]);
 
   const rows = tab === "faculty" ? facultyRows : mockOtherStaffAttendance;
 
@@ -175,9 +189,7 @@ export function FacultyAttendanceScreen() {
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {tab === "faculty" && facultyStatus === "loading" ? (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#2F6FE0" />
-          </View>
+          <SkeletonListRows count={4} />
         ) : tab === "faculty" && facultyStatus === "error" ? (
           <View style={styles.emptyState}>
             <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
@@ -256,8 +268,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -427,10 +437,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     color: "#9AA6B2",
     textAlign: "center",
-  },
-  inlineLoading: {
-    paddingVertical: 40,
-    alignItems: "center",
   },
   retryButton: {
     marginTop: 4,

@@ -7,6 +7,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import * as Linking from "expo-linking";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -95,11 +96,7 @@ export function TaskSubmissionsScreen({ taskId, title }: { taskId: number; title
         </Text>
       </LinearGradient>
 
-      {status === "loading" && (
-        <View style={styles.centerFill}>
-          <ActivityIndicator color="#2F6FE0" />
-        </View>
-      )}
+      {status === "loading" && <SkeletonListRows count={4} style={styles.list} />}
 
       {status === "error" && (
         <View style={styles.centerFill}>
@@ -200,8 +197,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,

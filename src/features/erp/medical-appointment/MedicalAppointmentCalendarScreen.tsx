@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, toIsoDate } from "@/utils/calendar";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -307,11 +308,7 @@ export function MedicalAppointmentCalendarScreen() {
           </View>
         )}
 
-        {status === "loading" && (
-          <View style={styles.loadingRow}>
-            <ActivityIndicator size="small" color="#2F6FE0" />
-          </View>
-        )}
+        {status === "loading" && <SkeletonListRows count={3} />}
 
         {upcoming.length > 0 && (
           <>
@@ -350,8 +347,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -579,10 +574,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: fonts.bold,
     color: "#C0392B",
-  },
-  loadingRow: {
-    paddingVertical: 12,
-    alignItems: "center",
   },
   errorCard: {
     backgroundColor: "#fff",

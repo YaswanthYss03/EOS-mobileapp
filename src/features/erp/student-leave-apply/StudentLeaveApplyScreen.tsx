@@ -4,12 +4,21 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
+import * as DocumentPicker from "expo-document-picker";
+import * as Linking from "expo-linking";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
-import { createMyLeave, listMyLeaves, type LeaveStatus, type MyLeave } from "@/services/api/leaves.api";
+import {
+  createMyLeave,
+  uploadLeaveAttachment,
+  listMyLeaves,
+  type LeaveStatus,
+  type MyLeave,
+} from "@/services/api/leaves.api";
 import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, formatDate } from "@/utils/calendar";
 
 type Tab = "apply" | "history";
@@ -45,11 +54,11 @@ function isBeforeToday(date: Date, today: Date): boolean {
 }
 
 // Wired to POST/GET /me/leaves (real student_leaves rows, two-stage
-// faculty-then-HOD approval). This is the student's own self-service
-// application, distinct from the Class Advisor's review screen (see
-// erp/student-leave) and the employee's own leave request (see
-// erp/leave-request). There is no attachment/hostel-leave column on
-// student_leaves, so those mockup fields aren't wired to anything real.
+// faculty-then-HOD approval), including also_on_hostel_leave and a real
+// attachment upload (POST /me/leaves/:id/attachment). This is the student's
+// own self-service application, distinct from the Class Advisor's review
+// screen (see erp/student-leave) and the employee's own leave request (see
+// erp/leave-request).
 export function StudentLeaveApplyScreen() {
   const navigation = useNavigation();
   const router = useRouter();
@@ -65,7 +74,7 @@ export function StudentLeaveApplyScreen() {
   const [endDateObj, setEndDateObj] = useState<Date | null>(null);
   const [reason, setReason] = useState("");
   const [hostelLeave, setHostelLeave] = useState(false);
-  const [attached, setAttached] = useState(false);
+  const [attachedFile, setAttachedFile] = useState<{ uri: string; name: string; mimeType: string } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [datePickerFor, setDatePickerFor] = useState<DateField>(null);
@@ -141,7 +150,15 @@ export function StudentLeaveApplyScreen() {
   }
 
   function handleAttachment() {
-    setAttached((prev) => !prev);
+    if (attachedFile) {
+      setAttachedFile(null);
+      return;
+    }
+    DocumentPicker.getDocumentAsync({ type: ["application/pdf", "image/*"] }).then((result) => {
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+      setAttachedFile({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType ?? "application/octet-stream" });
+    });
   }
 
   function resetForm() {
@@ -149,7 +166,7 @@ export function StudentLeaveApplyScreen() {
     setEndDateObj(null);
     setReason("");
     setHostelLeave(false);
-    setAttached(false);
+    setAttachedFile(null);
   }
 
   function handleSubmit() {
@@ -167,12 +184,24 @@ export function StudentLeaveApplyScreen() {
       from_date: toDateOnly(startDateObj),
       to_date: toDateOnly(endDateObj),
       reason: reason.trim(),
+      also_on_hostel_leave: hostelLeave,
     })
-      .then(() => {
-        toast.success("Leave request submitted");
-        resetForm();
-        setTab("history");
-        loadHistory();
+      .then((leave) => {
+        // The leave request itself is already submitted at this point - a
+        // failed attachment upload shouldn't read as "the request failed"
+        // (which would invite a duplicate resubmission), just its own
+        // separate warning.
+        const uploadAttempt = attachedFile
+          ? uploadLeaveAttachment(leave.id, attachedFile).catch(() =>
+              toast.warning("Leave request submitted, but the attachment couldn't be uploaded."),
+            )
+          : Promise.resolve();
+        return uploadAttempt.then(() => {
+          toast.success("Leave request submitted");
+          resetForm();
+          setTab("history");
+          loadHistory();
+        });
       })
       .catch((err) => {
         toast.error(getApiErrorMessage(err, "Couldn't submit your leave request."));
@@ -286,13 +315,14 @@ export function StudentLeaveApplyScreen() {
             <Text style={styles.fieldLabel}>Supporting document (optional)</Text>
             <TouchableOpacity style={styles.attachButton} onPress={handleAttachment} activeOpacity={0.8}>
               <Ionicons
-                name={attached ? "checkmark-circle" : "cloud-upload-outline"}
+                name={attachedFile ? "checkmark-circle" : "cloud-upload-outline"}
                 size={16}
                 color="#2F6FE0"
               />
-              <Text style={styles.attachButtonText}>
-                {attached ? "Medical certificate attached" : "Attach medical certificate (optional)"}
+              <Text style={styles.attachButtonText} numberOfLines={1}>
+                {attachedFile ? attachedFile.name : "Attach medical certificate (optional)"}
               </Text>
+              {attachedFile && <Ionicons name="close-circle" size={16} color="#9AA6B2" />}
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -309,9 +339,7 @@ export function StudentLeaveApplyScreen() {
             </TouchableOpacity>
           </View>
         ) : historyStatus === "loading" ? (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#2F6FE0" />
-          </View>
+          <SkeletonListRows count={4} />
         ) : historyStatus === "error" ? (
           <View style={styles.errorNotice}>
             <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
@@ -408,6 +436,28 @@ function HistoryRow({ item, isLast }: { item: MyLeave; isLast: boolean }) {
         </View>
       </View>
       {item.reason && <Text style={styles.historyReason}>{item.reason}</Text>}
+      {(item.also_on_hostel_leave || item.attachment_url) && (
+        <View style={styles.historyMetaRow}>
+          {item.also_on_hostel_leave && (
+            <View style={styles.hostelChip}>
+              <Ionicons name="home-outline" size={11} color="#2F6FE0" />
+              <Text style={styles.hostelChipText}>Hostel leave</Text>
+            </View>
+          )}
+          {item.attachment_url && (
+            <TouchableOpacity
+              style={styles.attachmentChip}
+              activeOpacity={0.8}
+              onPress={() =>
+                Linking.openURL(item.attachment_url!).catch(() => toast.error("Couldn't open the file"))
+              }
+            >
+              <Ionicons name="document-text-outline" size={11} color="#2F6FE0" />
+              <Text style={styles.attachmentChipText}>View attachment</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -423,8 +473,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -442,10 +490,6 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
-  },
-  inlineLoading: {
-    paddingVertical: 48,
-    alignItems: "center",
   },
   errorNotice: {
     alignItems: "center",
@@ -620,12 +664,15 @@ const styles = StyleSheet.create({
     borderStyle: "dashed",
     borderRadius: 12,
     paddingVertical: 14,
+    paddingHorizontal: 14,
     marginBottom: 16,
   },
   attachButtonText: {
+    flexShrink: 1,
     fontSize: 13,
     fontFamily: fonts.semibold,
     color: "#2F6FE0",
+    textAlign: "center",
   },
   submitButton: {
     alignItems: "center",
@@ -699,6 +746,41 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     color: "#6B7280",
     marginTop: 10,
+  },
+  historyMetaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 10,
+  },
+  hostelChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#EAF0FD",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  hostelChipText: {
+    fontSize: 11,
+    fontFamily: fonts.semibold,
+    color: "#2F6FE0",
+  },
+  attachmentChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  attachmentChipText: {
+    fontSize: 11,
+    fontFamily: fonts.semibold,
+    color: "#2F6FE0",
   },
   emptyState: {
     alignItems: "center",

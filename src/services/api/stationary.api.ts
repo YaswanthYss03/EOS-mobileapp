@@ -1,23 +1,26 @@
 import { apiClient } from "./client";
 
-// Mirrors EOS-backend's new stationary module (see
+// Mirrors EOS-backend's stationary module (see
 // EOSbackend1/src/modules/stationary/stationary.*.ts) - the print/xerox
 // shop request payment gateway, same Razorpay order-then-verify shape as
-// wallet top-up (see wallet.api.ts). `amount` is computed server-side from
-// copies/color_mode - there's no per-document page count anywhere in this
-// app to price against yet, so this is a flat placeholder rate until real
-// page-count extraction exists.
+// wallet top-up (see wallet.api.ts). `amount` is always server-computed
+// from total_pages * copies * ₹2/page - never trusted from the client.
 
 export type StationaryOrientation = "portrait" | "landscape";
 export type StationaryColorMode = "color" | "bw";
-export type StationaryPages = "all" | "even" | "odd";
+export type StationaryPaperSize = "A4" | "A3" | "A5" | "Letter" | "Legal";
+export type StationarySides = "Single-sided" | "Double-sided";
+export type StationaryBinding = "No binding" | "Spiral binding" | "Calico binding";
 
 export type CreateStationaryOrderPayload = {
-  file_name?: string;
+  file_summary?: string;
+  total_pages: number;
   copies: number;
   orientation: StationaryOrientation;
   color_mode: StationaryColorMode;
-  pages: StationaryPages;
+  paper_size: StationaryPaperSize;
+  sides: StationarySides;
+  binding: StationaryBinding;
 };
 
 export type StationaryOrder = {
@@ -56,5 +59,25 @@ export async function verifyStationaryPayment(
     "/me/stationary-requests/order/verify",
     payload,
   );
+  return data.data;
+}
+
+export type MyStationaryRequest = {
+  id: number;
+  file_summary: string | null;
+  total_pages: number;
+  copies: number;
+  orientation: StationaryOrientation;
+  color_mode: StationaryColorMode;
+  paper_size: StationaryPaperSize | null;
+  sides: StationarySides | null;
+  binding: StationaryBinding | null;
+  amount: number;
+  status: "pending_payment" | "paid";
+  created_at: string;
+};
+
+export async function getMyStationaryRequests(): Promise<MyStationaryRequest[]> {
+  const { data } = await apiClient.get<{ data: MyStationaryRequest[] }>("/me/stationary-requests");
   return data.data;
 }

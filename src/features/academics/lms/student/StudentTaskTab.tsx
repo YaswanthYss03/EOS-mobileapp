@@ -4,6 +4,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import * as DocumentPicker from "expo-document-picker";
 import * as Linking from "expo-linking";
 import { Ionicons } from "@expo/vector-icons";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -79,11 +80,7 @@ export function StudentTaskTab({ subjectId }: { subjectId: number }) {
   }
 
   if (status === "loading") {
-    return (
-      <View style={styles.centerFill}>
-        <ActivityIndicator color="#2F6FE0" />
-      </View>
-    );
+    return <SkeletonListRows count={4} style={styles.list} />;
   }
 
   if (status === "error") {

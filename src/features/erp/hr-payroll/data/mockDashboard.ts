@@ -19,6 +19,17 @@ export const hrSectionItems: QuickAccessItem[] = [
   { id: "leave", label: "Leave", icon: "airplane-outline", route: "/(tabs)/erp/faculty-leave" },
   { id: "od", label: "OD", icon: "person-outline", route: "/(tabs)/erp/faculty-od" },
   { id: "payslip", label: "Payslip", icon: "receipt-outline", route: "/(tabs)/erp/faculty-payslip" },
+  // Moved in from the old Class tab (see app/(tabs)/_layout.tsx - that tab
+  // is now hidden for HR Payroll too, see isHrPayroll there). HR Payroll's
+  // Academics chooser only ever showed Timetable + Calendar to begin with
+  // (no Current Semester/Online Class/Placements - see
+  // AcademicsOverviewScreen.tsx's timetableAndCalendarOnly filter and
+  // AcademicsChooserScreen.tsx's hrOptions, which drop everything else for
+  // this role), so those are the only two tiles that make sense to carry
+  // over. Same route/icon those tiles used, no `library`/`size` override so
+  // they render at the same size as every other tile in this section.
+  { id: "timetable", label: "Timetable", icon: "time-outline", route: "/(tabs)/academics/timetable" },
+  { id: "academic-calendar", label: "Academic Calendar", icon: "calendar-outline", route: "/(tabs)/academics/calendar" },
 ];
 
 // Same self-service grid every staff member gets (see

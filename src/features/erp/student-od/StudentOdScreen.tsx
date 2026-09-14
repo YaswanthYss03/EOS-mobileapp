@@ -6,6 +6,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -143,10 +144,7 @@ export function StudentOdScreen() {
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {loading ? (
-          <View style={styles.centerState}>
-            <ActivityIndicator size="small" color="#2F6FE0" />
-            <Text style={styles.centerStateText}>Loading...</Text>
-          </View>
+          <SkeletonListRows count={4} />
         ) : errored ? (
           <View style={styles.centerState}>
             <Ionicons name="cloud-offline-outline" size={32} color="#B0B7C3" />
@@ -316,8 +314,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,

@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Asset } from "expo-asset";
 import { File } from "expo-file-system";
 import * as Print from "expo-print";
+import { SkeletonDetailBlock } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { downloadPdf } from "@/utils/pdfDownload";
@@ -103,9 +104,8 @@ export function IdCardScreen() {
       </LinearGradient>
 
       {status === "loading" && (
-        <View style={styles.centerFill}>
-          <ActivityIndicator color="#2F6FE0" size="large" />
-          <Text style={styles.errorText}>Generating your ID card…</Text>
+        <View style={styles.loadingWrap}>
+          <SkeletonDetailBlock style={{ alignSelf: "stretch" }} />
         </View>
       )}
 
@@ -160,8 +160,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -182,6 +180,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 12,
     paddingHorizontal: 32,
+  },
+  loadingWrap: {
+    padding: 24,
   },
   errorText: {
     fontSize: 14,

@@ -15,6 +15,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -463,11 +464,7 @@ export function AnnouncementsScreen() {
                   )}
                 </View>
 
-                {classesStatus === "loading" && (
-                  <View style={styles.inlineLoading}>
-                    <ActivityIndicator color="#2F6FE0" />
-                  </View>
-                )}
+                {classesStatus === "loading" && <SkeletonListRows count={3} />}
 
                 {classesStatus === "error" && (
                   <ErrorNotice message={classesError ?? "Something went wrong."} onRetry={loadClasses} />
@@ -505,11 +502,7 @@ export function AnnouncementsScreen() {
                   )}
                 </View>
 
-                {facultyTargetsStatus === "loading" && (
-                  <View style={styles.inlineLoading}>
-                    <ActivityIndicator color="#2F6FE0" />
-                  </View>
-                )}
+                {facultyTargetsStatus === "loading" && <SkeletonListRows count={3} />}
 
                 {facultyTargetsStatus === "error" && (
                   <ErrorNotice
@@ -546,11 +539,7 @@ export function AnnouncementsScreen() {
                   )}
                 </View>
 
-                {rolesStatus === "loading" && (
-                  <View style={styles.inlineLoading}>
-                    <ActivityIndicator color="#2F6FE0" />
-                  </View>
-                )}
+                {rolesStatus === "loading" && <SkeletonListRows count={3} />}
 
                 {rolesStatus === "error" && (
                   <ErrorNotice message={rolesError ?? "Something went wrong."} onRetry={loadRoles} />
@@ -623,9 +612,7 @@ export function AnnouncementsScreen() {
             </View>
           </View>
         ) : draftsStatus === "loading" ? (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#2F6FE0" />
-          </View>
+          <SkeletonListRows count={4} />
         ) : draftsStatus === "error" ? (
           <ErrorNotice message={draftsError ?? "Something went wrong."} onRetry={loadDrafts} />
         ) : drafts.length === 0 ? (
@@ -713,8 +700,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -849,10 +834,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: fonts.semibold,
     color: "#4B5563",
-  },
-  inlineLoading: {
-    paddingVertical: 16,
-    alignItems: "center",
   },
   errorNotice: {
     alignItems: "center",

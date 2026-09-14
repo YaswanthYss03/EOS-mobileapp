@@ -44,7 +44,7 @@ export function AnnouncementsSection() {
     <View style={styles.section}>
       <View style={styles.header}>
         <Ionicons name="megaphone-outline" size={16} color="#111827" />
-        <Text style={styles.title}>Announcements</Text>
+        <Text style={styles.title}>Notice</Text>
         <TouchableOpacity hitSlop={8} onPress={() => router.push("/(tabs)/home/announcements" as never)}>
           <Text style={styles.viewAll}>View All</Text>
         </TouchableOpacity>

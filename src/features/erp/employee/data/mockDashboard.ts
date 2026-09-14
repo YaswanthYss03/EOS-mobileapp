@@ -29,7 +29,7 @@ export const studentSectionItems: QuickAccessItem[] = [
   { id: "cia-marks", label: "CIA Marks", icon: "create-outline", route: "/(tabs)/erp/cia-marks" },
   {
     id: "announcements",
-    label: "Announcements",
+    label: "Announcement",
     icon: "megaphone-outline",
     route: "/(tabs)/erp/announcements?audience=faculty",
   },
@@ -43,4 +43,20 @@ export const studentSectionItems: QuickAccessItem[] = [
     icon: "calendar-outline",
     route: "/(tabs)/academics/calendar",
   },
+
+  // Moved in from the old Class tab (see app/(tabs)/_layout.tsx - that tab
+  // is now hidden entirely for faculty/HoD too, see isFaculty there). Routes
+  // are unchanged (same academics/* screens, just reached from here instead
+  // of the Class tab's own chooser) - same icons those tiles used there, and
+  // no `library`/`size` override so they render at the same size as every
+  // other tile in this section (see QuickAccessGrid's default SIZES).
+  {
+    id: "current-semester",
+    label: "Current Semester",
+    icon: "ribbon-outline",
+    route: "/(tabs)/academics/current-semester",
+  },
+  { id: "timetable", label: "Timetable", icon: "time-outline", route: "/(tabs)/academics/timetable" },
+  { id: "online-class", label: "Online Class", icon: "videocam-outline", route: "/(tabs)/academics/online-class" },
+  { id: "placements", label: "Placements", icon: "briefcase-outline", route: "/(tabs)/academics/placements" },
 ];

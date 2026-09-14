@@ -17,13 +17,16 @@ type ChooserOption = {
   route: "/(tabs)/academics/overview" | "/(tabs)/academics/placements";
 };
 
-// Same for hod, faculty (employee) and student - none of these roles get a
-// different set of options today, see src/hooks/useRole.ts.
+// Same for hod and faculty (employee) - neither gets a different set of
+// options today, see src/hooks/useRole.ts. This IS a student's own "Campus"
+// tab (see app/(tabs)/_layout.tsx) - every other role still has this tab
+// hidden, reaching the same options from their own dashboard's sections
+// instead.
 const options: ChooserOption[] = [
   {
     id: "academics",
     title: "Academics",
-    description: "Timetable and calendar ",
+    description: "Timetable and calendar",
     icon: "school-outline",
     route: "/(tabs)/academics/overview",
   },
@@ -56,10 +59,12 @@ function EduHeader({ onBack }: { onBack: () => void }) {
         style={headerStyles.backButton}
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       >
-        <Ionicons name="arrow-back" size={20} color="#fff" />
+        <Ionicons name="chevron-back" size={20} color="#fff" />
       </TouchableOpacity>
-      <View>
-        <Text style={headerStyles.title}>Edu</Text>
+      <View style={headerStyles.textWrap}>
+        <Text style={headerStyles.title} numberOfLines={2}>
+          Sri Eshwar College of Engineering
+        </Text>
         <Text style={headerStyles.subtitle}>Teaching & academics</Text>
       </View>
     </LinearGradient>
@@ -123,8 +128,6 @@ const headerStyles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -134,9 +137,12 @@ const headerStyles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  textWrap: {
+    flex: 1,
+  },
   title: {
     color: "#fff",
-    fontSize: 18,
+    fontSize: 16,
     fontFamily: fonts.bold,
   },
   subtitle: {
@@ -154,12 +160,15 @@ const styles = StyleSheet.create({
   },
   row: {
     flexDirection: "row",
-    padding: 16,
+    flexWrap: "wrap",
+    paddingHorizontal: 16,
+    paddingTop: 16,
     gap: 16,
   },
   card: {
-    flex: 1,
-    minHeight: 200,
+    flexBasis: "45%",
+    flexGrow: 1,
+    minHeight: 180,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: "#EEF0F4",

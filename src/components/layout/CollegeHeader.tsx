@@ -4,6 +4,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fonts } from "@/theme";
 
 // Shared branding bar shown above all 5 bottom tabs (see app/(tabs)/_layout.tsx).
+// No message icon here (unlike HomeHeader) - the Messages entry point is
+// Home-tab-only, by design, for every login.
 const logoSource = require("../../../assets/logo.png");
 
 export function CollegeHeader() {
@@ -19,7 +21,7 @@ export function CollegeHeader() {
       <View>
         <Image source={logoSource} style={styles.logo} />
       </View>
-      <View>
+      <View style={styles.titleWrap}>
         <Text style={styles.title}>Sri Eshwar College of Engineering</Text>
         <Text style={styles.subtitle}>LEADERSHIP & EXCELLENCE</Text>
       </View>
@@ -34,8 +36,9 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
+  },
+  titleWrap: {
+    flex: 1,
   },
   logoWrap: {
     width: 44,

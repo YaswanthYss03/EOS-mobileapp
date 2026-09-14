@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -181,9 +182,7 @@ export function StudentFeedbackScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.fieldLabel}>Course</Text>
         {formsStatus === "loading" ? (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#2F6FE0" />
-          </View>
+          <SkeletonListRows count={3} />
         ) : formsStatus === "error" ? (
           <View style={styles.errorNotice}>
             <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
@@ -229,11 +228,7 @@ export function StudentFeedbackScreen() {
           </View>
         </View>
 
-        {detailStatus === "loading" && (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#2F6FE0" />
-          </View>
-        )}
+        {detailStatus === "loading" && <SkeletonListRows count={3} />}
 
         {detailStatus === "error" && (
           <View style={styles.errorNotice}>
@@ -337,8 +332,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -362,10 +355,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     color: "#6B7280",
     marginBottom: 8,
-  },
-  inlineLoading: {
-    paddingVertical: 24,
-    alignItems: "center",
   },
   errorNotice: {
     alignItems: "center",

@@ -18,6 +18,12 @@ const academicsItems = [
   },
   { id: "timetable", label: "Timetable", icon: "time-outline", route: "/(tabs)/academics/timetable" },
   { id: "calendar", label: "Calendar", icon: "calendar-outline", route: "/(tabs)/academics/calendar" },
+  // Both UI/mock-data prototypes (see each screen's own doc comment). To-Do
+  // deliberately does NOT live here - it's the existing tab inside
+  // Placements (see PlacementsOverviewScreen's TabSwitch showTodo), not a
+  // separate Academics page.
+  { id: "daily-task", label: "Daily Task", icon: "checkbox-outline", route: "/(tabs)/academics/daily-task" },
+  { id: "online-class", label: "Online Class", icon: "videocam-outline", route: "/(tabs)/academics/online-class" },
 ];
 
 // HR Payroll and Parent both have no "own" current semester (that's a
@@ -47,7 +53,7 @@ function AcademicsHeader({ onBack }: { onBack: () => void }) {
         <Ionicons name="arrow-back" size={20} color="#fff" />
       </TouchableOpacity>
       <View>
-        <Text style={headerStyles.title}>Academics</Text>
+        <Text style={headerStyles.title}>Timetable & Calendar</Text>
         <Text style={headerStyles.subtitle}>Semester VI · 2025-26</Text>
       </View>
     </LinearGradient>
@@ -58,8 +64,12 @@ export function AcademicsOverviewScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const role = useRole();
-  const items =
-    role === "hr-payroll" || role === "parent" ? timetableAndCalendarOnly : academicsItems;
+  const items = (role === "hr-payroll" || role === "parent" ? timetableAndCalendarOnly : academicsItems).filter(
+    // Daily Task is wired to EOS-backend's real /me/lms/* student endpoints
+    // (see DailyTaskScreen.tsx) - those 403 for anyone who isn't a student,
+    // so only a student sees this tile.
+    (item) => item.id !== "daily-task" || role === "student",
+  );
 
   // Same header-swap pattern as AcademicsChooserScreen and the ERP role
   // dashboards - see src/features/academics/AcademicsChooserScreen.tsx.
@@ -77,8 +87,8 @@ export function AcademicsOverviewScreen() {
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Academics</Text>
-        <QuickAccessGrid items={items} size="large" />
+        <Text style={styles.sectionTitle}>Timetable & Calendar</Text>
+        <QuickAccessGrid items={items} size="campus" />
       </View>
     </SafeAreaView>
   );
@@ -91,8 +101,6 @@ const headerStyles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,

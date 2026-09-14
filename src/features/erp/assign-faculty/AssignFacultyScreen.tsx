@@ -15,6 +15,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -61,7 +62,6 @@ export function AssignFacultyScreen() {
   const [batchesStatus, setBatchesStatus] = useState<LoadStatus>("loading");
   const [batches, setBatches] = useState<MappingBatch[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
-  const [batchPickerOpen, setBatchPickerOpen] = useState(false);
 
   const [subjectsStatus, setSubjectsStatus] = useState<LoadStatus>("loading");
   const [subjectsError, setSubjectsError] = useState<string | null>(null);
@@ -144,16 +144,6 @@ export function AssignFacultyScreen() {
     return () => clearTimeout(timer);
   }, [loadSubjects]);
 
-  const selectedBatchName = useMemo(
-    () => batches.find((b) => b.id === selectedBatchId)?.name ?? "",
-    [batches, selectedBatchId],
-  );
-
-  function handlePickBatch(batchId: number) {
-    setSelectedBatchId(batchId);
-    setBatchPickerOpen(false);
-  }
-
   function handleAssign(facultyId: number | null) {
     if (!pickerSubject || saving) return;
     setSaving(true);
@@ -231,29 +221,41 @@ export function AssignFacultyScreen() {
           />
         </View>
 
+        {/* Inline chips instead of a popup - "Sem"/"Section" would go here
+            too, but neither exists as a separate field anywhere in this
+            data yet (class_subjects.semester isn't exposed by this
+            endpoint, and section isn't cleanly separable from the free-text
+            class.label) - would need a small backend addition to do
+            properly rather than guessing at a string format. */}
         {batchesStatus === "success" && batches.length > 0 && (
-          <TouchableOpacity
-            style={styles.batchButton}
-            activeOpacity={0.8}
-            onPress={() => setBatchPickerOpen(true)}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterRow}
+            contentContainerStyle={styles.filterRowContent}
           >
-            <Ionicons name="layers-outline" size={16} color="#2F6FE0" />
-            <Text style={styles.batchButtonText} numberOfLines={1}>
-              {selectedBatchName}
-            </Text>
-            <Ionicons name="chevron-down" size={16} color="#B0B7C3" />
-          </TouchableOpacity>
+            {batches.map((batch) => (
+              <TouchableOpacity
+                key={batch.id}
+                style={[styles.filterChip, batch.id === selectedBatchId && styles.filterChipActive]}
+                onPress={() => setSelectedBatchId(batch.id)}
+                activeOpacity={0.85}
+              >
+                <Text
+                  style={[styles.filterChipText, batch.id === selectedBatchId && styles.filterChipTextActive]}
+                >
+                  {batch.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
         )}
 
         {batchesStatus === "success" && batches.length === 0 && (
           <Text style={styles.emptyInlineText}>No batches found for your department.</Text>
         )}
 
-        {subjectsStatus === "loading" && (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#2F6FE0" />
-          </View>
-        )}
+        {subjectsStatus === "loading" && <SkeletonListRows count={4} />}
 
         {subjectsStatus === "error" && (
           <View style={styles.errorNotice}>
@@ -309,29 +311,6 @@ export function AssignFacultyScreen() {
           })}
       </ScrollView>
 
-      <Modal visible={batchPickerOpen} transparent animationType="fade" onRequestClose={() => setBatchPickerOpen(false)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setBatchPickerOpen(false)}>
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>Select Batch</Text>
-            <ScrollView style={styles.modalList}>
-              {batches.map((batch) => (
-                <TouchableOpacity
-                  key={batch.id}
-                  style={styles.modalOptionRow}
-                  onPress={() => handlePickBatch(batch.id)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.modalOptionName}>{batch.name}</Text>
-                  {batch.id === selectedBatchId && (
-                    <Ionicons name="checkmark" size={18} color="#2F6FE0" />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-
       <Modal
         visible={pickerSubject !== null}
         animationType="fade"
@@ -344,11 +323,7 @@ export function AssignFacultyScreen() {
             <Text style={styles.modalSubtitle}>Select a faculty member</Text>
 
             <ScrollView style={styles.modalList}>
-              {facultyOptionsStatus === "loading" && (
-                <View style={styles.inlineLoading}>
-                  <ActivityIndicator color="#2F6FE0" />
-                </View>
-              )}
+              {facultyOptionsStatus === "loading" && <SkeletonListRows count={3} />}
 
               {facultyOptionsStatus === "error" && (
                 <View style={styles.errorNotice}>
@@ -420,8 +395,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -503,31 +476,31 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     color: "#111827",
   },
-  batchButton: {
-    flexDirection: "row",
-    alignItems: "center",
+  filterRow: {
+    marginBottom: 14,
+  },
+  filterRowContent: {
     gap: 8,
-    alignSelf: "flex-start",
+  },
+  filterChip: {
     backgroundColor: "#fff",
     borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
     paddingHorizontal: 14,
     paddingVertical: 9,
-    marginBottom: 14,
-    elevation: 1,
-    shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
   },
-  batchButtonText: {
+  filterChipActive: {
+    backgroundColor: "#2F6FE0",
+    borderColor: "#2F6FE0",
+  },
+  filterChipText: {
     fontSize: 13,
     fontFamily: fonts.bold,
-    color: "#111827",
-    maxWidth: 200,
+    color: "#4B5563",
   },
-  inlineLoading: {
-    paddingVertical: 24,
-    alignItems: "center",
+  filterChipTextActive: {
+    color: "#fff",
   },
   errorNotice: {
     alignItems: "center",

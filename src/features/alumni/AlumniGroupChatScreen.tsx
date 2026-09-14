@@ -15,6 +15,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -167,9 +168,9 @@ export function AlumniGroupChatScreen() {
     >
       <SafeAreaView style={styles.container} edges={[]}>
         {status === "loading" && (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#2F6FE0" />
-          </View>
+          <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
+            <SkeletonListRows count={5} />
+          </ScrollView>
         )}
 
         {status === "error" && (
@@ -297,11 +298,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: fonts.bold,
     color: "#2F6FE0",
-  },
-  inlineLoading: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
   },
   centerState: {
     alignItems: "center",

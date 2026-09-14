@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -157,9 +158,7 @@ export function EnrollFacesScreen() {
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {loadingClasses ? (
-          <View style={styles.emptyState}>
-            <ActivityIndicator color="#2F6FE0" />
-          </View>
+          <SkeletonListRows count={4} />
         ) : mentorClasses.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="shield-outline" size={32} color="#B0B7C3" />
@@ -194,9 +193,7 @@ export function EnrollFacesScreen() {
             </TouchableOpacity>
 
             {rosterLoading ? (
-              <View style={styles.emptyState}>
-                <ActivityIndicator color="#2F6FE0" />
-              </View>
+              <SkeletonListRows count={4} />
             ) : (
               selectedClass && (
                 <View style={styles.card}>
@@ -303,8 +300,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,

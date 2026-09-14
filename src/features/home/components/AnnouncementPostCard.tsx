@@ -90,6 +90,7 @@ export function AnnouncementPostCard({ post }: { post: Announcement }) {
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [comments, setComments] = useState<AnnouncementComment[] | null>(null);
   const [loadingComments, setLoadingComments] = useState(false);
+  const [showAllComments, setShowAllComments] = useState(false);
   const [draft, setDraft] = useState("");
   const [posting, setPosting] = useState(false);
 
@@ -138,6 +139,10 @@ export function AnnouncementPostCard({ post }: { post: Announcement }) {
       // Appended locally rather than refetching the whole thread - the server
       // returned the created row, so a round trip would tell us nothing new.
       setComments((current) => [...(current ?? []), created]);
+      // A comment just added lands at the end of the (oldest-first) list -
+      // without this, posting a 3rd+ comment would hide it behind "View all"
+      // immediately, which reads as if it silently failed.
+      setShowAllComments(true);
       setDraft("");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Couldn't post your comment."));
@@ -192,11 +197,9 @@ export function AnnouncementPostCard({ post }: { post: Announcement }) {
         )}
       </View>
 
-      {post.title.trim().length > 0 && <Text style={styles.title}>{post.title}</Text>}
-      {post.content.trim().length > 0 && <CaptionText text={post.content} />}
-
-      {/* Multi-photo/video carousel (announcement_media). Takes precedence
-          over the legacy single `file_url`, which older posts still use. */}
+      {/* Image first, caption after - matches how a Media Room social post
+          reads (Multi-photo/video carousel takes precedence over the legacy
+          single `file_url`, which older posts still use). */}
       {carousel.length > 0 && <PostMediaCarousel media={carousel} />}
 
       {carousel.length === 0 && looksLikeImage && attachment && (
@@ -223,6 +226,9 @@ export function AnnouncementPostCard({ post }: { post: Announcement }) {
           </Text>
         </TouchableOpacity>
       )}
+
+      {post.title.trim().length > 0 && <Text style={styles.title}>{post.title}</Text>}
+      {post.content.trim().length > 0 && <CaptionText text={post.content} />}
 
       {linkUrl && (
         <TouchableOpacity style={styles.linkRow} onPress={openLink}>
@@ -262,13 +268,20 @@ export function AnnouncementPostCard({ post }: { post: Announcement }) {
               {(comments ?? []).length === 0 && (
                 <Text style={styles.noComments}>No comments yet. Be the first.</Text>
               )}
-              {(comments ?? []).map((comment) => (
+              {(showAllComments ? comments ?? [] : (comments ?? []).slice(0, 2)).map((comment) => (
                 <View key={comment.id} style={styles.commentRow}>
                   <Text style={styles.commentAuthor}>{comment.commenter_name ?? "Someone"}</Text>
                   <Text style={styles.commentText}>{comment.comment_text}</Text>
                   <Text style={styles.commentTime}>{formatRelativeTime(comment.created_at)}</Text>
                 </View>
               ))}
+              {!showAllComments && (comments ?? []).length > 2 && (
+                <TouchableOpacity onPress={() => setShowAllComments(true)}>
+                  <Text style={styles.viewAllComments}>
+                    View all {comments!.length} comments
+                  </Text>
+                </TouchableOpacity>
+              )}
 
               <View style={styles.composerRow}>
                 <TextInput
@@ -495,6 +508,12 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     color: "#9AA1AD",
     marginTop: 2,
+  },
+  viewAllComments: {
+    fontSize: 12.5,
+    fontFamily: fonts.semibold,
+    color: "#2F6FE0",
+    marginBottom: 10,
   },
   composerRow: {
     flexDirection: "row",

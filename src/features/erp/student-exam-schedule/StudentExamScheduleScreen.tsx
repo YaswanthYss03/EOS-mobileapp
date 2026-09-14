@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity, Modal, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, Modal, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { getApiErrorMessage } from "@/services/api/client";
 import { getMyExamSchedule, type MyExamScheduleRow } from "@/services/api/exam-schedule.api";
@@ -123,11 +124,7 @@ export function StudentExamScheduleScreen() {
         <Text style={styles.headerTitle}>Exam schedule</Text>
       </LinearGradient>
 
-      {status === "loading" && (
-        <View style={styles.inlineLoading}>
-          <ActivityIndicator color="#2F6FE0" />
-        </View>
-      )}
+      {status === "loading" && <SkeletonListRows count={5} style={styles.content} />}
 
       {status === "error" && (
         <View style={styles.errorNotice}>
@@ -253,8 +250,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -272,10 +267,6 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
-  },
-  inlineLoading: {
-    paddingVertical: 48,
-    alignItems: "center",
   },
   errorNotice: {
     alignItems: "center",

@@ -1,28 +1,39 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { useRole } from "@/hooks/useRole";
 import { getMyTeachingSubjects, type LmsTeachingSubject } from "@/services/api/lms.api";
 import { SegmentedTabs } from "./SegmentedTabs";
-import { StudentMaterialTab } from "./student/StudentMaterialTab";
 import { StudentTaskTab } from "./student/StudentTaskTab";
-import { StudentLessonPlanTab } from "./student/StudentLessonPlanTab";
+import { StudentLessonsTab } from "./student/StudentLessonsTab";
 import { FacultyMaterialTab } from "./faculty/FacultyMaterialTab";
 import { FacultyTaskTab } from "./faculty/FacultyTaskTab";
 import { FacultyLessonPlanTab } from "./faculty/FacultyLessonPlanTab";
 
-type TabKey = "material" | "task" | "lesson-plan";
+type FacultyTabKey = "material" | "task" | "lesson-plan";
+type StudentTabKey = "task" | "lessons";
+type TabKey = FacultyTabKey | StudentTabKey;
 
-const TABS: { key: TabKey; label: string }[] = [
+const FACULTY_TABS: { key: FacultyTabKey; label: string }[] = [
   { key: "material", label: "Material" },
   { key: "task", label: "Task" },
   { key: "lesson-plan", label: "Lesson plan" },
+];
+
+// Student's own "Lesson plan" and "Material" tabs are merged into one
+// "Lessons" tab (each syllabus session expands to show its own matched
+// material) - see StudentLessonsTab. Faculty/HoD keep all 3 tabs above,
+// unchanged - they still manage folders and the lesson plan separately.
+const STUDENT_TABS: { key: StudentTabKey; label: string }[] = [
+  { key: "task", label: "Task" },
+  { key: "lessons", label: "Lessons" },
 ];
 
 function subjectInitials(name?: string) {
@@ -70,7 +81,7 @@ export function LmsSubjectScreen({
     }, [navigation]),
   );
 
-  const [tab, setTab] = useState<TabKey>("material");
+  const [tab, setTab] = useState<TabKey>(isTeaching ? "material" : "task");
   const [classes, setClasses] = useState<{ class_id: number; label: string }[]>([]);
   const [classId, setClassId] = useState<number | null>(null);
   const [classesStatus, setClassesStatus] = useState<"loading" | "success" | "error">(
@@ -123,12 +134,10 @@ export function LmsSubjectScreen({
         </View>
       </View>
 
-      <SegmentedTabs tabs={TABS} active={tab} onChange={setTab} />
+      <SegmentedTabs tabs={isTeaching ? FACULTY_TABS : STUDENT_TABS} active={tab} onChange={setTab} />
 
       {isTeaching && classesStatus === "loading" && (
-        <View style={styles.centerFill}>
-          <ActivityIndicator color="#2F6FE0" />
-        </View>
+        <SkeletonListRows count={4} style={styles.skeletonWrap} />
       )}
 
       {isTeaching && classesStatus === "error" && (
@@ -174,9 +183,8 @@ export function LmsSubjectScreen({
 
       {!isTeaching && (
         <>
-          {tab === "material" && <StudentMaterialTab subjectId={subjectId} />}
           {tab === "task" && <StudentTaskTab subjectId={subjectId} />}
-          {tab === "lesson-plan" && <StudentLessonPlanTab subjectId={subjectId} />}
+          {tab === "lessons" && <StudentLessonsTab subjectId={subjectId} />}
         </>
       )}
     </SafeAreaView>
@@ -194,8 +202,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -262,11 +268,9 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     letterSpacing: 0.3,
   },
-  centerFill: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 32,
+  skeletonWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
   },
   errorText: {
     fontSize: 13,

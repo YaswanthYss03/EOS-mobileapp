@@ -7,6 +7,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { useRole } from "@/hooks/useRole";
 import { toast } from "@/utils/toast";
@@ -242,9 +243,7 @@ export function AppraisalRequestScreen() {
 
         {tab === "apply" ? (
           criteriaStatus === "loading" ? (
-            <View style={styles.inlineLoading}>
-              <ActivityIndicator color="#2F6FE0" />
-            </View>
+            <SkeletonListRows count={3} />
           ) : criteriaStatus === "error" ? (
             <View style={styles.errorNotice}>
               <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
@@ -289,9 +288,7 @@ export function AppraisalRequestScreen() {
             </>
           )
         ) : historyStatus === "loading" ? (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#2F6FE0" />
-          </View>
+          <SkeletonListRows count={4} />
         ) : historyStatus === "error" ? (
           <View style={styles.errorNotice}>
             <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
@@ -469,8 +466,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -766,10 +761,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: fonts.medium,
     color: "#9AA6B2",
-  },
-  inlineLoading: {
-    paddingVertical: 48,
-    alignItems: "center",
   },
   errorNotice: {
     alignItems: "center",

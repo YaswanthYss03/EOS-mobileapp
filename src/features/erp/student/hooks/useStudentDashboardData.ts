@@ -30,6 +30,10 @@ export type CardStat = {
 
 export type StudentDashboardData = {
   classSection: string | null;
+  // null while the hostel-room lookup is still in flight - the Campus grid
+  // holds off rendering the Hostel tile until this resolves, rather than
+  // flashing it for a dayscholar before hiding it again.
+  isHostelResident: boolean | null;
   attendance: CardStat;
   performance: CardStat;
   fees: CardStat;
@@ -57,6 +61,7 @@ function toDateOnly(date: Date): string {
 export function useStudentDashboardData(): StudentDashboardData {
   const [data, setData] = useState<StudentDashboardData>({
     classSection: null,
+    isHostelResident: null,
     attendance: LOADING,
     performance: LOADING,
     fees: LOADING,
@@ -164,6 +169,7 @@ export function useStudentDashboardData(): StudentDashboardData {
     getMyHostelRoom()
       .then((room) => {
         set({
+          isHostelResident: room.is_hostel_resident,
           hostel: {
             value: room.is_hostel_resident ? room.room_number ?? "Allotted" : "Not allotted",
             subtitle: room.hostel_name ?? "",
@@ -172,6 +178,10 @@ export function useStudentDashboardData(): StudentDashboardData {
           },
         });
       })
+      // isHostelResident is left unset (null) on failure - StudentDashboard
+      // only renders the Hostel tile once it's confirmed true, so a
+      // dayscholar never sees it and a hostel resident just sees it appear
+      // a beat late on a retry rather than a wrong/stale value now.
       .catch(() => set({ hostel: FAILED }));
 
     getMyBorrowRecords("borrowed")

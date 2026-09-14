@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { getApiErrorMessage } from "@/services/api/client";
 import { listAlumniBatches, type AlumniBatchSummary } from "@/services/api/alumni.api";
@@ -98,11 +99,7 @@ export function AlumniScreen() {
         </View>
       </View>
 
-      {status === "loading" && (
-        <View style={styles.inlineLoading}>
-          <ActivityIndicator color="#2F6FE0" />
-        </View>
-      )}
+      {status === "loading" && <SkeletonListRows count={5} style={styles.skeletonWrap} />}
 
       {status === "error" && (
         <View style={styles.centerState}>
@@ -185,9 +182,9 @@ const styles = StyleSheet.create({
     color: "#D7E2FA",
     marginTop: 2,
   },
-  inlineLoading: {
-    paddingVertical: 60,
-    alignItems: "center",
+  skeletonWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
   },
   centerState: {
     alignItems: "center",

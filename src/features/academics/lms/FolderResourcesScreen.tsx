@@ -18,6 +18,7 @@ import * as Linking from "expo-linking";
 import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { useRole } from "@/hooks/useRole";
 import { toast } from "@/utils/toast";
@@ -140,7 +141,11 @@ export function FolderResourcesScreen({ folderId, title }: { folderId: number; t
 
   function handleOpen(resource: LmsResource) {
     const url = resource.resource_type === "file" ? resource.file_url : resource.link_url;
-    if (url) Linking.openURL(url).catch(() => toast.error("Couldn't open that item"));
+    if (!url) {
+      toast.error("This item has no file or link attached yet");
+      return;
+    }
+    Linking.openURL(url).catch(() => toast.error("Couldn't open that item"));
   }
 
   async function handleCopyLink(url: string) {
@@ -195,11 +200,7 @@ export function FolderResourcesScreen({ folderId, title }: { folderId: number; t
         </View>
       )}
 
-      {status === "loading" && (
-        <View style={styles.centerFill}>
-          <ActivityIndicator color="#2F6FE0" />
-        </View>
-      )}
+      {status === "loading" && <SkeletonListRows count={4} style={styles.list} />}
 
       {status === "error" && (
         <View style={styles.centerFill}>
@@ -327,8 +328,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,

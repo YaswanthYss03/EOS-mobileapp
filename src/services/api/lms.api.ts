@@ -13,6 +13,12 @@ export type LmsSubject = {
   subject_code: string;
 };
 
+// getMySubjects (student) additionally resolves each subject's teaching
+// faculty (null if no faculty_subject_class_mapping row exists yet for that
+// subject/class) - getMyTeachingSubjects (faculty) has no such field, so
+// this isn't on the shared LmsSubject base.
+export type LmsStudentSubject = LmsSubject & { faculty_name: string | null };
+
 export type LmsTeachingSubject = LmsSubject & {
   classes: { class_id: number; label: string }[];
 };
@@ -92,8 +98,8 @@ export type LmsLessonPlan = {
 
 // --- Student ---
 
-export async function getMyLmsSubjects(): Promise<LmsSubject[]> {
-  const { data } = await apiClient.get<{ data: LmsSubject[] }>("/me/lms/subjects");
+export async function getMyLmsSubjects(): Promise<LmsStudentSubject[]> {
+  const { data } = await apiClient.get<{ data: LmsStudentSubject[] }>("/me/lms/subjects");
   return data.data;
 }
 

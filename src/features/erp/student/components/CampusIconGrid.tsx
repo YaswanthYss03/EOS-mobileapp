@@ -6,9 +6,11 @@ import type { CampusItem } from "../types";
 
 const ICON_COLOR = "#2F6FE0";
 
-// Student-only "Campus" grid - 3-per-row circular icons with a label and a
-// bold value line underneath. Local to the student dashboard so the shared
-// QuickAccessGrid (used by every other role) stays untouched.
+// Student-only "Campus" grid - 3-per-row circular icons with just a label
+// underneath (no value line - see CampusItem's own `value` field, still
+// computed by useStudentDashboardData but no longer rendered here). Local
+// to the student dashboard so the shared QuickAccessGrid (used by every
+// other role) stays untouched.
 export function CampusIconGrid({ items }: { items: CampusItem[] }) {
   const router = useRouter();
 
@@ -30,9 +32,6 @@ export function CampusIconGrid({ items }: { items: CampusItem[] }) {
           <Text style={styles.label} numberOfLines={1}>
             {item.label}
           </Text>
-          <Text style={styles.value} numberOfLines={1}>
-            {item.value}
-          </Text>
         </Pressable>
       ))}
     </View>
@@ -48,7 +47,7 @@ const styles = StyleSheet.create({
     width: "33.33%",
     alignItems: "center",
     gap: 4,
-    paddingVertical: 14,
+    paddingVertical: 6,
   },
   iconWrap: {
     width: 60,
@@ -63,10 +62,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: fonts.regular,
     color: "#8A93A3",
-  },
-  value: {
-    fontSize: 14,
-    fontFamily: fonts.bold,
-    color: "#1E3A8A",
   },
 });

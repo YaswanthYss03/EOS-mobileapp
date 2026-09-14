@@ -4,19 +4,21 @@ import {
   Text,
   FlatList,
   TouchableOpacity,
-  ActivityIndicator,
   RefreshControl,
   StyleSheet,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import * as Linking from "expo-linking";
 import { Ionicons } from "@expo/vector-icons";
+import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
-import { formatRelativeTime } from "@/utils/calendar";
+import { formatDate } from "@/utils/calendar";
 import { getAnnouncements, type Announcement } from "@/services/api/announcements.api";
 
 type LoadStatus = "loading" | "success" | "error";
@@ -26,12 +28,89 @@ function isRecent(isoTimestamp: string): boolean {
   return Date.now() - new Date(isoTimestamp).getTime() < NEW_BADGE_WINDOW_MS;
 }
 
+// A role account with no personal faculty/student record (Billing, IQAC,
+// Placement, ...) resolves `posted_by.name` to its raw login email
+// server-side (see AnnouncementAuthor's own doc comment) - fine as data,
+// but showing "billing@sece.ac.in" as a sender in a feed card looks broken.
+// This is purely a display label for those cases; a real person's name
+// (faculty/HoD/student) is shown exactly as the server resolved it.
+const ROLE_OFFICE_LABEL: Record<string, string> = {
+  admin: "Admin Office",
+  principal: "Principal's Office",
+  hod: "HoD Office",
+  placement: "Placement Cell",
+  billing: "Accounts Office",
+  hr_payroll: "HR & Payroll",
+  finance: "Finance Office",
+  iqac: "IQAC",
+  secretary: "Secretary's Office",
+  gate_warden: "Gate Office",
+  warden: "Hostel Warden",
+  media_room: "Media Room",
+  academic_coordinator: "Academic Coordinator",
+  alumni: "Alumni Cell",
+  transport: "Transport Desk",
+  higheredu: "Higher Education Cell",
+  medical_centre: "Medical Centre",
+  sports_admin: "Sports Department",
+  edc_coordinator: "EDC",
+  coe: "Controller of Examinations",
+  library: "Library",
+};
+
+function senderDisplayName(announcement: Announcement): string {
+  const poster = announcement.posted_by;
+  if (!poster) return "College Notice";
+  // A real person's name never contains "@" - only the email fallback does.
+  if (!poster.name.includes("@")) return poster.name;
+  return (
+    ROLE_OFFICE_LABEL[poster.role] ??
+    poster.role
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ")
+  );
+}
+
+function initialsFromName(name: string) {
+  const words = name.trim().split(/\s+/);
+  return words
+    .slice(0, 2)
+    .map((word) => word.charAt(0).toUpperCase())
+    .join("");
+}
+
+const CATEGORY_LABEL: Record<string, string> = {
+  academic: "Academic",
+  department: "Department",
+  emergency: "Emergency",
+  event: "Event",
+  general: "Notice",
+};
+
+function categoryLabel(category: Announcement["category"]): string {
+  return category ? (CATEGORY_LABEL[category] ?? category) : "Notice";
+}
+
 // "View All" destination from the Home tab's Announcements carousel - the
 // full, unpaginated list of every announcement visible to this caller (see
 // AnnouncementsSection's own doc comment on why no pagination is needed).
 export function AnnouncementsListScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+
+  // This screen renders its own full header below, so hide the shared
+  // Home tab header while it's focused - same pattern as the sibling
+  // NotificationsScreen.
+  useFocusEffect(
+    useCallback(() => {
+      navigation.getParent()?.setOptions({ headerShown: false });
+      return () => {
+        navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
+      };
+    }, [navigation]),
+  );
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [error, setError] = useState<string | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
@@ -78,7 +157,14 @@ export function AnnouncementsListScreen() {
         >
           <Ionicons name="arrow-back" size={20} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Announcements</Text>
+        <View>
+          <Text style={styles.headerTitle}>Notice</Text>
+          {status === "success" && (
+            <Text style={styles.headerSubtitle}>
+              {announcements.length} {announcements.length === 1 ? "notice" : "notices"}
+            </Text>
+          )}
+        </View>
       </LinearGradient>
 
       {status === "error" ? (
@@ -100,9 +186,7 @@ export function AnnouncementsListScreen() {
           )}
           ListEmptyComponent={
             status === "loading" ? (
-              <View style={styles.centerState}>
-                <ActivityIndicator color="#2F6FE0" />
-              </View>
+              <SkeletonListRows count={4} />
             ) : (
               <View style={styles.centerState}>
                 <Ionicons name="megaphone-outline" size={32} color="#B0B7C3" />
@@ -116,13 +200,6 @@ export function AnnouncementsListScreen() {
   );
 }
 
-const TARGET_AUDIENCE_LABEL: Record<Announcement["target_audience"], string> = {
-  students: "Students",
-  teachers: "Faculty",
-  parents: "Parents",
-  roles: "Selected roles",
-};
-
 function AnnouncementListItem({
   announcement,
   onOpenAttachment,
@@ -130,20 +207,32 @@ function AnnouncementListItem({
   announcement: Announcement;
   onOpenAttachment: () => void;
 }) {
+  const sender = senderDisplayName(announcement);
+
   return (
     <View style={styles.card}>
       <View style={styles.cardTopRow}>
-        {isRecent(announcement.created_at) && (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>NEW</Text>
+        <View style={styles.senderAvatar}>
+          <Text style={styles.senderAvatarText}>{initialsFromName(sender)}</Text>
+        </View>
+        <View style={styles.senderTextWrap}>
+          <View style={styles.senderNameRow}>
+            <Text style={styles.senderName} numberOfLines={1}>
+              {sender}
+            </Text>
+            {isRecent(announcement.created_at) && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>NEW</Text>
+              </View>
+            )}
           </View>
-        )}
-        <Text style={styles.audiencePill}>{TARGET_AUDIENCE_LABEL[announcement.target_audience]}</Text>
+          <Text style={styles.senderDate}>{formatDate(new Date(announcement.created_at))}</Text>
+        </View>
+        <Text style={styles.categoryPill}>{categoryLabel(announcement.category)}</Text>
       </View>
 
       <Text style={styles.cardTitle}>{announcement.title}</Text>
       <Text style={styles.cardContent}>{announcement.content}</Text>
-      <Text style={styles.cardMeta}>{formatRelativeTime(announcement.created_at)}</Text>
 
       {announcement.file_url && (
         <TouchableOpacity style={styles.attachmentRow} onPress={onOpenAttachment} activeOpacity={0.8}>
@@ -169,8 +258,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -184,6 +271,12 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 18,
     fontFamily: fonts.bold,
+  },
+  headerSubtitle: {
+    color: "#D7E2FA",
+    fontSize: 12,
+    fontFamily: fonts.medium,
+    marginTop: 2,
   },
   list: {
     padding: 16,
@@ -235,9 +328,42 @@ const styles = StyleSheet.create({
   },
   cardTopRow: {
     flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    marginBottom: 10,
+  },
+  senderAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#EAF0FD",
     alignItems: "center",
-    gap: 8,
-    marginBottom: 8,
+    justifyContent: "center",
+  },
+  senderAvatarText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+  },
+  senderTextWrap: {
+    flex: 1,
+  },
+  senderNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  senderName: {
+    flexShrink: 1,
+    fontSize: 13.5,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+  },
+  senderDate: {
+    fontSize: 11.5,
+    fontFamily: fonts.medium,
+    color: "#9AA6B2",
+    marginTop: 2,
   },
   badge: {
     backgroundColor: "#1A3D8F",
@@ -251,7 +377,7 @@ const styles = StyleSheet.create({
     color: "#fff",
     letterSpacing: 0.5,
   },
-  audiencePill: {
+  categoryPill: {
     fontSize: 11,
     fontFamily: fonts.semibold,
     color: "#2F6FE0",
@@ -271,12 +397,6 @@ const styles = StyleSheet.create({
     color: "#4B5563",
     marginTop: 6,
     lineHeight: 19,
-  },
-  cardMeta: {
-    fontSize: 12,
-    fontFamily: fonts.medium,
-    color: "#9AA6B2",
-    marginTop: 10,
   },
   attachmentRow: {
     flexDirection: "row",

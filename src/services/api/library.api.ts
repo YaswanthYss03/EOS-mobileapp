@@ -28,6 +28,18 @@ export async function getMyBorrowRecords(status?: BorrowStatus): Promise<MyBorro
   return data.data;
 }
 
+// GET /me/library/staff-borrow-records - HR Payroll/Secretary's own borrow
+// history, keyed by staff_user_id rather than a faculty/student row (these
+// roles have no faculty row to self-scope through, unlike Employee/HoD -
+// see getMyFacultyBorrowRecords below, which 403s for them). Same response
+// shape as the student endpoint above, just a different backing column.
+export async function getMyStaffBorrowRecords(status?: BorrowStatus): Promise<MyBorrowRecord[]> {
+  const { data } = await apiClient.get<{ data: MyBorrowRecord[] }>("/me/library/staff-borrow-records", {
+    params: status ? { status } : undefined,
+  });
+  return data.data;
+}
+
 // GET /library/borrow-records has no @Roles restriction and auto-scopes by
 // the caller's own role (student -> student_id, faculty -> faculty_id) - see
 // BorrowRecordsService.findAll. This is how a FACULTY member sees their own

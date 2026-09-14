@@ -34,6 +34,32 @@ export async function getMyTimetableAsFaculty(): Promise<MyTimetableDay[]> {
   return data.data.days;
 }
 
+// GET /me/classes/today (Faculty/HoD) - see
+// EOS-backend/src/modules/faculty/timetable/timetable.service.ts
+// findTodayForFaculty(). Unlike MyTimetableSlot above, each row here
+// includes subject_id/class_id - needed for the Online Class "Start"
+// action (POST /online-classes/start), which getMyTimetableAsFaculty()'s
+// shape can't provide.
+export type MyTodayClassSlot = {
+  id: number;
+  period_number: number;
+  start_time: string;
+  end_time: string;
+  subject_id: number;
+  subject_name: string;
+  subject_code: string;
+  course_type: string | null;
+  class_id: number;
+  class_section: string;
+  semester: number | null;
+  department_name: string;
+};
+
+export async function getMyClassesToday(): Promise<MyTodayClassSlot[]> {
+  const { data } = await apiClient.get<{ data: MyTodayClassSlot[] }>("/me/classes/today");
+  return data.data;
+}
+
 // GET /me/lms-notes?subject_id= is a shared Faculty/Student read (see
 // EOS-backend/src/modules/faculty/lms-notes/lms-notes.controller.ts - the
 // controller's own doc comments say "/lms-notes" but it's actually

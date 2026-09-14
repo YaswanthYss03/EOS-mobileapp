@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   View,
   Text,
   ScrollView,
@@ -15,6 +14,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonIconGrid } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -224,8 +224,8 @@ export function MedicalAppointmentSlotsScreen() {
       <SlotsHeader onBack={() => router.back()} dateLabel={dateLabel} />
 
       {status === "loading" && (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#2F6FE0" />
+        <View style={styles.content}>
+          <SkeletonIconGrid count={6} />
         </View>
       )}
 
@@ -342,8 +342,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   headerTextBlock: {
     flex: 1,

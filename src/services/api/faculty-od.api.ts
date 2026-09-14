@@ -56,8 +56,11 @@ export async function createFacultyOd(payload: CreateFacultyOdPayload): Promise<
 }
 
 export async function listFacultyOd(): Promise<MyFacultyOd[]> {
+  // mine:true - self-service screen, always the caller's own requests, even
+  // for a HoD (who would otherwise get their department review queue back
+  // from this same endpoint - see faculty-od.service.ts's findAll).
   const { data } = await apiClient.get<{ data: { data: MyFacultyOd[] } }>("/me/faculty-od", {
-    params: { limit: 100 },
+    params: { limit: 100, mine: true },
   });
   return data.data.data;
 }

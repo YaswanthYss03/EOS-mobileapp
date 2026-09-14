@@ -1,26 +1,41 @@
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, View, Text, ScrollView, TextInput, TouchableOpacity, Linking, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TextInput, TouchableOpacity, Linking, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
+import { useRole } from "@/hooks/useRole";
 import {
   searchBooks,
   searchEResources,
   getMyFacultyBorrowRecords,
+  getMyStaffBorrowRecords,
   type LibraryBook,
   type EResource,
-  type FacultyBorrowRecord,
 } from "@/services/api/library.api";
 import { libraryInfo } from "./data/mockLibrary";
 
 type Tab = "search" | "e-resources" | "borrowed" | "history";
 type LoadStatus = "loading" | "success" | "error";
+
+// Faculty/HoD's own record shape (faculty_id-scoped, nested `book`) and HR
+// Payroll/Secretary's (staff_user_id-scoped, flat) don't match - normalized
+// to this one shape before hitting state, so the render below doesn't need
+// to care which endpoint a given role actually called.
+type BorrowedItem = {
+  id: number;
+  title: string;
+  borrowed_date: string;
+  due_date: string;
+  returned_date: string | null;
+  is_overdue: boolean;
+};
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "search", label: "Search" },
@@ -33,19 +48,31 @@ function formatShortDate(dateOnly: string): string {
   return new Date(dateOnly).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-// Wired to GET /library/books, GET /library/e-resources and GET
-// /library/borrow-records (real books/e_resources/book_borrow_records rows).
-// The borrow-records endpoint has no @Roles restriction and auto-scopes to
-// the caller's own faculty_id when role is faculty (distinct from the
-// student-only /me/library/borrow-records used by erp/student-library).
-// There is no faculty-callable renew/return action anywhere in the backend
-// (those mutations are library/admin only), so Renew shows an honest notice
-// instead of a fake success. Reachable from the Employee-section "Library"
-// item on both the Employee/Faculty and HoD dashboards.
+// Wired to GET /library/books, GET /library/e-resources and one of two real
+// book_borrow_records-backed endpoints for Borrowed/History, depending on
+// who's asking: Employee/HoD go through GET /library/borrow-records
+// (@Roles(..., 'faculty', 'hod'), self-scoped to the caller's own
+// faculty_id - a HoD account has a real faculty row of its own); HR
+// Payroll/Secretary have no faculty row at all, so they go through GET
+// /me/library/staff-borrow-records instead (self-scoped to staff_user_id -
+// see getMyStaffBorrowRecords). Both responses get normalized into the same
+// local BorrowedItem shape before hitting state, since the two backend
+// shapes don't match (nested `book` vs flat). There is no self-service
+// renew/return action anywhere in the backend for any of these roles (those
+// mutations are library/admin only), so Renew shows an honest notice
+// instead of a fake success. Reachable from the shared Employee-section
+// "Library" item on the Employee/Faculty, HoD, HR Payroll, and Secretary
+// dashboards alike.
 export function LibraryScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const role = useRole();
+  // HR Payroll/Secretary have no faculty row to self-scope through (see
+  // GET /me/library/staff-borrow-records's own doc comment) - every other
+  // role reaching this screen (Employee/HoD) uses the faculty_id-scoped
+  // /library/borrow-records instead.
+  const isStaffBorrower = role === "hr-payroll" || role === "secretary";
   const [tab, setTab] = useState<Tab>("search");
   const [search, setSearch] = useState("");
 
@@ -57,11 +84,11 @@ export function LibraryScreen() {
 
   const [borrowedStatus, setBorrowedStatus] = useState<LoadStatus>("loading");
   const [borrowedError, setBorrowedError] = useState<string | null>(null);
-  const [borrowed, setBorrowed] = useState<FacultyBorrowRecord[]>([]);
+  const [borrowed, setBorrowed] = useState<BorrowedItem[]>([]);
 
   const [historyStatus, setHistoryStatus] = useState<LoadStatus>("loading");
   const [historyError, setHistoryError] = useState<string | null>(null);
-  const [history, setHistory] = useState<FacultyBorrowRecord[]>([]);
+  const [history, setHistory] = useState<BorrowedItem[]>([]);
 
   useEffect(() => {
     setCatalogueStatus("loading");
@@ -89,7 +116,28 @@ export function LibraryScreen() {
   const loadBorrowed = useCallback(() => {
     setBorrowedStatus("loading");
     setBorrowedError(null);
-    getMyFacultyBorrowRecords("borrowed")
+    const request = isStaffBorrower
+      ? getMyStaffBorrowRecords("borrowed").then((rows) =>
+          rows.map((r) => ({
+            id: r.id,
+            title: r.title,
+            borrowed_date: r.borrowed_date,
+            due_date: r.due_date,
+            returned_date: r.returned_date,
+            is_overdue: r.status === "borrowed" && new Date(r.due_date) < new Date(),
+          })),
+        )
+      : getMyFacultyBorrowRecords("borrowed").then((rows) =>
+          rows.map((r) => ({
+            id: r.id,
+            title: r.book.title,
+            borrowed_date: r.borrowed_date,
+            due_date: r.due_date,
+            returned_date: r.returned_date,
+            is_overdue: r.is_overdue,
+          })),
+        );
+    request
       .then((rows) => {
         setBorrowed(rows);
         setBorrowedStatus("success");
@@ -98,12 +146,33 @@ export function LibraryScreen() {
         setBorrowedError(getApiErrorMessage(err, "Couldn't load your borrowed books."));
         setBorrowedStatus("error");
       });
-  }, []);
+  }, [isStaffBorrower]);
 
   const loadHistory = useCallback(() => {
     setHistoryStatus("loading");
     setHistoryError(null);
-    getMyFacultyBorrowRecords("returned")
+    const request = isStaffBorrower
+      ? getMyStaffBorrowRecords("returned").then((rows) =>
+          rows.map((r) => ({
+            id: r.id,
+            title: r.title,
+            borrowed_date: r.borrowed_date,
+            due_date: r.due_date,
+            returned_date: r.returned_date,
+            is_overdue: false,
+          })),
+        )
+      : getMyFacultyBorrowRecords("returned").then((rows) =>
+          rows.map((r) => ({
+            id: r.id,
+            title: r.book.title,
+            borrowed_date: r.borrowed_date,
+            due_date: r.due_date,
+            returned_date: r.returned_date,
+            is_overdue: r.is_overdue,
+          })),
+        );
+    request
       .then((rows) => {
         setHistory(rows);
         setHistoryStatus("success");
@@ -112,7 +181,7 @@ export function LibraryScreen() {
         setHistoryError(getApiErrorMessage(err, "Couldn't load your library history."));
         setHistoryStatus("error");
       });
-  }, []);
+  }, [isStaffBorrower]);
 
   useEffect(() => {
     loadBorrowed();
@@ -260,7 +329,7 @@ export function LibraryScreen() {
               {borrowed.map((book) => (
                 <View key={book.id} style={styles.card}>
                   <View style={styles.borrowedHeader}>
-                    <Text style={styles.bookTitle}>{book.book.title}</Text>
+                    <Text style={styles.bookTitle}>{book.title}</Text>
                     <View style={[styles.statusBadge, book.is_overdue && styles.statusBadgeOverdue]}>
                       <Text
                         style={[styles.statusBadgeText, book.is_overdue && styles.statusBadgeTextOverdue]}
@@ -299,7 +368,7 @@ export function LibraryScreen() {
             >
               {history.map((entry) => (
                 <View key={entry.id} style={styles.card}>
-                  <Text style={styles.bookTitle}>{entry.book.title}</Text>
+                  <Text style={styles.bookTitle}>{entry.title}</Text>
                   <Text style={styles.bookMeta}>
                     Borrowed {formatShortDate(entry.borrowed_date)}
                     {entry.returned_date ? ` · Returned ${formatShortDate(entry.returned_date)}` : ""}
@@ -332,11 +401,7 @@ function AsyncSection({
   children: React.ReactNode;
 }) {
   if (status === "loading") {
-    return (
-      <View style={styles.inlineLoading}>
-        <ActivityIndicator color="#2F6FE0" />
-      </View>
-    );
+    return <SkeletonListRows count={4} />;
   }
   if (status === "error") {
     return (
@@ -371,8 +436,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -540,10 +603,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: fonts.medium,
     color: "#9AA6B2",
-  },
-  inlineLoading: {
-    paddingVertical: 40,
-    alignItems: "center",
   },
   errorNotice: {
     alignItems: "center",

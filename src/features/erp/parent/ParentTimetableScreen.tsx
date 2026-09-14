@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { Ionicons } from "@expo/vector-icons";
+import { SkeletonDetailBlock, SkeletonListRows, SkeletonStatCards } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { getChildTimetable } from "@/services/api/parents.api";
 import type { MyTimetableDay, MyTimetableSlot } from "@/services/api/current-semester.api";
@@ -147,7 +148,14 @@ export function ParentTimetableScreen() {
             weekDates={weekDates}
             selectedIndex={selectedIndex}
             onSelectDay={(index) => setSelectedDayOfWeek(index + 1)}
-            onBack={() => router.back()}
+            // This screen is parent-only (rendered by app/(tabs)/academics/
+            // timetable/index.tsx's own role check), and parent now only
+            // reaches it via a Campus tab tile (Class tab is hidden for
+            // this role) - same cross-tab stale-Stack-history reasoning as
+            // the shared TimetableScreen's identical comment, so this
+            // always goes straight to Campus rather than a plain
+            // router.back().
+            onBack={() => router.replace("/(tabs)/erp")}
           />
         ),
       });
@@ -172,11 +180,7 @@ export function ParentTimetableScreen() {
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {childrenStatus === "loading" && (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#2F6FE0" />
-          </View>
-        )}
+        {childrenStatus === "loading" && <SkeletonDetailBlock />}
 
         {childrenStatus === "error" && (
           <View style={styles.errorNotice}>
@@ -200,9 +204,10 @@ export function ParentTimetableScreen() {
             <ChildSelector children={children} selected={selectedChild} onSelect={(c) => setSelectedChildId(c.id)} />
 
             {status === "loading" && (
-              <View style={styles.inlineLoading}>
-                <ActivityIndicator color="#2F6FE0" />
-              </View>
+              <>
+                <SkeletonStatCards count={3} style={{ marginBottom: 20 }} />
+                <SkeletonListRows count={3} />
+              </>
             )}
 
             {status === "error" && (
@@ -314,8 +319,6 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: 16,
     paddingBottom: 16,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   headerTopRow: {
     flexDirection: "row",
@@ -377,10 +380,6 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
-  },
-  inlineLoading: {
-    paddingVertical: 48,
-    alignItems: "center",
   },
   errorNotice: {
     alignItems: "center",

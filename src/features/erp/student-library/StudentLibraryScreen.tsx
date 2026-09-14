@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Linking, View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet } from "react-native";
+import { Linking, View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { getApiErrorMessage } from "@/services/api/client";
 import {
@@ -274,11 +275,7 @@ function AsyncSection({
   children: React.ReactNode;
 }) {
   if (status === "loading") {
-    return (
-      <View style={styles.inlineLoading}>
-        <ActivityIndicator color="#2F6FE0" />
-      </View>
-    );
+    return <SkeletonListRows count={4} />;
   }
   if (status === "error") {
     return (
@@ -403,8 +400,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -422,10 +417,6 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
-  },
-  inlineLoading: {
-    paddingVertical: 32,
-    alignItems: "center",
   },
   errorNotice: {
     alignItems: "center",

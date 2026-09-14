@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonDetailBlock, SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { getChildAcademicCalendar } from "@/services/api/parents.api";
 import type { CalendarEventType, MyAcademicCalendar, MyCalendarEvent } from "@/services/api/academic-calendar.api";
@@ -115,7 +116,13 @@ export function ParentCalendarScreen() {
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({
-        header: () => <AcademicCalendarHeader onBack={() => router.back()} calendar={calendar} />,
+        // This screen is parent-only, and parent now only reaches it via a
+        // Campus tab tile (Class tab is hidden for this role) - same
+        // cross-tab stale-Stack-history reasoning as the shared
+        // AcademicCalendarScreen's identical comment.
+        header: () => (
+          <AcademicCalendarHeader onBack={() => router.replace("/(tabs)/erp")} calendar={calendar} />
+        ),
       });
       return () => {
         navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
@@ -158,11 +165,7 @@ export function ParentCalendarScreen() {
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {childrenStatus === "loading" && (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#2F6FE0" />
-          </View>
-        )}
+        {childrenStatus === "loading" && <SkeletonDetailBlock />}
 
         {childrenStatus === "error" && (
           <View style={styles.errorNotice}>
@@ -186,9 +189,10 @@ export function ParentCalendarScreen() {
             <ChildSelector children={children} selected={selectedChild} onSelect={(c) => setSelectedChildId(c.id)} />
 
             {status === "loading" && (
-              <View style={styles.inlineLoading}>
-                <ActivityIndicator color="#2F6FE0" />
-              </View>
+              <>
+                <SkeletonDetailBlock style={{ marginBottom: 20 }} />
+                <SkeletonListRows count={3} />
+              </>
             )}
 
             {status === "error" && (
@@ -291,8 +295,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -316,10 +318,6 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
-  },
-  inlineLoading: {
-    paddingVertical: 48,
-    alignItems: "center",
   },
   errorNotice: {
     alignItems: "center",

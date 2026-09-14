@@ -8,8 +8,9 @@ import { fonts } from "@/theme";
 // swapped in for the shared CollegeHeader (logo + college name + tagline)
 // while that role's dashboard is focused, same useFocusEffect pattern each
 // dashboard already used individually before this was extracted. Title is
-// always "EOS" (not the college name/logo) - only the subtitle varies per role.
-export function DashboardHeader({ subtitle, onBack }: { subtitle: string; onBack: () => void }) {
+// always "Class" (matches this tab's own bottom-bar label, not the college
+// name/logo) - subtitle is optional per role (Student's own dashboard omits it).
+export function DashboardHeader({ subtitle, onBack }: { subtitle?: string; onBack: () => void }) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -27,8 +28,8 @@ export function DashboardHeader({ subtitle, onBack }: { subtitle: string; onBack
         <Ionicons name="arrow-back" size={20} color="#fff" />
       </TouchableOpacity>
       <View>
-        <Text style={styles.title}>EOS</Text>
-        <Text style={styles.subtitle}>{subtitle}</Text>
+        <Text style={styles.title}>Class</Text>
+        {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
       </View>
     </LinearGradient>
   );
@@ -41,8 +42,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,

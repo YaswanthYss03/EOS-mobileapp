@@ -1,11 +1,12 @@
 import { useCallback, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { useRole } from "@/hooks/useRole";
 import { getMyLmsSubjects, getMyTeachingSubjects, type LmsSubject, type LmsTeachingSubject } from "@/services/api/lms.api";
@@ -91,11 +92,7 @@ export function LmsScreen() {
         <Text style={styles.headerTitle}>Learning management</Text>
       </LinearGradient>
 
-      {status === "loading" && (
-        <View style={styles.centerFill}>
-          <ActivityIndicator color="#2F6FE0" size="large" />
-        </View>
-      )}
+      {status === "loading" && <SkeletonListRows count={4} style={styles.content} />}
 
       {status === "error" && (
         <View style={styles.centerFill}>
@@ -159,8 +156,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,

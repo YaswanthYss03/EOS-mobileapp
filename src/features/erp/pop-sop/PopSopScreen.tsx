@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Modal } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Animated, View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Modal } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { confirm } from "@/utils/confirm";
@@ -26,7 +27,6 @@ import {
 
 type PopSopType = "pop" | "sop";
 type StatusFilter = "pending" | "history";
-type Stage = "secretary" | "hod" | "finance";
 
 // Both request types share the exact same 6-value derived status union (see
 // purchase-requests.api.ts / service-requests.api.ts) - normalized here so
@@ -37,7 +37,6 @@ type DisplayOrder = {
   title: string;
   status: PurchaseRequestStatus;
   department: { id: number; name: string };
-  raisedByEmail: string;
   detailLabel: string;
   detailValue: string;
   quantity: string;
@@ -55,7 +54,6 @@ function fromPurchaseRequest(r: PurchaseRequest): DisplayOrder {
     title: r.title,
     status: r.status,
     department: r.department,
-    raisedByEmail: r.raised_by.email,
     detailLabel: "SPECIFICATION",
     detailValue: r.purpose || "—",
     quantity: String(r.quantity),
@@ -74,7 +72,6 @@ function fromServiceRequest(r: ServiceRequest): DisplayOrder {
     title: r.title ?? "Service request",
     status: r.status,
     department: r.department,
-    raisedByEmail: r.raised_by.email,
     detailLabel: "LOCATION",
     detailValue: `${r.location || "—"}${r.service_description ? ` — ${r.service_description}` : ""}`,
     quantity: r.quantity ?? "—",
@@ -97,8 +94,6 @@ const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
   pending: "Pending",
   history: "History",
 };
-const STAGE_ORDER: Stage[] = ["secretary", "hod", "finance"];
-const STAGE_LABELS: Record<Stage, string> = { secretary: "Secretary", hod: "HOD", finance: "Finance" };
 
 const TYPE_META: Record<PopSopType, { tabLabel: string; headerTitle: string; headerSubtitle: string }> = {
   pop: { tabLabel: "POP · Purchase", headerTitle: "Purchase Orders", headerSubtitle: "POP · raised by the dept secretary" },
@@ -107,11 +102,6 @@ const TYPE_META: Record<PopSopType, { tabLabel: string; headerTitle: string; hea
 
 function toFilterBucket(status: PurchaseRequestStatus): StatusFilter {
   return status === "pending_hod" ? "pending" : "history";
-}
-
-function toStage(status: PurchaseRequestStatus): Stage {
-  if (status === "pending_hod" || status === "rejected_by_hod") return "hod";
-  return "finance"; // pending_finance | approved | converted | rejected_by_finance
 }
 
 function formatMaybeDate(iso: string | null) {
@@ -302,8 +292,8 @@ export function PopSopScreen() {
       </View>
 
       {loading ? (
-        <View style={styles.emptyState}>
-          <ActivityIndicator color="#2F6FE0" size="small" />
+        <View style={styles.content}>
+          <SkeletonListRows count={4} />
         </View>
       ) : loadError ? (
         <View style={styles.emptyState}>
@@ -375,6 +365,19 @@ export function PopSopScreen() {
   );
 }
 
+function useRotateStyle(expanded: boolean) {
+  const anim = useRef(new Animated.Value(expanded ? 1 : 0)).current;
+  useEffect(() => {
+    Animated.timing(anim, { toValue: expanded ? 1 : 0, duration: 180, useNativeDriver: true }).start();
+  }, [anim, expanded]);
+  return { transform: [{ rotate: anim.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "180deg"] }) }] };
+}
+
+// Collapsed row: title + a short ref/date line on the left, status pill +
+// chevron on the right - no "raised by" identity and no Secretary->HoD->
+// Finance pipeline visualization (per request, this HoD-facing screen only
+// needs to show what's waiting on them and the outcome, not the full
+// routing history). Tapping the row expands it to reveal the rest.
 function OrderCard({
   order,
   reviewing,
@@ -386,14 +389,24 @@ function OrderCard({
   onApproveAndForward: () => void;
   onSendBack: () => void;
 }) {
-  const currentIndex = STAGE_ORDER.indexOf(toStage(order.status));
+  const [expanded, setExpanded] = useState(false);
+  const rotateStyle = useRotateStyle(expanded);
   const statusMeta = getPurchaseRequestStatusMeta(order.status);
-  const raiserLabel = order.raisedByEmail.split("@")[0];
 
   return (
     <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.cardTitle}>{order.title}</Text>
+      <TouchableOpacity
+        style={styles.cardHeader}
+        onPress={() => setExpanded((prev) => !prev)}
+        activeOpacity={0.8}
+      >
+        <View style={styles.cardTitleWrap}>
+          <Text style={styles.cardTitle}>{order.title}</Text>
+          <Text style={styles.cardRef}>
+            #{order.type.toUpperCase()}-{order.id} · {formatMaybeDate(order.createdAt)}
+            {order.orderNumber ? ` · ${order.orderNumber}` : ""}
+          </Text>
+        </View>
         <View
           style={[
             styles.statusBadge,
@@ -411,83 +424,61 @@ function OrderCard({
             {statusMeta.label}
           </Text>
         </View>
-      </View>
-      <Text style={styles.cardRef}>
-        #{order.type.toUpperCase()}-{order.id} · {formatMaybeDate(order.createdAt)}
-        {order.orderNumber ? ` · ${order.orderNumber}` : ""}
-      </Text>
+        <Animated.View style={rotateStyle}>
+          <Ionicons name="chevron-down" size={18} color="#9AA6B2" />
+        </Animated.View>
+      </TouchableOpacity>
 
-      <View style={styles.raisedByRow}>
-        <View style={styles.raisedByAvatar}>
-          <Text style={styles.raisedByAvatarText}>{raiserLabel.slice(0, 2).toUpperCase()}</Text>
-        </View>
-        <Text style={styles.raisedByText}>Raised by {raiserLabel} · Dept Secretary</Text>
-      </View>
+      {expanded && (
+        <View style={styles.cardBody}>
+          <View style={styles.metaRow}>
+            <View style={styles.metaCol}>
+              <Text style={styles.metaLabel}>{order.detailLabel}</Text>
+              <Text style={styles.metaValue}>{order.detailValue}</Text>
+            </View>
+            <View style={styles.metaColSmall}>
+              <Text style={styles.metaLabel}>QTY</Text>
+              <Text style={styles.metaValue}>{order.quantity}</Text>
+            </View>
+            <View style={styles.metaColSmall}>
+              <Text style={styles.metaLabel}>NEEDED BY</Text>
+              <Text style={styles.metaValue}>{formatMaybeDate(order.neededBy)}</Text>
+            </View>
+          </View>
 
-      <View style={styles.divider} />
-
-      <View style={styles.metaRow}>
-        <View style={styles.metaCol}>
-          <Text style={styles.metaLabel}>{order.detailLabel}</Text>
-          <Text style={styles.metaValue}>{order.detailValue}</Text>
-        </View>
-        <View style={styles.metaColSmall}>
-          <Text style={styles.metaLabel}>QTY</Text>
-          <Text style={styles.metaValue}>{order.quantity}</Text>
-        </View>
-        <View style={styles.metaColSmall}>
-          <Text style={styles.metaLabel}>NEEDED BY</Text>
-          <Text style={styles.metaValue}>{formatMaybeDate(order.neededBy)}</Text>
-        </View>
-      </View>
-
-      <View style={styles.stageLabelsRow}>
-        {STAGE_ORDER.map((stage, index) => (
-          <Text key={stage} style={[styles.stageLabel, index <= currentIndex && styles.stageLabelActive]}>
-            {STAGE_LABELS[stage]}
-          </Text>
-        ))}
-      </View>
-      <View style={styles.stageBarTrack}>
-        {[0, 1].map((segmentIndex) => (
-          <View
-            key={segmentIndex}
-            style={[styles.stageBarSegment, segmentIndex < currentIndex && styles.stageBarSegmentFilled]}
-          />
-        ))}
-      </View>
-
-      {(order.status === "rejected_by_hod" || order.status === "rejected_by_finance") &&
-        (order.hodRemarks || order.financeRemarks) && (
-          <Text style={styles.remarksText}>
-            {order.status === "rejected_by_hod"
-              ? `HoD remarks: ${order.hodRemarks}`
-              : `Finance remarks: ${order.financeRemarks}`}
-          </Text>
-        )}
-
-      {order.status === "pending_hod" && (
-        <View style={styles.actionsRow}>
-          <TouchableOpacity
-            style={styles.sendBackButton}
-            onPress={onSendBack}
-            activeOpacity={0.85}
-            disabled={reviewing}
-          >
-            <Text style={styles.sendBackButtonText}>Send back</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.approveButton, reviewing && styles.approveButtonDisabled]}
-            onPress={onApproveAndForward}
-            activeOpacity={0.85}
-            disabled={reviewing}
-          >
-            {reviewing ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <Text style={styles.approveButtonText}>Approve & forward</Text>
+          {(order.status === "rejected_by_hod" || order.status === "rejected_by_finance") &&
+            (order.hodRemarks || order.financeRemarks) && (
+              <Text style={styles.remarksText}>
+                {order.status === "rejected_by_hod"
+                  ? `HoD remarks: ${order.hodRemarks}`
+                  : `Finance remarks: ${order.financeRemarks}`}
+              </Text>
             )}
-          </TouchableOpacity>
+
+          {order.status === "pending_hod" && (
+            <View style={styles.actionsRow}>
+              <TouchableOpacity
+                style={styles.sendBackButton}
+                onPress={onSendBack}
+                activeOpacity={0.85}
+                disabled={reviewing}
+              >
+                <Text style={styles.sendBackButtonText}>Send back</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.approveButton, reviewing && styles.approveButtonDisabled]}
+                onPress={onApproveAndForward}
+                activeOpacity={0.85}
+                disabled={reviewing}
+              >
+                {reviewing ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.approveButtonText}>Approve & forward</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       )}
     </View>
@@ -505,8 +496,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -604,12 +593,13 @@ const styles = StyleSheet.create({
   },
   cardHeader: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
+    alignItems: "center",
     gap: 8,
   },
-  cardTitle: {
+  cardTitleWrap: {
     flex: 1,
+  },
+  cardTitle: {
     fontSize: 14,
     fontFamily: fonts.bold,
     color: "#111827",
@@ -642,36 +632,12 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     color: "#9AA6B2",
     marginTop: 2,
-    marginBottom: 10,
   },
-  raisedByRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 10,
-  },
-  raisedByAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: "#E4EBFB",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  raisedByAvatarText: {
-    fontSize: 10,
-    fontFamily: fonts.bold,
-    color: "#2F6FE0",
-  },
-  raisedByText: {
-    fontSize: 12,
-    fontFamily: fonts.regular,
-    color: "#6B7280",
-  },
-  divider: {
-    height: 1,
-    backgroundColor: "#F1F3F6",
-    marginBottom: 10,
+  cardBody: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#F1F3F6",
   },
   metaRow: {
     flexDirection: "row",
@@ -695,34 +661,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: fonts.semibold,
     color: "#111827",
-  },
-  stageLabelsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 4,
-  },
-  stageLabel: {
-    fontSize: 10,
-    fontFamily: fonts.semibold,
-    color: "#9AA6B2",
-  },
-  stageLabelActive: {
-    color: "#2F6FE0",
-    fontFamily: fonts.bold,
-  },
-  stageBarTrack: {
-    flexDirection: "row",
-    gap: 4,
-    marginBottom: 14,
-  },
-  stageBarSegment: {
-    flex: 1,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "#EEF2F9",
-  },
-  stageBarSegmentFilled: {
-    backgroundColor: "#2F6FE0",
   },
   remarksText: {
     fontSize: 11,

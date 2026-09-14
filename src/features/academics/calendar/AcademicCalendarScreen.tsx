@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonCalendarBlock, SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
+import { useAuth } from "@/context/AuthContext";
 import { useRole } from "@/hooks/useRole";
 import { getApiErrorMessage } from "@/services/api/client";
 import {
@@ -91,23 +93,33 @@ function AcademicCalendarHeader({ onBack, calendar }: { onBack: () => void; cale
 
 // Wired to GET /me/academic-calendar for STUDENTS (real calendar_events for
 // the student's own batch + current semester), GET
-// /me/faculty-academic-calendar for plain Faculty (a faculty member can
+// /me/faculty-academic-calendar for real Faculty (a faculty member can
 // teach into several distinct batch+semester calendars at once, so their
 // events are merged/deduped server-side - see
 // getMergedAcademicCalendarForFaculty), and GET
-// /me/academic-calendar-institution for HR Payroll AND HoD (both have no
-// single "own" batch/semester to scope to - a HoD is mostly an
-// administrator, not necessarily teaching any class themselves this term,
-// so the per-personally-taught-classes faculty merge above would often come
-// back empty for them; the backend's own doc comment on
-// getInstitutionAcademicCalendar explicitly calls this out: "HR Payroll
-// (and HoD, browsing outside their own department)" - see
-// me-faculty-timetable-roster.controller.ts's @Roles on that endpoint,
-// which grants HOD access precisely for this). Only "holiday"/"event" types
+// /me/academic-calendar-institution for every other staff role (HoD, HR
+// Payroll, Admin, Principal, Library, IQAC, Secretary, ... - none of these
+// have an "own" batch/semester to scope a calendar to, so they get the
+// institution-wide merge instead - see me-faculty-timetable-roster
+// .controller.ts's @Roles on that endpoint). Only "holiday"/"event" types
 // exist in the schema - there is no "review"/"exam" category to show.
+//
+// Branches on the RAW backend role (user.role from the JWT), not the app's
+// own collapsed Role enum (see useRole.ts) - that enum deliberately folds
+// many distinct backend roles (library/finance/academic_coordinator/
+// alumni/...) into a single "employee" bucket for dashboard purposes, which
+// would wrongly route all of them into the Faculty-only endpoint here and
+// 403. This screen needs to tell "actually teaches" apart from "generic
+// staff" precisely, so it reads the unmapped role string directly.
 export function AcademicCalendarScreen() {
   const router = useRouter();
   const navigation = useNavigation();
+  const { user } = useAuth();
+  const rawRole = user?.role;
+  // Mapped role (not rawRole) for the back-button decision below - the
+  // Class tab is hidden for the whole "employee" bucket (faculty, library,
+  // finance, academic_coordinator, alumni - see useRole.ts), all of which
+  // now reach this screen via the Campus tab, not just literal faculty.
   const role = useRole();
 
   const today = useMemo(() => new Date(), []);
@@ -122,11 +134,11 @@ export function AcademicCalendarScreen() {
     setStatus("loading");
     setLoadError(null);
     const request =
-      role === "student"
+      rawRole === "student"
         ? getMyAcademicCalendar()
-        : role === "hr-payroll" || role === "hod"
-          ? getInstitutionAcademicCalendar()
-          : getMyAcademicCalendarAsFaculty();
+        : rawRole === "faculty"
+          ? getMyAcademicCalendarAsFaculty()
+          : getInstitutionAcademicCalendar();
     request
       .then((response) => {
         setCalendar(response);
@@ -136,7 +148,7 @@ export function AcademicCalendarScreen() {
         setLoadError(getApiErrorMessage(error, "Couldn't load the academic calendar."));
         setStatus("error");
       });
-  }, [role]);
+  }, [rawRole]);
 
   useEffect(() => {
     load();
@@ -145,7 +157,22 @@ export function AcademicCalendarScreen() {
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({
-        header: () => <AcademicCalendarHeader onBack={() => router.back()} calendar={calendar} />,
+        // An "employee"-mapped staff member, HoD, or HR Payroll reaches this
+        // via the Class tab's own Campus grid (a separate tab's Stack) - see
+        // TimetableScreen's identical comment for why router.back() alone
+        // isn't reliable there. A student has their own dedicated Campus tab
+        // instead (this screen's own Stack), where router.back() correctly
+        // pops back to Academics. Uses the mapped role here (not rawRole,
+        // which the data-fetch above still needs for its own student/
+        // faculty/institution branching).
+        header: () => (
+          <AcademicCalendarHeader
+            onBack={() =>
+              role === "employee" || role === "hod" || role === "hr-payroll" ? router.replace("/(tabs)/erp") : router.back()
+            }
+            calendar={calendar}
+          />
+        ),
       });
       return () => {
         navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
@@ -188,8 +215,9 @@ export function AcademicCalendarScreen() {
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       {status === "loading" && (
-        <View style={styles.inlineLoading}>
-          <ActivityIndicator color="#2F6FE0" />
+        <View style={styles.content}>
+          <SkeletonCalendarBlock style={{ marginBottom: 20 }} />
+          <SkeletonListRows count={3} />
         </View>
       )}
 
@@ -290,8 +318,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -315,10 +341,6 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
-  },
-  inlineLoading: {
-    paddingVertical: 48,
-    alignItems: "center",
   },
   errorNotice: {
     alignItems: "center",

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, RefreshControl, Text, View, TouchableOpacity, StyleSheet } from "react-native";
+import { FlatList, RefreshControl, Text, View, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { getApiErrorMessage } from "@/services/api/client";
 import { TopBar } from "./components/TopBar";
@@ -162,9 +163,7 @@ export function HomeFeedScreen() {
           }
           ListEmptyComponent={
             status === "loading" ? (
-              <View style={styles.centerState}>
-                <ActivityIndicator color="#2F6FE0" />
-              </View>
+              <SkeletonListRows count={4} style={styles.loadingList} />
             ) : (
               <View style={styles.centerState}>
                 <Ionicons name="images-outline" size={32} color="#B0B7C3" />
@@ -186,6 +185,9 @@ const styles = StyleSheet.create({
   },
   list: {
     paddingBottom: 8,
+  },
+  loadingList: {
+    paddingHorizontal: 16,
   },
   centerFill: {
     flex: 1,

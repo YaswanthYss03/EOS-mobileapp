@@ -1,20 +1,20 @@
-import { useCallback, useEffect, useState } from "react";
 import { View, Text, Image, Pressable, StyleSheet } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter, useFocusEffect } from "expo-router";
+import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "@/theme";
 import { useRole } from "@/hooks/useRole";
-import { getUnreadCount } from "@/services/api/notifications.api";
+import { MessagesIconButton } from "@/components/layout/MessagesIconButton";
 
 const logoSource = require("../../../../assets/logo.png");
 
 // Home-only variant of the shared CollegeHeader (src/components/layout/CollegeHeader)
-// that trades the "LEADERSHIP & EXCELLENCE" tagline for notification/wallet
-// icon buttons. Swapped in only while Home is focused - see
-// HomeFeedScreen's useFocusEffect, same pattern as the ERP employee
-// dashboard's header override.
+// that trades the "LEADERSHIP & EXCELLENCE" tagline for message/wallet icon
+// buttons. Notifications no longer has its own header entry point - message
+// icon is the only inbox-style icon here now. Swapped in only while Home is
+// focused - see HomeFeedScreen's useFocusEffect, same pattern as the ERP
+// employee dashboard's header override.
 export function HomeHeader() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -22,20 +22,6 @@ export function HomeHeader() {
   // Every role has a wallet except Parent - see EOSbackend1's wallet
   // module's @Roles (everything but ROLES.PARENT).
   const hasWallet = role !== "parent";
-  const [unreadCount, setUnreadCount] = useState(0);
-
-  // Re-fetches every time Home regains focus (e.g. coming back from the
-  // notifications screen after marking some read) - cheap enough for a
-  // single count query to not need a dedicated refresh trigger.
-  useFocusEffect(
-    useCallback(() => {
-      getUnreadCount()
-        .then(setUnreadCount)
-        .catch(() => {
-          // Best-effort - a stale/missing badge count isn't worth surfacing an error for.
-        });
-    }, []),
-  );
 
   return (
     <LinearGradient
@@ -50,14 +36,7 @@ export function HomeHeader() {
       </Text>
 
       <View style={styles.actions}>
-        <Pressable
-          style={styles.iconButton}
-          hitSlop={8}
-          onPress={() => router.push("/(tabs)/home/notifications" as never)}
-        >
-          <Ionicons name="notifications-outline" size={18} color="#fff" />
-          {unreadCount > 0 && <View style={styles.badge} />}
-        </Pressable>
+        <MessagesIconButton />
         {hasWallet && (
           <Pressable
             style={styles.iconButton}
@@ -83,8 +62,6 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   logo: {
     width: 32,
@@ -108,16 +85,5 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
-  },
-  badge: {
-    position: "absolute",
-    top: 4,
-    right: 4,
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: "#DC2626",
-    borderWidth: 1,
-    borderColor: "#2F6FE0",
   },
 });

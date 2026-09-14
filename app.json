@@ -18,7 +18,10 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.eos.mobileapp"
+      "bundleIdentifier": "com.eos.mobileapp",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "EOS needs microphone access so you can speak during an online class."
+      }
     },
     "android": {
       "package": "com.eos.mobileapp",
@@ -35,7 +38,11 @@
         "USE_FULL_SCREEN_INTENT",
         "WAKE_LOCK",
         "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_NETWORK_STATE"
       ]
     },
     "notification": {
@@ -53,7 +60,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "EOS needs camera access to scan a wallet QR code when sending money."
+          "cameraPermission": "EOS needs camera access to scan a wallet QR code when sending money, and to show your video during an online class."
         }
       ],
       [

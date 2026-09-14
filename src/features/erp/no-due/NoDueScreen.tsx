@@ -15,6 +15,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -55,7 +56,7 @@ export function NoDueScreen() {
   const insets = useSafeAreaInsets();
 
   const [search, setSearch] = useState("");
-  const [statusTab, setStatusTab] = useState<StatusTab>("cleared");
+  const [statusTab, setStatusTab] = useState<StatusTab>("pending");
 
   const [batchesStatus, setBatchesStatus] = useState<LoadStatus>("loading");
   const [batches, setBatches] = useState<NoDueBatch[]>([]);
@@ -185,14 +186,6 @@ export function NoDueScreen() {
 
         <View style={styles.tabSwitch}>
           <TouchableOpacity
-            style={[styles.tabSwitchButton, statusTab === "cleared" && styles.tabSwitchButtonActive]}
-            onPress={() => setStatusTab("cleared")}
-          >
-            <Text style={[styles.tabSwitchText, statusTab === "cleared" && styles.tabSwitchTextActive]}>
-              Cleared
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
             style={[styles.tabSwitchButton, statusTab === "pending" && styles.tabSwitchButtonActive]}
             onPress={() => setStatusTab("pending")}
           >
@@ -200,13 +193,17 @@ export function NoDueScreen() {
               Pending
             </Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabSwitchButton, statusTab === "cleared" && styles.tabSwitchButtonActive]}
+            onPress={() => setStatusTab("cleared")}
+          >
+            <Text style={[styles.tabSwitchText, statusTab === "cleared" && styles.tabSwitchTextActive]}>
+              Cleared
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        {studentsStatus === "loading" && (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#2F6FE0" />
-          </View>
-        )}
+        {studentsStatus === "loading" && <SkeletonListRows count={4} />}
 
         {studentsStatus === "error" && (
           <View style={styles.errorNotice}>
@@ -303,11 +300,14 @@ function NoDueCard({
             {student.section ? ` · ${student.section}` : ""}
           </Text>
         </View>
-        <View style={[styles.statusBadge, isCleared ? styles.statusBadgeCleared : styles.statusBadgePending]}>
-          <Text style={[styles.statusBadgeText, { color: isCleared ? "#2F6FE0" : "#D97706" }]}>
-            {isCleared ? "Cleared" : "Pending"}
-          </Text>
-        </View>
+        {/* Only shown on the Cleared tab - within the Pending tab every card
+            is pending by definition, so repeating that word on each row is
+            redundant with the tab you're already on. */}
+        {isCleared && (
+          <View style={[styles.statusBadge, styles.statusBadgeCleared]}>
+            <Text style={[styles.statusBadgeText, { color: "#2F6FE0" }]}>Cleared</Text>
+          </View>
+        )}
       </View>
 
       <View style={styles.divider} />
@@ -367,8 +367,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -466,10 +464,6 @@ const styles = StyleSheet.create({
   },
   tabSwitchTextActive: {
     color: "#fff",
-  },
-  inlineLoading: {
-    paddingVertical: 24,
-    alignItems: "center",
   },
   errorNotice: {
     alignItems: "center",

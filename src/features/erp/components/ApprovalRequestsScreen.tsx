@@ -6,6 +6,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -20,10 +21,11 @@ import { getHodFacultyOds, hodApproveFacultyOd, type MyFacultyOd } from "@/servi
 import type { ApprovalRequest, ApprovalStatus } from "../types";
 
 type Tab = "student" | "faculty";
-type StatusFilter = "pending" | "approved" | "rejected" | "all";
+// "History" covers both approved and rejected together - there's no
+// separate filter for each anymore, just "still needs a decision" vs
+// "already decided".
+type SubTab = "pending" | "history";
 type LoadStatus = "loading" | "success" | "error";
-
-const STATUS_FILTERS: StatusFilter[] = ["pending", "approved", "rejected", "all"];
 
 function initialsFromName(name: string) {
   return name
@@ -140,7 +142,7 @@ export function ApprovalRequestsScreen({ kind, title, studentHeaderSubtitle, fac
   const { tab: initialTab } = useLocalSearchParams<{ tab?: string }>();
 
   const [tab, setTab] = useState<Tab>(initialTab === "faculty" ? "faculty" : "student");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
+  const [subTab, setSubTab] = useState<SubTab>("pending");
 
   const [studentStatus, setStudentStatus] = useState<LoadStatus>("loading");
   const [studentError, setStudentError] = useState<string | null>(null);
@@ -215,19 +217,12 @@ export function ApprovalRequestsScreen({ kind, title, studentHeaderSubtitle, fac
   const loadError = tab === "student" ? studentError : facultyError;
   const reload = tab === "student" ? loadStudent : loadFaculty;
 
-  const counts = useMemo(
-    () => ({
-      pending: requests.filter((r) => r.status === "pending").length,
-      approved: requests.filter((r) => r.status === "approved").length,
-      rejected: requests.filter((r) => r.status === "rejected").length,
-      all: requests.length,
-    }),
-    [requests],
-  );
-
   const filteredRequests = useMemo(
-    () => (statusFilter === "all" ? requests : requests.filter((r) => r.status === statusFilter)),
-    [requests, statusFilter],
+    () =>
+      subTab === "pending"
+        ? requests.filter((r) => r.status === "pending")
+        : requests.filter((r) => r.status !== "pending"),
+    [requests, subTab],
   );
 
   function handleDecision(id: string, decision: "approved" | "rejected") {
@@ -257,7 +252,7 @@ export function ApprovalRequestsScreen({ kind, title, studentHeaderSubtitle, fac
 
   function switchTab(nextTab: Tab) {
     setTab(nextTab);
-    setStatusFilter("pending");
+    setSubTab("pending");
   }
 
   return (
@@ -314,25 +309,22 @@ export function ApprovalRequestsScreen({ kind, title, studentHeaderSubtitle, fac
           </View>
         )}
 
-        <View style={styles.statusRow}>
-          {STATUS_FILTERS.map((status) => (
-            <TouchableOpacity
-              key={status}
-              style={[styles.statusPill, statusFilter === status && styles.statusPillActive]}
-              onPress={() => setStatusFilter(status)}
-            >
-              <Text style={[styles.statusPillText, statusFilter === status && styles.statusPillTextActive]}>
-                {status.charAt(0).toUpperCase() + status.slice(1)} ({counts[status]})
-              </Text>
-            </TouchableOpacity>
-          ))}
+        <View style={styles.subTabSwitch}>
+          <TouchableOpacity
+            style={[styles.subTabButton, subTab === "pending" && styles.subTabButtonActive]}
+            onPress={() => setSubTab("pending")}
+          >
+            <Text style={[styles.subTabText, subTab === "pending" && styles.subTabTextActive]}>Pending</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.subTabButton, subTab === "history" && styles.subTabButtonActive]}
+            onPress={() => setSubTab("history")}
+          >
+            <Text style={[styles.subTabText, subTab === "history" && styles.subTabTextActive]}>History</Text>
+          </TouchableOpacity>
         </View>
 
-        {loadStatus === "loading" && (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#2F6FE0" />
-          </View>
-        )}
+        {loadStatus === "loading" && <SkeletonListRows count={4} />}
 
         {loadStatus === "error" && (
           <ErrorNotice message={loadError ?? "Something went wrong."} onRetry={reload} />
@@ -473,8 +465,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -579,35 +569,32 @@ const styles = StyleSheet.create({
     color: "#2F6FE0",
     letterSpacing: 0.5,
   },
-  statusRow: {
+  subTabSwitch: {
     flexDirection: "row",
     gap: 8,
     marginBottom: 14,
   },
-  statusPill: {
+  subTabButton: {
     flex: 1,
     alignItems: "center",
     borderRadius: 999,
-    paddingVertical: 8,
+    paddingVertical: 9,
     backgroundColor: "#fff",
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: "#E5E7EB",
   },
-  statusPillActive: {
-    backgroundColor: "#2F6FE0",
+  subTabButtonActive: {
+    backgroundColor: "#EAF0FD",
     borderColor: "#2F6FE0",
   },
-  statusPillText: {
-    fontSize: 11,
+  subTabText: {
+    fontSize: 12.5,
     fontFamily: fonts.semibold,
-    color: "#4B5563",
+    color: "#6B7280",
   },
-  statusPillTextActive: {
-    color: "#fff",
-  },
-  inlineLoading: {
-    paddingVertical: 24,
-    alignItems: "center",
+  subTabTextActive: {
+    color: "#2F6FE0",
+    fontFamily: fonts.bold,
   },
   errorNotice: {
     alignItems: "center",

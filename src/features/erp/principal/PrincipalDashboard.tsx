@@ -43,6 +43,13 @@ const academicsItems: QuickAccessItem[] = [
   },
   { id: "announcements", label: "Announcements", icon: "megaphone-outline", route: "/(tabs)/erp/announcements" },
   { id: "calendar", label: "Calendar", icon: "calendar-outline", route: "/(tabs)/erp/principal/calendar" },
+  // No Placements tile here - it already has a real entry point via the
+  // Amenity tab (/(tabs)/amenity/placements, see AmenityHomeScreen.tsx's
+  // principalOptions), which reuses this exact same PrincipalPlacementsBody.
+  // A tile here too would just be a duplicate. Current Semester/Timetable/
+  // Online Class have no principal-specific screen at all (not stubbed, not
+  // built) - a principal isn't enrolled in or teaching a subject, so there
+  // was nothing to move in for those either.
 ];
 
 const institutionItems: QuickAccessItem[] = [
@@ -79,7 +86,7 @@ function PrincipalHeader({ onBack }: { onBack: () => void }) {
         <Ionicons name="arrow-back" size={20} color="#fff" />
       </TouchableOpacity>
       <View>
-        <Text style={styles.headerTitle}>EOS</Text>
+        <Text style={styles.headerTitle}>EIS</Text>
         <Text style={styles.headerSubtitle}>Principal services</Text>
       </View>
     </LinearGradient>
@@ -151,8 +158,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   headerIconButton: {
     width: 36,

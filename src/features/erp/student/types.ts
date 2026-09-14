@@ -31,5 +31,8 @@ export type StatCardItem = StatCardConfig & {
 };
 
 export type CampusItem = CampusItemConfig & {
-  value: string;
+  // Optional - the tiles moved in here from the old Class tab (Timetable,
+  // Calendar, Placements, ...) are pure navigation shortcuts with no
+  // matching stat from useStudentDashboardData, unlike od/leave/etc.
+  value?: string;
 };

@@ -34,6 +34,44 @@ export type MyProfile = {
   reporting_to: string | null;
   social_links: SocialLink[];
   children?: MyChild[];
+
+  // Personal/contact biodata - present for student and faculty-type roles
+  // (HoD/HR/Principal all resolve through the same faculty branch server
+  // side), absent for parent (no personal record exists for that role).
+  gender?: string | null;
+  date_of_birth?: string | null;
+  personal_email?: string | null;
+  address?: string | null;
+
+  // Student-only.
+  blood_group?: string | null;
+  nationality?: string | null;
+  religion?: string | null;
+  community?: string | null;
+  mobile?: string | null;
+  father_name?: string | null;
+  father_mobile?: string | null;
+  father_occupation?: string | null;
+  father_photo_url?: string | null;
+  mother_name?: string | null;
+  mother_mobile?: string | null;
+  mother_occupation?: string | null;
+  mother_photo_url?: string | null;
+  guardian_name?: string | null;
+  guardian_phone?: string | null;
+
+  // Faculty-type only.
+  whatsapp_number?: string | null;
+  alternate_phone?: string | null;
+  qualification?: string | null;
+  specialization?: string | null;
+  previous_institution?: string | null;
+  previous_experience_years?: number | null;
+  office_room?: string | null;
+  work_location?: string | null;
+  employment_type?: string | null;
+  employment_status?: string | null;
+  staff_code?: string | null;
 };
 
 export type MyIdCard = {

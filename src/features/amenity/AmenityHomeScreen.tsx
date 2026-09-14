@@ -99,7 +99,7 @@ export function AmenityHomeScreen() {
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({
-        header: () => <BackHeader title="Amenity" onBack={() => router.replace("/(tabs)/home")} />,
+        header: () => <BackHeader title="Campus" onBack={() => router.replace("/(tabs)/home")} />,
       });
       return () => {
         navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });

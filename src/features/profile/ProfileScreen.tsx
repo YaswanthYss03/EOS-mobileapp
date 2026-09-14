@@ -17,6 +17,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import * as DocumentPicker from "expo-document-picker";
 import * as Linking from "expo-linking";
 import { Ionicons } from "@expo/vector-icons";
+import { SkeletonDetailBlock, SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/utils/toast";
@@ -30,6 +31,148 @@ import {
   type MyProfile,
   type SocialLink,
 } from "@/services/api/profile.api";
+
+function humanize(value: string | null | undefined) {
+  if (!value) return value ?? null;
+  return value
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+type DetailRow = { label: string; value: string | number | null | undefined };
+
+// Renders nothing (not even the card) when every row in the section is
+// empty - biodata coverage varies a lot per student/faculty record, and an
+// empty "Address" card is worse than no card at all.
+function DetailCard({ title, rows }: { title: string; rows: DetailRow[] }) {
+  const visibleRows = rows.filter((row) => row.value !== null && row.value !== undefined && row.value !== "");
+  if (visibleRows.length === 0) return null;
+
+  return (
+    <>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      <View style={styles.card}>
+        {visibleRows.map((row, index) => (
+          <View
+            key={row.label}
+            style={[styles.serviceRow, index > 0 && styles.serviceRowDivider]}
+          >
+            <Text style={styles.serviceLabel}>{row.label}</Text>
+            <Text style={styles.serviceValue}>{row.value}</Text>
+          </View>
+        ))}
+      </View>
+    </>
+  );
+}
+
+type ParentRole = "Father" | "Mother" | "Guardian";
+
+// One row per parent/guardian - photo on the left stretched to match the
+// height of the Name/Occupation/Phone No. rows on the right (default RN
+// flex alignItems is "stretch", so the photo box just needs no explicit
+// height of its own). Renders nothing when every field for this person is
+// empty, same "don't show an empty block" rule as DetailCard.
+function ParentBlock({
+  role,
+  photoUrl,
+  name,
+  occupation,
+  phone,
+  divider,
+}: {
+  role: ParentRole;
+  photoUrl?: string | null;
+  name?: string | null;
+  occupation?: string | null;
+  phone?: string | null;
+  divider: boolean;
+}) {
+  const fields = [
+    { label: "Name", value: name },
+    { label: "Occupation", value: occupation },
+    { label: "Phone No.", value: phone },
+  ].filter((field) => !!field.value);
+  if (fields.length === 0) return null;
+
+  return (
+    <View style={[styles.parentBlock, divider && styles.parentBlockDivider]}>
+      <View style={styles.parentBadgeRow}>
+        <View style={styles.parentBadge}>
+          <Text style={styles.parentBadgeText}>{role.toUpperCase()}</Text>
+        </View>
+      </View>
+      <View style={styles.parentContentRow}>
+        <View style={styles.parentPhoto}>
+          {photoUrl ? (
+            <Image source={{ uri: photoUrl }} style={styles.parentPhotoImage} />
+          ) : (
+            <Ionicons name="person" size={28} color="#B0B7C3" />
+          )}
+        </View>
+        <View style={styles.parentFieldsWrap}>
+          {fields.map((field, index) => (
+            <View key={field.label} style={[styles.serviceRow, index > 0 && styles.serviceRowDivider]}>
+              <Text style={styles.serviceLabel}>{field.label}</Text>
+              <Text style={styles.serviceValue}>{field.value}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function ParentGuardianCard({ profile }: { profile: MyProfile }) {
+  const hasAny =
+    profile.father_name ||
+    profile.father_mobile ||
+    profile.father_occupation ||
+    profile.mother_name ||
+    profile.mother_mobile ||
+    profile.mother_occupation ||
+    profile.guardian_name ||
+    profile.guardian_phone;
+  if (!hasAny) return null;
+
+  return (
+    <>
+      <Text style={styles.sectionTitle}>Parent / Guardian</Text>
+      <View style={styles.card}>
+        <ParentBlock
+          role="Father"
+          photoUrl={profile.father_photo_url}
+          name={profile.father_name}
+          occupation={profile.father_occupation}
+          phone={profile.father_mobile}
+          divider={false}
+        />
+        <ParentBlock
+          role="Mother"
+          photoUrl={profile.mother_photo_url}
+          name={profile.mother_name}
+          occupation={profile.mother_occupation}
+          phone={profile.mother_mobile}
+          divider={!!(profile.father_name || profile.father_mobile || profile.father_occupation)}
+        />
+        <ParentBlock
+          role="Guardian"
+          name={profile.guardian_name}
+          phone={profile.guardian_phone}
+          divider={!!(
+            profile.mother_name ||
+            profile.mother_mobile ||
+            profile.mother_occupation ||
+            profile.father_name ||
+            profile.father_mobile ||
+            profile.father_occupation
+          )}
+        />
+      </View>
+    </>
+  );
+}
 
 function initialsFromName(name: string | null | undefined) {
   if (!name) return "?";
@@ -102,12 +245,26 @@ export function ProfileScreen() {
   }
 
   async function handleUploadResume() {
-    const result = await DocumentPicker.getDocumentAsync({
-      type: ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
-    });
-    if (result.canceled || !result.assets?.[0]) return;
+    // Filtering by exact MIME type (application/pdf, ...) is unreliable on
+    // Android - many file providers report real PDFs/docs as
+    // application/octet-stream, which makes the native picker return a
+    // false "cancelled" result even after the user visibly picks a file.
+    // Accept anything here and validate by extension instead, so a bad
+    // pick fails loudly (a toast) rather than silently doing nothing.
+    const result = await DocumentPicker.getDocumentAsync({ type: "*/*" });
+    if (result.canceled) return;
 
-    const asset = result.assets[0];
+    const asset = result.assets?.[0];
+    if (!asset) {
+      toast.error("Couldn't read that file. Please try picking it again.");
+      return;
+    }
+
+    if (!/\.(pdf|docx?)$/i.test(asset.name)) {
+      toast.warning("Please choose a PDF or Word document (.pdf, .doc, .docx)");
+      return;
+    }
+
     setUploadingResume(true);
     uploadMyResume({
       uri: asset.uri,
@@ -189,8 +346,9 @@ export function ProfileScreen() {
       </LinearGradient>
 
       {status === "loading" && (
-        <View style={styles.centerFill}>
-          <ActivityIndicator color="#2F6FE0" size="large" />
+        <View style={styles.content}>
+          <SkeletonDetailBlock style={{ marginBottom: 16 }} />
+          <SkeletonListRows count={3} />
         </View>
       )}
 
@@ -223,6 +381,58 @@ export function ProfileScreen() {
               </View>
             </View>
           </View>
+
+          {/* Personal details */}
+          <DetailCard
+            title="Personal Details"
+            rows={[
+              { label: "Gender", value: humanize(profile.gender) },
+              { label: "Date of Birth", value: profile.date_of_birth },
+              { label: "Blood Group", value: profile.blood_group },
+              { label: "Nationality", value: profile.nationality },
+              { label: "Religion", value: profile.religion },
+              { label: "Community", value: profile.community },
+            ]}
+          />
+
+          {/* Contact details */}
+          <DetailCard
+            title="Contact Details"
+            rows={[
+              { label: "Mobile", value: profile.mobile },
+              { label: "WhatsApp", value: profile.whatsapp_number },
+              { label: "Alternate Phone", value: profile.alternate_phone },
+              { label: "Personal Email", value: profile.personal_email },
+              { label: "Address", value: profile.address },
+            ]}
+          />
+
+          {/* Parent / guardian (student only) */}
+          {profile.role === "student" && <ParentGuardianCard profile={profile} />}
+
+          {/* Professional details (faculty/HoD/HR/Principal) */}
+          {profile.role === "faculty" && (
+            <DetailCard
+              title="Professional Details"
+              rows={[
+                { label: "Staff Code", value: profile.staff_code },
+                { label: "Qualification", value: profile.qualification },
+                { label: "Specialization", value: profile.specialization },
+                { label: "Previous Institution", value: profile.previous_institution },
+                {
+                  label: "Prior Experience",
+                  value:
+                    profile.previous_experience_years != null
+                      ? `${profile.previous_experience_years} years`
+                      : null,
+                },
+                { label: "Office Room", value: profile.office_room },
+                { label: "Work Location", value: profile.work_location },
+                { label: "Employment Type", value: humanize(profile.employment_type) },
+                { label: "Employment Status", value: humanize(profile.employment_status) },
+              ]}
+            />
+          )}
 
           {profile.role !== "parent" && (
             <>
@@ -456,8 +666,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -560,6 +768,50 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     color: "#9AA6B2",
     marginTop: 2,
+  },
+  parentBlock: {
+    paddingTop: 4,
+  },
+  parentBlockDivider: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#F1F3F6",
+  },
+  parentBadgeRow: {
+    alignItems: "flex-end",
+    marginBottom: 10,
+  },
+  parentBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: "#E4EBFB",
+  },
+  parentBadgeText: {
+    fontSize: 10.5,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+    letterSpacing: 0.5,
+  },
+  parentContentRow: {
+    flexDirection: "row",
+    gap: 14,
+  },
+  parentPhoto: {
+    width: 76,
+    borderRadius: 14,
+    backgroundColor: "#EEF1F6",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  parentPhotoImage: {
+    width: "100%",
+    height: "100%",
+  },
+  parentFieldsWrap: {
+    flex: 1,
   },
   resumeRow: {
     flexDirection: "row",
@@ -698,11 +950,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: fonts.regular,
     color: "#6B7280",
+    flexShrink: 0,
   },
   serviceValue: {
+    flex: 1,
+    marginLeft: 12,
     fontSize: 13,
     fontFamily: fonts.semibold,
     color: "#111827",
+    textAlign: "right",
   },
   idCardButton: {
     flexDirection: "row",

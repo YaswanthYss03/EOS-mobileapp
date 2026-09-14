@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, Pressable, ActivityIndicator, StyleSheet } from "react-native";
+import { View, Text, ScrollView, Pressable, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonStatCards, SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { getApiErrorMessage } from "@/services/api/client";
 import {
@@ -77,9 +78,10 @@ export function HostelScreen() {
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {loading && (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#2F6FE0" />
-          </View>
+          <>
+            <SkeletonStatCards count={2} style={styles.statsSkeletonSpacing} />
+            <SkeletonListRows count={4} />
+          </>
         )}
 
         {!loading && error && (
@@ -179,18 +181,16 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   headerTextWrap: { flex: 1 },
   title: { fontSize: 18, fontFamily: fonts.bold, color: "#fff" },
   subtitle: { fontSize: 11, fontFamily: fonts.regular, color: "#D7E2FA", marginTop: 2 },
   content: { padding: 16, paddingBottom: 40 },
-  inlineLoading: { paddingVertical: 40, alignItems: "center" },
   centerState: { alignItems: "center", paddingVertical: 40, gap: 8 },
   centerStateText: { fontSize: 13, fontFamily: fonts.medium, color: "#9AA6B2", textAlign: "center", paddingHorizontal: 20 },
   retryText: { fontSize: 13, fontFamily: fonts.bold, color: "#2F6FE0", marginTop: 4 },
   statsGrid: { flexDirection: "row", gap: 10, marginBottom: 20 },
+  statsSkeletonSpacing: { marginBottom: 20 },
   statCard: {
     flex: 1,
     backgroundColor: "#fff",

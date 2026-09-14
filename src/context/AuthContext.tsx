@@ -3,6 +3,7 @@ import * as SecureStore from "expo-secure-store";
 import { login as loginRequest, type AuthUser } from "@/services/api/auth.api";
 import { setAuthToken, setUnauthorizedHandler } from "@/services/api/client";
 import { registerForPushNotifications, unregisterPushToken } from "@/services/push-notifications";
+import { toast } from "@/utils/toast";
 
 const STORAGE_KEY = "eos_auth";
 
@@ -66,6 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // A 401 from any protected endpoint (token expired/revoked) forces logout.
   useEffect(() => {
     setUnauthorizedHandler(() => {
+      toast.warning("Your session has expired. Please log in again.");
       setToken(null);
       setUser(null);
       setAuthToken(null);

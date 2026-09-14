@@ -16,6 +16,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { getApiErrorMessage } from "@/services/api/client";
 import { listDepartments, type Department } from "@/services/api/departments.api";
@@ -260,11 +261,7 @@ export function PrincipalStudentsScreen() {
         {/* Recent lookups / results */}
         <Text style={styles.sectionTitle}>{sectionTitle}</Text>
 
-        {loading && (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#2F6FE0" />
-          </View>
-        )}
+        {loading && <SkeletonListRows count={4} />}
 
         {!loading && searchError && (
           <View style={styles.centerState}>
@@ -489,8 +486,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   headerTextWrap: { flex: 1 },
   title: { fontSize: 18, fontFamily: fonts.bold, color: "#fff" },
@@ -554,7 +549,6 @@ const styles = StyleSheet.create({
   chartFill: { height: 8, borderRadius: 4 },
   chartValue: { width: 40, fontSize: 11, fontFamily: fonts.medium, color: "#9AA6B2", textAlign: "right" },
   sectionTitle: { fontSize: 14, fontFamily: fonts.bold, color: "#111827", marginBottom: 10 },
-  inlineLoading: { paddingVertical: 30, alignItems: "center" },
   centerState: { alignItems: "center", paddingVertical: 40, gap: 8 },
   centerStateText: { fontSize: 13, fontFamily: fonts.medium, color: "#9AA6B2", textAlign: "center", paddingHorizontal: 20 },
   studentRow: {

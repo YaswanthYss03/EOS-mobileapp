@@ -53,8 +53,11 @@ export async function createFacultyLeave(payload: CreateFacultyLeavePayload): Pr
 }
 
 export async function listFacultyLeaves(): Promise<MyFacultyLeave[]> {
+  // mine:true - self-service screen, always the caller's own requests, even
+  // for a HoD (who would otherwise get their department review queue back
+  // from this same endpoint - see faculty-leaves.service.ts's findAll).
   const { data } = await apiClient.get<{ data: { data: MyFacultyLeave[] } }>("/me/faculty-leaves", {
-    params: { limit: 100 },
+    params: { limit: 100, mine: true },
   });
   return data.data.data;
 }

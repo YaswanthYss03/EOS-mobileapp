@@ -7,6 +7,7 @@ import { useRouter } from "expo-router";
 import RazorpayCheckout from "react-native-razorpay";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonDetailBlock, SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { useAuth } from "@/context/AuthContext";
@@ -268,8 +269,8 @@ export function ParentFeesScreen() {
       </LinearGradient>
 
       {childrenStatus === "loading" && (
-        <View style={styles.inlineLoading}>
-          <ActivityIndicator color="#2F6FE0" />
+        <View style={styles.content}>
+          <SkeletonDetailBlock />
         </View>
       )}
 
@@ -291,8 +292,9 @@ export function ParentFeesScreen() {
       )}
 
       {childrenStatus === "success" && selectedChild && status === "loading" && (
-        <View style={styles.inlineLoading}>
-          <ActivityIndicator color="#2F6FE0" />
+        <View style={styles.content}>
+          <SkeletonDetailBlock style={{ marginBottom: 16 }} />
+          <SkeletonListRows count={3} />
         </View>
       )}
 
@@ -579,8 +581,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -598,10 +598,6 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
-  },
-  inlineLoading: {
-    paddingVertical: 48,
-    alignItems: "center",
   },
   errorNotice: {
     alignItems: "center",

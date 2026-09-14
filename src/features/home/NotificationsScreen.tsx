@@ -4,7 +4,6 @@ import {
   Text,
   FlatList,
   TouchableOpacity,
-  ActivityIndicator,
   RefreshControl,
   StyleSheet,
 } from "react-native";
@@ -14,6 +13,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { getApiErrorMessage } from "@/services/api/client";
 import { formatRelativeTime } from "@/utils/calendar";
@@ -169,9 +169,7 @@ export function NotificationsScreen() {
           )}
           ListEmptyComponent={
             status === "loading" ? (
-              <View style={styles.centerState}>
-                <ActivityIndicator color="#2F6FE0" />
-              </View>
+              <SkeletonListRows count={4} />
             ) : (
               <View style={styles.centerState}>
                 <Ionicons name="notifications-off-outline" size={32} color="#B0B7C3" />
@@ -226,8 +224,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,

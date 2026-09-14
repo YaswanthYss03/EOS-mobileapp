@@ -6,6 +6,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -14,6 +15,7 @@ import {
   getHandledClasses,
   recognizeAttendance,
   markClassAttendance,
+  publishClassAttendance,
   type TodayClassSlot,
   type HandledClass,
   type RosterStudent,
@@ -128,6 +130,7 @@ export function StudentAttendanceScreen() {
   const [statusMap, setStatusMap] = useState<Record<number, AttendanceStatus | undefined>>({});
   const [cameraOpen, setCameraOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [publishing, setPublishing] = useState(false);
 
   async function openPicker() {
     setPickerVisible(true);
@@ -232,15 +235,36 @@ export function StudentAttendanceScreen() {
         todayIso(),
         records,
       );
-      toast.success(`Attendance saved for ${result.marked} students`);
+      // Saved as a draft only (is_published: false) - not yet visible to
+      // students/parents/advisors, and can still be re-marked and re-saved
+      // from here. The screen stays open (unlike before) so Publish can
+      // follow right away instead of having to re-pick the same class.
+      toast.success(`Draft saved for ${result.marked} students - tap Publish to send it out`);
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Couldn't save attendance"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handlePublish() {
+    if (!selectedClass || students.length === 0) {
+      toast.warning("Choose a class first");
+      return;
+    }
+
+    setPublishing(true);
+    try {
+      const result = await publishClassAttendance(selectedClass.class_id, selectedClass.subject_id, todayIso());
+      toast.success(`Attendance published for ${result.published} students`);
       setSelectedClass(null);
       setStudents([]);
       setStatusMap({});
       setAnalyzed(false);
     } catch (error) {
-      toast.error(getApiErrorMessage(error, "Couldn't save attendance"));
+      toast.error(getApiErrorMessage(error, "Couldn't publish attendance - save a draft first"));
     } finally {
-      setSaving(false);
+      setPublishing(false);
     }
   }
 
@@ -322,12 +346,7 @@ export function StudentAttendanceScreen() {
           </View>
         )}
 
-        {selectedClass && rosterLoading && students.length === 0 && (
-          <View style={styles.emptyState}>
-            <ActivityIndicator color="#2F6FE0" />
-            <Text style={styles.emptyStateText}>Loading roster...</Text>
-          </View>
-        )}
+        {selectedClass && rosterLoading && students.length === 0 && <SkeletonListRows count={4} />}
 
         {selectedClass && students.length > 0 && (
           <>
@@ -403,7 +422,32 @@ export function StudentAttendanceScreen() {
                 <TouchableOpacity style={styles.clearButton} onPress={handleClear} activeOpacity={0.85}>
                   <Text style={styles.clearButtonText}>Clear</Text>
                 </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+                  onPress={handleSave}
+                  activeOpacity={0.85}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.saveButtonText}>Save</Text>
+                  )}
+                </TouchableOpacity>
               </View>
+
+              <TouchableOpacity
+                style={[styles.publishButton, publishing && styles.publishButtonDisabled]}
+                onPress={handlePublish}
+                activeOpacity={0.85}
+                disabled={publishing}
+              >
+                {publishing ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.publishButtonText}>Publish Attendance</Text>
+                )}
+              </TouchableOpacity>
 
               <View style={styles.studentList}>
                 {students.map((student) => (
@@ -416,19 +460,6 @@ export function StudentAttendanceScreen() {
                 ))}
               </View>
             </View>
-
-            <TouchableOpacity
-              style={[styles.saveButton, saving && styles.saveButtonDisabled]}
-              onPress={handleSave}
-              activeOpacity={0.85}
-              disabled={saving}
-            >
-              {saving ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.saveButtonText}>Save Attendance</Text>
-              )}
-            </TouchableOpacity>
           </>
         )}
       </ScrollView>
@@ -483,8 +514,8 @@ function ClassPickerModal({
           </View>
 
           {loading ? (
-            <View style={styles.modalLoading}>
-              <ActivityIndicator color="#2F6FE0" />
+            <View style={styles.modalList}>
+              <SkeletonListRows count={4} />
             </View>
           ) : (
             <ScrollView contentContainerStyle={styles.modalList}>
@@ -587,8 +618,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -922,21 +951,38 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
   },
   saveButton: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
+    borderRadius: 12,
     backgroundColor: "#2F6FE0",
-    borderRadius: 16,
-    paddingVertical: 16,
-    elevation: 3,
-    shadowColor: "#2F6FE0",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    paddingVertical: 10,
   },
   saveButtonDisabled: {
     opacity: 0.6,
   },
   saveButtonText: {
+    fontSize: 13,
+    fontFamily: fonts.semibold,
+    color: "#fff",
+  },
+  publishButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#16A34A",
+    borderRadius: 16,
+    paddingVertical: 16,
+    marginBottom: 14,
+    elevation: 3,
+    shadowColor: "#16A34A",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  publishButtonDisabled: {
+    opacity: 0.6,
+  },
+  publishButtonText: {
     fontSize: 15,
     fontFamily: fonts.bold,
     color: "#fff",
@@ -966,10 +1012,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: fonts.bold,
     color: "#111827",
-  },
-  modalLoading: {
-    paddingVertical: 40,
-    alignItems: "center",
   },
   modalList: {
     paddingHorizontal: 20,

@@ -10,6 +10,7 @@ import {
   StyleSheet,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -265,11 +266,7 @@ export function PrincipalCalendarScreen() {
         </TouchableOpacity>
       </View>
 
-      {isLoading && (
-        <View style={styles.inlineLoading}>
-          <ActivityIndicator color="#2F6FE0" />
-        </View>
-      )}
+      {isLoading && <SkeletonListRows count={5} />}
 
       {!isLoading && hasError && (
         <View style={styles.errorNotice}>
@@ -544,10 +541,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: fonts.bold,
     color: "#fff",
-  },
-  inlineLoading: {
-    paddingVertical: 40,
-    alignItems: "center",
   },
   errorNotice: {
     alignItems: "center",

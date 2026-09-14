@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { useRole } from "@/hooks/useRole";
 import {
@@ -183,7 +184,19 @@ export function CurrentSemesterScreen() {
     useCallback(() => {
       navigation.getParent()?.setOptions({
         header: () => (
-          <CurrentSemesterHeader onBack={() => router.back()} semester={semester} subjectCount={subjects.length} />
+          <CurrentSemesterHeader
+            // A faculty member or HoD reaches this via the Class tab's own
+            // Campus grid (a separate tab's Stack) - see TimetableScreen's
+            // identical comment for why router.back() alone isn't reliable
+            // there. A student has their own dedicated Campus tab instead
+            // (this screen's own Stack), where router.back() correctly pops
+            // back to Academics.
+            onBack={() =>
+              role === "employee" || role === "hod" ? router.replace("/(tabs)/erp") : router.back()
+            }
+            semester={semester}
+            subjectCount={subjects.length}
+          />
         ),
       });
       return () => {
@@ -196,8 +209,8 @@ export function CurrentSemesterScreen() {
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       {status === "loading" && (
-        <View style={styles.inlineLoading}>
-          <ActivityIndicator color="#2F6FE0" />
+        <View style={styles.content}>
+          <SkeletonListRows count={4} />
         </View>
       )}
 
@@ -289,8 +302,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -314,10 +325,6 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
-  },
-  inlineLoading: {
-    paddingVertical: 48,
-    alignItems: "center",
   },
   errorNotice: {
     alignItems: "center",

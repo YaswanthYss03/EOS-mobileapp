@@ -15,6 +15,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonDetailBlock, SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { confirm } from "@/utils/confirm";
@@ -363,10 +364,7 @@ export function StudentOdApplyScreen() {
 
         {tab === "apply" ? (
           teamsLoading ? (
-            <View style={styles.loadingState}>
-              <ActivityIndicator size="small" color="#2F6FE0" />
-              <Text style={styles.loadingStateText}>Loading...</Text>
-            </View>
+            <SkeletonDetailBlock />
           ) : teamsErrored ? (
             <View style={styles.emptyState}>
               <Ionicons name="cloud-offline-outline" size={32} color="#B0B7C3" />
@@ -566,7 +564,7 @@ export function StudentOdApplyScreen() {
                   onPress={() => setMode("create")}
                 />
                 <ModeCard
-                  icon="mail-open-outline"
+                  icon="mail-outline"
                   label="Join team"
                   selected={mode === "join"}
                   onPress={() => setMode("join")}
@@ -721,10 +719,7 @@ export function StudentOdApplyScreen() {
             </>
           )
         ) : historyLoading ? (
-          <View style={styles.loadingState}>
-            <ActivityIndicator size="small" color="#2F6FE0" />
-            <Text style={styles.loadingStateText}>Loading history...</Text>
-          </View>
+          <SkeletonListRows count={4} />
         ) : historyErrored ? (
           <View style={styles.emptyState}>
             <Ionicons name="cloud-offline-outline" size={32} color="#B0B7C3" />
@@ -962,8 +957,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -1013,16 +1006,6 @@ const styles = StyleSheet.create({
   tabButtonTextActive: {
     color: "#fff",
     fontFamily: fonts.bold,
-  },
-  loadingState: {
-    alignItems: "center",
-    paddingVertical: 48,
-    gap: 10,
-  },
-  loadingStateText: {
-    fontSize: 13,
-    fontFamily: fonts.regular,
-    color: "#9AA6B2",
   },
   modeRow: {
     flexDirection: "row",

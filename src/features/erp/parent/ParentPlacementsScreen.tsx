@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonDetailBlock, SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { formatDate } from "@/utils/calendar";
 import { getChildUpcomingDrives, getChildPlacementHistory } from "@/services/api/parents.api";
@@ -102,7 +103,11 @@ export function ParentPlacementsScreen() {
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({
-        header: () => <PlacementsHeader onBack={() => router.back()} />,
+        // This screen is parent-only, and parent now only reaches it via a
+        // Campus tab tile (Class tab is hidden for this role) - same
+        // cross-tab stale-Stack-history reasoning as the shared
+        // PlacementsOverviewScreen's identical comment.
+        header: () => <PlacementsHeader onBack={() => router.replace("/(tabs)/erp")} />,
       });
       return () => {
         navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
@@ -113,11 +118,7 @@ export function ParentPlacementsScreen() {
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       <View style={styles.content}>
-        {childrenStatus === "loading" && (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#2F6FE0" />
-          </View>
-        )}
+        {childrenStatus === "loading" && <SkeletonDetailBlock />}
 
         {childrenStatus === "error" && (
           <ErrorNotice message={childrenError ?? "Something went wrong."} onRetry={reloadChildren} />
@@ -262,12 +263,7 @@ function ErrorNotice({ message, onRetry }: { message: string; onRetry: () => voi
 }
 
 function LoadingState() {
-  return (
-    <View style={styles.centerState}>
-      <ActivityIndicator size="small" color="#2F6FE0" />
-      <Text style={styles.centerStateText}>Loading...</Text>
-    </View>
-  );
+  return <SkeletonListRows count={3} />;
 }
 
 function ErrorState({ onRetry }: { onRetry: () => void }) {
@@ -302,8 +298,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -321,10 +315,6 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     padding: 16,
-  },
-  inlineLoading: {
-    paddingVertical: 24,
-    alignItems: "center",
   },
   errorNotice: {
     alignItems: "center",

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet, Modal } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { SkeletonListRows, SkeletonStatCards } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { formatDate } from "@/utils/calendar";
 import { toast } from "@/utils/toast";
@@ -36,8 +37,9 @@ import {
   type PrincipalPlacementsOverview,
 } from "@/services/api/principal-placements.api";
 import { getApiErrorMessage } from "@/services/api/client";
+import { TodoTabBody } from "./TodoTabBody";
 
-type PlacementTab = "upcoming" | "history";
+type PlacementTab = "upcoming" | "history" | "todo";
 
 // "Round N cleared" comes straight from drive_application_status_enum
 // (applied/r1_cleared/r2_cleared/r3_cleared/rejected/placed) - the schema
@@ -70,7 +72,17 @@ function PlacementsHeader({ onBack }: { onBack: () => void }) {
       >
         <Ionicons name="arrow-back" size={20} color="#fff" />
       </TouchableOpacity>
-      <Text style={styles.headerTitle}>Placements</Text>
+      <View>
+        <Text style={styles.headerTitle}>Placements</Text>
+        {/* Every sibling header this page's Campus tile sits next to
+            (Timetable, Calendar, Current Semester) shows a title + a real
+            subtitle line - this one was just a bare title, which read as
+            broken/incomplete once every role started reaching it from the
+            same Campus tab tiles rather than only students via the old
+            Class tab chooser. Same descriptive line the chooser card itself
+            already used for this feature (see AcademicsChooserScreen.tsx). */}
+        <Text style={styles.headerSubtitle}>Drives, eligibility, offers and training</Text>
+      </View>
     </LinearGradient>
   );
 }
@@ -98,7 +110,19 @@ export function PlacementsOverviewScreen() {
     useCallback(() => {
       if (role === "principal") return;
       navigation.getParent()?.setOptions({
-        header: () => <PlacementsHeader onBack={() => router.back()} />,
+        // A faculty member or HoD reaches this via the Class tab's own
+        // Campus grid (a separate tab's Stack) - see TimetableScreen's
+        // identical comment for why router.back() alone isn't reliable
+        // there. A student has their own dedicated Campus tab instead (this
+        // screen's own Stack, via the Academics chooser), where
+        // router.back() correctly pops back to Edu.
+        header: () => (
+          <PlacementsHeader
+            onBack={() =>
+              role === "employee" || role === "hod" ? router.replace("/(tabs)/erp") : router.back()
+            }
+          />
+        ),
       });
       return () => {
         navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
@@ -155,7 +179,7 @@ function StudentPlacementsBody() {
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       <View style={styles.content}>
-        <TabSwitch tab={tab} setTab={setTab} />
+        <TabSwitch tab={tab} setTab={setTab} showTodo />
 
         <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
           {tab === "upcoming" ? (
@@ -168,14 +192,18 @@ function StudentPlacementsBody() {
             ) : (
               <EmptyState icon="briefcase-outline" text="No drives coming up right now." />
             )
-          ) : historyLoading ? (
-            <LoadingState />
-          ) : historyErrored ? (
-            <ErrorState onRetry={() => setHistoryReloadToken((n) => n + 1)} />
-          ) : history && history.length > 0 ? (
-            history.map((item) => <HistoryCard key={item.drive_id} item={item} />)
+          ) : tab === "history" ? (
+            historyLoading ? (
+              <LoadingState />
+            ) : historyErrored ? (
+              <ErrorState onRetry={() => setHistoryReloadToken((n) => n + 1)} />
+            ) : history && history.length > 0 ? (
+              history.map((item) => <HistoryCard key={item.drive_id} item={item} />)
+            ) : (
+              <EmptyState icon="document-text-outline" text="No placement history yet." />
+            )
           ) : (
-            <EmptyState icon="document-text-outline" text="No placement history yet." />
+            <TodoTabBody />
           )}
         </ScrollView>
       </View>
@@ -347,6 +375,12 @@ function PrincipalPlacementsBody() {
         end={{ x: 1, y: 1 }}
         style={[styles.principalHeader, { paddingTop: insets.top + 10 }]}
       >
+        {/* This body only ever renders for role === "principal" (see the
+            gate above), reached only via the Amenity tab's own Placements
+            card (see AmenityHomeScreen.tsx's principalOptions) - a normal
+            same-stack push within that tab, not a cross-tab jump, so a
+            plain router.back() is correct here (no stale-history risk like
+            the Campus-tab entry points other roles use). */}
         <TouchableOpacity onPress={() => router.back()} hitSlop={8}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
@@ -361,11 +395,7 @@ function PrincipalPlacementsBody() {
       </LinearGradient>
 
       <ScrollView contentContainerStyle={styles.principalContent} showsVerticalScrollIndicator={false}>
-        {overviewLoading && (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#2F6FE0" />
-          </View>
-        )}
+        {overviewLoading && <SkeletonStatCards count={4} style={{ marginBottom: 16 }} />}
 
         {!overviewLoading && overviewError && (
           <View style={styles.centerState}>
@@ -856,7 +886,15 @@ function StudentRow({ student, onPress }: { student: MentoredStudent; onPress: (
 
 // ───────────────────────────── Shared ─────────────────────────────
 
-function TabSwitch({ tab, setTab }: { tab: PlacementTab; setTab: (tab: PlacementTab) => void }) {
+function TabSwitch({
+  tab,
+  setTab,
+  showTodo,
+}: {
+  tab: PlacementTab;
+  setTab: (tab: PlacementTab) => void;
+  showTodo?: boolean;
+}) {
   return (
     <View style={styles.tabSwitch}>
       <TouchableOpacity
@@ -871,17 +909,20 @@ function TabSwitch({ tab, setTab }: { tab: PlacementTab; setTab: (tab: Placement
       >
         <Text style={[styles.tabSwitchText, tab === "history" && styles.tabSwitchTextActive]}>History</Text>
       </TouchableOpacity>
+      {showTodo && (
+        <TouchableOpacity
+          style={[styles.tabSwitchButton, tab === "todo" && styles.tabSwitchButtonActive]}
+          onPress={() => setTab("todo")}
+        >
+          <Text style={[styles.tabSwitchText, tab === "todo" && styles.tabSwitchTextActive]}>Todo</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
 
 function LoadingState() {
-  return (
-    <View style={styles.centerState}>
-      <ActivityIndicator size="small" color="#2F6FE0" />
-      <Text style={styles.centerStateText}>Loading...</Text>
-    </View>
-  );
+  return <SkeletonListRows count={3} />;
 }
 
 function ErrorState({ onRetry }: { onRetry: () => void }) {
@@ -916,8 +957,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   backButton: {
     width: 36,
@@ -931,6 +970,12 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 18,
     fontFamily: fonts.bold,
+  },
+  headerSubtitle: {
+    color: "#D7E2FA",
+    fontSize: 12,
+    fontFamily: fonts.medium,
+    marginTop: 2,
   },
   content: {
     flex: 1,
@@ -963,6 +1008,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: fonts.semibold,
     color: "#4B5563",
+    // The button itself centers this Text node as a block (tabSwitchButton's
+    // alignItems/justifyContent), but a two-word label like "Upcoming
+    // drives" can wrap onto two lines in the narrower 3-tab layout (with
+    // Todo) - without this, each wrapped line defaults to left-aligned
+    // inside that block, so the shorter line looks off-center relative to
+    // the other.
+    textAlign: "center",
   },
   tabSwitchTextActive: {
     color: "#fff",
@@ -1160,18 +1212,12 @@ const styles = StyleSheet.create({
     color: "#2F6FE0",
     marginTop: 4,
   },
-  inlineLoading: {
-    paddingVertical: 40,
-    alignItems: "center",
-  },
   principalHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 14,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   principalHeaderTextWrap: {
     flex: 1,

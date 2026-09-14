@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { Ionicons } from "@expo/vector-icons";
+import { SkeletonListRows, SkeletonStatCards } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { useRole } from "@/hooks/useRole";
 import {
@@ -154,7 +155,21 @@ export function TimetableScreen() {
             weekDates={weekDates}
             selectedIndex={selectedIndex}
             onSelectDay={(index) => setSelectedDayOfWeek(index + 1)}
-            onBack={() => router.back()}
+            // A faculty member, HoD, or HR Payroll reaches this screen from
+            // the Class tab's own Campus grid (a separate tab's Stack - see
+            // app/(tabs)/_layout.tsx), which pushes across tabs into this
+            // one's own Stack. That Stack's history isn't reset on
+            // re-entry, so a plain router.back() can pop to whatever was
+            // last visited here (e.g. always landing on Calendar) instead
+            // of where they actually came from. A student instead has their
+            // own dedicated Campus tab (this screen's own Stack, via the
+            // Academics chooser) - router.back() there correctly pops back
+            // to Academics within that same stack. Principal never reaches
+            // this screen at all (no Class tab, no Campus tile either - see
+            // PrincipalDashboard).
+            onBack={() =>
+              role === "employee" || role === "hod" || role === "hr-payroll" ? router.replace("/(tabs)/erp") : router.back()
+            }
           />
         ),
       });
@@ -179,9 +194,10 @@ export function TimetableScreen() {
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       {status === "loading" && (
-        <View style={styles.inlineLoading}>
-          <ActivityIndicator color="#2F6FE0" />
-        </View>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <SkeletonStatCards count={3} style={styles.statsRow} />
+          <SkeletonListRows count={4} />
+        </ScrollView>
       )}
 
       {status === "error" && (
@@ -290,8 +306,6 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: 16,
     paddingBottom: 16,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   headerTopRow: {
     flexDirection: "row",
@@ -353,10 +367,6 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
-  },
-  inlineLoading: {
-    paddingVertical: 48,
-    alignItems: "center",
   },
   errorNotice: {
     alignItems: "center",
