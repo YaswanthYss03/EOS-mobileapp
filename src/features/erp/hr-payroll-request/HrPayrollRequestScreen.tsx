@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -7,6 +7,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnchoredDropdown, useDropdown } from "@/components/ui/dropdown";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { formatDate } from "@/utils/calendar";
@@ -18,6 +19,7 @@ import {
   type HrQueryStatus,
 } from "@/services/api/hr-queries.api";
 import { requestCategories } from "./data/mockHrPayrollRequest";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 // Keyed on the values hr_payroll_requests_status_check actually allows:
 // 'submitted' | 'under_review' | 'resolved'. There is deliberately no
@@ -43,7 +45,7 @@ export function HrPayrollRequestScreen() {
   const insets = useSafeAreaInsets();
 
   const [category, setCategory] = useState<string | null>(null);
-  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
+  const categoryPicker = useDropdown();
   const [subject, setSubject] = useState("");
   const [description, setDescription] = useState("");
   const [tickets, setTickets] = useState<HrQuery[]>([]);
@@ -123,6 +125,7 @@ export function HrPayrollRequestScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -145,14 +148,16 @@ export function HrPayrollRequestScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.card}>
           <Text style={styles.fieldLabel}>Request Category</Text>
-          <TouchableOpacity
-            style={styles.selectRow}
-            onPress={() => setCategoryPickerOpen(true)}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.selectValue}>{category ?? "Select a category"}</Text>
-            <Ionicons name="chevron-down" size={18} color="#B0B7C3" />
-          </TouchableOpacity>
+          <View ref={categoryPicker.anchorRef} collapsable={false}>
+            <TouchableOpacity
+              style={styles.selectRow}
+              onPress={categoryPicker.toggle}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.selectValue}>{category ?? "Select a category"}</Text>
+              <Ionicons name="chevron-down" size={18} color="#B0B7C3" />
+            </TouchableOpacity>
+          </View>
 
           <Text style={styles.fieldLabel}>Subject</Text>
           <TextInput
@@ -216,32 +221,30 @@ export function HrPayrollRequestScreen() {
         ))}
       </ScrollView>
 
-      <Modal
-        visible={categoryPickerOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setCategoryPickerOpen(false)}
+      <AnchoredDropdown
+        anchorRef={categoryPicker.anchorRef}
+        visible={categoryPicker.visible}
+        onClose={categoryPicker.close}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
       >
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setCategoryPickerOpen(false)}>
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>Request Category</Text>
-            {requestCategories.map((option) => (
-              <TouchableOpacity
-                key={option}
-                style={styles.modalOptionRow}
-                onPress={() => {
-                  setCategory(option);
-                  setCategoryPickerOpen(false);
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.modalOptionName}>{option}</Text>
-                {category === option && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
-              </TouchableOpacity>
-            ))}
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+        <Text style={styles.modalTitle}>Request Category</Text>
+        <ScrollView style={styles.modalList} showsVerticalScrollIndicator={false}>
+          {requestCategories.map((option) => (
+            <TouchableOpacity
+              key={option}
+              style={styles.modalOptionRow}
+              onPress={() => {
+                setCategory(option);
+                categoryPicker.close();
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.modalOptionName}>{option}</Text>
+              {category === option && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </AnchoredDropdown>
     </SafeAreaView>
   );
 }
@@ -293,7 +296,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -493,16 +496,22 @@ const styles = StyleSheet.create({
     color: "#111827",
     marginTop: 3,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.5)",
-    justifyContent: "center",
-    padding: 20,
-  },
   modalCard: {
     backgroundColor: "#fff",
     borderRadius: 18,
     padding: 18,
+  },
+  anchoredCard: {
+    width: 260,
+    maxHeight: 320,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+  },
+  modalList: {
+    marginBottom: 4,
   },
   modalTitle: {
     fontSize: 15,

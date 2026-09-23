@@ -3,7 +3,7 @@ import { View, Text, ScrollView, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
-import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import { fonts } from "@/theme";
 import { DashboardHeader } from "../components/DashboardHeader";
 import { QuickAccessStatCards } from "./components/QuickAccessStatCards";
@@ -27,52 +27,46 @@ export function StudentDashboard() {
   const campusStats: Record<string, CardStat> = {
     od: data.od,
     leave: data.leave,
-    "exam-schedule": data.examSchedule,
     bonafide: data.bonafide,
-    hostel: data.hostel,
-    library: data.library,
-    feedback: data.feedback,
-    "no-due": data.noDue,
-    medical: data.medical,
   };
-  // Hostel is only relevant to hostel residents - a dayscholar never sees
-  // the tile at all, not just a "Not allotted" value. Held back while
-  // isHostelResident is still unresolved (null) so it doesn't flash in
-  // for a dayscholar before disappearing again.
-  const campusItems: CampusItem[] = campusConfigs
-    .filter((cfg) => cfg.id !== "hostel" || data.isHostelResident === true)
-    // Tiles moved in from the old Class tab (Timetable, Calendar, ...) have
-    // no matching entry in campusStats - they're pure navigation shortcuts,
-    // not stats, so they simply render with no value line (see CampusItem's
-    // now-optional `value` and CampusIconGrid's conditional render).
-    .map((cfg) => ({ ...cfg, value: campusStats[cfg.id]?.value }));
+  const campusItems: CampusItem[] = campusConfigs.map((cfg) => ({ ...cfg, value: campusStats[cfg.id]?.value }));
 
   // Swaps the shared CollegeHeader (mounted at the Tabs level, see
-  // app/(tabs)/_layout.tsx) for this screen's own header while it's focused,
-  // restoring the shared one on blur/unmount - same pattern as the ERP
-  // employee/hod dashboards.
+  // app/(tabs)/_layout.tsx) for this screen's own header while it's
+  // focused - same pattern as the ERP employee/hod dashboards. Explicitly
+  // re-asserts headerShown:true too (not just `header`), since the Hostel
+  // hub (this dashboard's own "Hostel" tile, erp/student-hostel) and its 3
+  // sub-pages each set headerShown:false for their own inline header with
+  // no cleanup of their own (see StudentHostelScreen.tsx's comment) - this
+  // screen owns restoring it instead of depending on theirs.
+  //
+  // No cleanup here either: an unconditional reset-on-blur raced whatever
+  // the pushed screen had just set on its own focus (undefined ordering
+  // between screens in the same Stack), intermittently leaving the
+  // CollegeHeader shown instead of the pushed screen's own header (see
+  // PrincipalStudentsScreen.tsx in erp/principal/students for the
+  // identical bug and fix this mirrors). Coming back here re-fires this
+  // effect regardless, so nothing is lost by not resetting on the way out.
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({
+        headerShown: true,
         header: () => <DashboardHeader onBack={() => router.replace("/(tabs)/home")} />,
       });
-      return () => {
-        navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
-      };
+      return undefined;
     }, [navigation, router]),
   );
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.section}>
           <QuickAccessStatCards items={statCards} />
         </View>
 
         <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Campus</Text>
-          </View>
+          <Text style={styles.sectionTitle}>Requests</Text>
           <CampusIconGrid items={campusItems} />
         </View>
       </ScrollView>
@@ -92,17 +86,13 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: 16,
   },
-  sectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 8,
-  },
   sectionTitle: {
     fontSize: 12,
     fontFamily: fonts.bold,
     color: "#8A93A3",
     letterSpacing: 1,
     textTransform: "uppercase",
+    marginBottom: 4,
+    paddingHorizontal: 10,
   },
 });

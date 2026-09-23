@@ -15,22 +15,15 @@ export const statCardConfigs: StatCardConfig[] = [
   { id: "fees", label: "Fees", icon: "card-outline", route: "/(tabs)/erp/student-fees" },
 ];
 
+// "Requests" section on the student's Progress tab (see StudentDashboard.tsx)
+// - just Leave/OD/Bonafide now. No-Due and Exam Schedule moved to the
+// Academics tab's Current Semester page (AcademicsOverviewScreen.tsx).
+// Hostel moved to its own 5th bottom-nav tab for a hosteller (see
+// app/(tabs)/bus-tracking/index.tsx). Library/Medical/Feedback moved to the
+// Campus (amenity) tab (see AmenityHomeScreen.tsx). Same routes/screens in
+// every case, just reachable from a different place now, never duplicated.
 export const campusConfigs: CampusItemConfig[] = [
-  {
-    id: "exam-schedule",
-    label: "Exam schedule",
-    icon: "calendar-outline",
-    route: "/(tabs)/erp/student-exam-schedule",
-  },
-  { id: "no-due", label: "No-Due", icon: "shield-checkmark-outline", route: "/(tabs)/erp/student-no-due" },
   { id: "leave", label: "Leave", icon: "log-out-outline", route: "/(tabs)/erp/student-leave-apply" },
   { id: "od", label: "OD", icon: "people-outline", route: "/(tabs)/erp/student-od-apply" },
-  { id: "feedback", label: "Feedback", icon: "star-outline", route: "/(tabs)/erp/student-feedback" },
-  { id: "library", label: "Library", icon: "library-outline", route: "/(tabs)/erp/student-library" },
   { id: "bonafide", label: "Bonafide", icon: "document-text-outline", route: "/(tabs)/erp/student-bonafide" },
-  // Same medical appointment booking every staff role gets from the shared
-  // Employee grid (see src/features/erp/data/employeeSectionItems.ts) - it sits
-  // under Campus here because that is where a student's own services live.
-  { id: "medical", label: "Medical", icon: "medkit-outline", route: "/(tabs)/erp/medical-appointment" },
-  { id: "hostel", label: "Hostel", icon: "bed-outline", route: "/(tabs)/erp/student-hostel" },
 ];

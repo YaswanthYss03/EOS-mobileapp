@@ -5,7 +5,6 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
-  Modal,
   StyleSheet,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,8 +14,10 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnchoredDropdown, useDropdown } from "@/components/ui/dropdown";
 import { fonts } from "@/theme";
 import { getApiErrorMessage } from "@/services/api/client";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import {
   getMyMentorClasses,
   getMentorClassResult,
@@ -47,7 +48,7 @@ export function ClassResultScreen() {
 
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const picker = useDropdown();
 
   const [classesStatus, setClassesStatus] = useState<LoadStatus>("loading");
   const [classesError, setClassesError] = useState<string | null>(null);
@@ -130,13 +131,14 @@ export function ClassResultScreen() {
 
   function handlePickClass(classId: number) {
     setSelectedClassId(classId);
-    setPickerOpen(false);
+    picker.close();
   }
 
   const hasMultipleClasses = classes.length > 1;
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -182,24 +184,26 @@ export function ClassResultScreen() {
 
         {classesStatus === "success" && classes.length > 0 && (
           <>
-            <TouchableOpacity
-              style={styles.sectionsCard}
-              activeOpacity={hasMultipleClasses ? 0.8 : 1}
-              onPress={() => hasMultipleClasses && setPickerOpen(true)}
-            >
-              <View style={styles.sectionsIconWrap}>
-                <Ionicons name="people-outline" size={16} color="#2F6FE0" />
-              </View>
-              <View style={styles.sectionsTextWrap}>
-                <Text style={styles.sectionsTitle}>My Class</Text>
-                <Text style={styles.sectionsSubtitle} numberOfLines={1}>
-                  {result
-                    ? result.class.label
-                    : classes.find((c) => c.class_id === selectedClassId)?.label ?? ""}
-                </Text>
-              </View>
-              {hasMultipleClasses && <Ionicons name="chevron-down" size={18} color="#B0B7C3" />}
-            </TouchableOpacity>
+            <View ref={picker.anchorRef} collapsable={false}>
+              <TouchableOpacity
+                style={styles.sectionsCard}
+                activeOpacity={hasMultipleClasses ? 0.8 : 1}
+                onPress={() => hasMultipleClasses && picker.open()}
+              >
+                <View style={styles.sectionsIconWrap}>
+                  <Ionicons name="people-outline" size={16} color="#2F6FE0" />
+                </View>
+                <View style={styles.sectionsTextWrap}>
+                  <Text style={styles.sectionsTitle}>My Class</Text>
+                  <Text style={styles.sectionsSubtitle} numberOfLines={1}>
+                    {result
+                      ? result.class.label
+                      : classes.find((c) => c.class_id === selectedClassId)?.label ?? ""}
+                  </Text>
+                </View>
+                {hasMultipleClasses && <Ionicons name="chevron-down" size={18} color="#B0B7C3" />}
+              </TouchableOpacity>
+            </View>
 
             <View style={styles.searchBar}>
               <Ionicons name="search-outline" size={16} color="#9AA6B2" />
@@ -244,31 +248,32 @@ export function ClassResultScreen() {
         )}
       </ScrollView>
 
-      <Modal visible={pickerOpen} transparent animationType="fade" onRequestClose={() => setPickerOpen(false)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setPickerOpen(false)}>
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>Select Your Class</Text>
-            <ScrollView style={styles.modalList}>
-              {classes.map((c) => (
-                <TouchableOpacity
-                  key={c.class_id}
-                  style={styles.modalRow}
-                  onPress={() => handlePickClass(c.class_id)}
-                  activeOpacity={0.7}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.modalRowText}>{c.label}</Text>
-                    <Text style={styles.modalRowSubtext}>{c.department.name}</Text>
-                  </View>
-                  {c.class_id === selectedClassId && (
-                    <Ionicons name="checkmark-circle" size={20} color="#2F6FE0" />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+      <AnchoredDropdown
+        anchorRef={picker.anchorRef}
+        visible={picker.visible}
+        onClose={picker.close}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
+      >
+        <Text style={styles.modalTitle}>Select Your Class</Text>
+        <ScrollView style={styles.modalList}>
+          {classes.map((c) => (
+            <TouchableOpacity
+              key={c.class_id}
+              style={styles.modalRow}
+              onPress={() => handlePickClass(c.class_id)}
+              activeOpacity={0.7}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalRowText}>{c.label}</Text>
+                <Text style={styles.modalRowSubtext}>{c.department.name}</Text>
+              </View>
+              {c.class_id === selectedClassId && (
+                <Ionicons name="checkmark-circle" size={20} color="#2F6FE0" />
+              )}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </AnchoredDropdown>
     </SafeAreaView>
   );
 }
@@ -368,7 +373,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -604,17 +609,22 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     color: "#9AA6B2",
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.5)",
-    justifyContent: "center",
-    padding: 20,
-  },
   modalCard: {
     backgroundColor: "#fff",
     borderRadius: 18,
     padding: 18,
     maxHeight: "70%",
+  },
+  // Anchored dropdown has no full-screen flex parent to resolve modalCard's
+  // percentage maxHeight against, so pin a concrete size here.
+  anchoredCard: {
+    width: 280,
+    maxHeight: 360,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   modalTitle: {
     fontSize: 15,

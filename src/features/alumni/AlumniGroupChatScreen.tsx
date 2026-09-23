@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   KeyboardAvoidingView,
-  Platform,
+  Keyboard,
   StyleSheet,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,6 +15,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
@@ -90,6 +91,7 @@ function GroupHeader({
 export function AlumniGroupChatScreen() {
   const navigation = useNavigation();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ alumniBatchId: string; groupName?: string; memberCount?: string }>();
   const alumniBatchId = Number(params.alumniBatchId);
   const scrollRef = useRef<ScrollView>(null);
@@ -101,6 +103,20 @@ export function AlumniGroupChatScreen() {
 
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+
+  // Same keyboard-tracking as the Home tab's own ConversationScreen (see
+  // app/(tabs)/home/messages/[conversationId].tsx) - only relevant while the
+  // keyboard is closed, so the compose row's own bottom padding doesn't
+  // stack on top of the space KeyboardAvoidingView already added.
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  useEffect(() => {
+    const showSub = Keyboard.addListener("keyboardDidShow", () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener("keyboardDidHide", () => setKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const load = useCallback(() => {
     setStatus("loading");
@@ -127,7 +143,20 @@ export function AlumniGroupChatScreen() {
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({
-        header: () => <GroupHeader onBack={() => router.back()} groupName={groupName} memberCount={memberCount} />,
+        header: () => (
+          <GroupHeader
+            onBack={() => {
+              // Dismiss first, then navigate - leaving while the keyboard is
+              // still open/animating is what left this screen's own
+              // KeyboardAvoidingView padding stuck mid-unwind (see the Home
+              // tab's own ConversationScreen for the same fix).
+              Keyboard.dismiss();
+              router.back();
+            }}
+            groupName={groupName}
+            memberCount={memberCount}
+          />
+        ),
       });
       return () => {
         navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
@@ -163,10 +192,15 @@ export function AlumniGroupChatScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.flex}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+      // app.json has `android.edgeToEdgeEnabled: true`, so Android needs
+      // this compensation too, not just iOS (same reasoning as the Home
+      // tab's own ConversationScreen) - "padding" unconditionally on both
+      // platforms, not disabled on Android.
+      behavior="padding"
+      keyboardVerticalOffset={0}
     >
       <SafeAreaView style={styles.container} edges={[]}>
+        <WatermarkBackground />
         {status === "loading" && (
           <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
             <SkeletonListRows count={5} />
@@ -219,7 +253,12 @@ export function AlumniGroupChatScreen() {
           </ScrollView>
         )}
 
-        <View style={styles.composeRow}>
+        <View
+          style={[
+            styles.composeRow,
+            { paddingBottom: keyboardVisible ? 10 : Math.max(insets.bottom, 12) },
+          ]}
+        >
           <TextInput
             style={styles.composeInput}
             placeholder="Type here.."
@@ -382,7 +421,7 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
     gap: 8,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingTop: 10,
     backgroundColor: "#fff",
     borderTopWidth: 1,
     borderTopColor: "#F1F3F6",

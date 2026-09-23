@@ -1,31 +1,17 @@
 import { useEffect, useState } from "react";
-import { View, Text, Image, ActivityIndicator, TouchableOpacity, TextInput, StyleSheet } from "react-native";
+import { View, Text, Image, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "@/theme";
-import { toast } from "@/utils/toast";
-import { getApiErrorMessage } from "@/services/api/client";
 import { formatRelativeTime } from "@/utils/calendar";
-import {
-  getAchievement,
-  addAchievementComment,
-  type AchievementListItem,
-  type AchievementComment,
-} from "@/services/api/achievements.api";
+import { type AchievementListItem } from "@/services/api/achievements.api";
 
 const logoSource = require("../../../../assets/logo.png");
 
 type Props = {
   post: AchievementListItem;
+  commentCount: number;
+  onOpenComments: () => void;
 };
-
-function initialsFromName(name: string) {
-  return name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
-    .join("");
-}
 
 // Splits on hashtags (keeping them, via a capturing group) so they can be
 // highlighted without touching the rest of the caption text.
@@ -63,19 +49,12 @@ function clamp(value: number, min: number, max: number) {
 
 // Every post is from the college's own account (Media Room only - see
 // AchievementsController's own doc comment), so the author header is fixed
-// rather than per-post data. Comments below it are wired to the real
-// backend: GET .../:id (lazy-loaded on "View comments") and POST
-// .../:id/comments, each comment carrying a server-resolved
-// {name, department} for whoever wrote it (see resolveCommenterDisplays).
-export function PostCard({ post }: Props) {
-  const [commentsExpanded, setCommentsExpanded] = useState(false);
-  const [comments, setComments] = useState<AchievementComment[] | null>(null);
-  const [loadingComments, setLoadingComments] = useState(false);
-  const [commentText, setCommentText] = useState("");
-  const [sending, setSending] = useState(false);
+// rather than per-post data. Comments are handled entirely by the shared
+// CommentsSheet modal (see HomeFeedScreen) now - this card just shows the
+// count and opens it.
+export function PostCard({ post, commentCount, onOpenComments }: Props) {
   const [imageAspectRatio, setImageAspectRatio] = useState(DEFAULT_IMAGE_ASPECT_RATIO);
 
-  const commentCount = comments?.length ?? post._count.achievement_comments;
   const firstMedia = post.achievement_media[0];
   const displayedImageUrl = firstMedia
     ? firstMedia.media_type === "video"
@@ -92,40 +71,6 @@ export function PostCard({ post }: Props) {
     );
   }, [displayedImageUrl]);
   const mediaCount = post.achievement_media.length;
-
-  async function handleToggleComments() {
-    const expanding = !commentsExpanded;
-    setCommentsExpanded(expanding);
-    if (!expanding || comments !== null) return;
-
-    setLoadingComments(true);
-    try {
-      const detail = await getAchievement(post.id);
-      setComments(detail.achievement_comments);
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Couldn't load comments"));
-      setCommentsExpanded(false);
-    } finally {
-      setLoadingComments(false);
-    }
-  }
-
-  async function handleSendComment() {
-    const text = commentText.trim();
-    if (!text || sending) return;
-
-    setSending(true);
-    try {
-      const created = await addAchievementComment(post.id, text);
-      setComments((prev) => [created, ...(prev ?? [])]);
-      setCommentsExpanded(true);
-      setCommentText("");
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Couldn't post your comment"));
-    } finally {
-      setSending(false);
-    }
-  }
 
   return (
     <View style={styles.card}>
@@ -168,69 +113,29 @@ export function PostCard({ post }: Props) {
       )}
 
       {commentCount > 0 && (
-        <TouchableOpacity style={styles.toggleRow} onPress={handleToggleComments} hitSlop={8}>
+        <TouchableOpacity style={styles.toggleRow} onPress={onOpenComments} hitSlop={8}>
           <Text style={styles.toggleText}>
-            {commentsExpanded
-              ? "Hide comments"
-              : `View ${commentCount > 1 ? `all ${commentCount} comments` : "1 comment"}`}
+            View {commentCount > 1 ? `all ${commentCount} comments` : "1 comment"}
           </Text>
-          <Ionicons name={commentsExpanded ? "chevron-up" : "chevron-down"} size={14} color="#2F6FE0" />
+          <Ionicons name="chevron-forward" size={14} color="#2F6FE0" />
         </TouchableOpacity>
       )}
 
-      {commentsExpanded && (
-        <View style={styles.commentsList}>
-          {loadingComments ? (
-            <ActivityIndicator color="#2F6FE0" style={{ paddingVertical: 8 }} />
-          ) : (
-            comments?.map((comment) => (
-              <View key={comment.id} style={styles.commentRow}>
-                <View style={styles.commentAvatar}>
-                  <Text style={styles.commentAvatarText}>
-                    {initialsFromName(comment.commenter?.name ?? "?")}
-                  </Text>
-                </View>
-                <View style={styles.commentTextWrap}>
-                  <View style={styles.commentAuthorRow}>
-                    <Text style={styles.commentAuthor}>{comment.commenter?.name ?? "Unknown"}</Text>
-                    {comment.commenter && (
-                      <>
-                        <Text style={styles.commentAuthorDot}>·</Text>
-                        <Text style={styles.commentDepartment} numberOfLines={1}>
-                          {comment.commenter.department}
-                        </Text>
-                      </>
-                    )}
-                  </View>
-                  <Text style={styles.commentText}>{comment.comment_text}</Text>
-                </View>
-              </View>
-            ))
-          )}
-        </View>
-      )}
-
-      <View style={styles.inputRow}>
+      {/* Opens the shared CommentsSheet instead of an inline composer - kept
+          the same look as the old always-visible input row (icon bubble +
+          pill + send button) so tapping it reads exactly like starting to
+          type a comment, matching the rest of the card's design. */}
+      <TouchableOpacity style={styles.inputRow} onPress={onOpenComments} activeOpacity={0.8}>
         <View style={styles.inputIconWrap}>
           <Ionicons name="chatbox-outline" size={16} color="#9AA6B2" />
         </View>
-        <TextInput
-          style={styles.input}
-          placeholder="Write a comment..."
-          placeholderTextColor="#9AA6B2"
-          value={commentText}
-          onChangeText={setCommentText}
-          onSubmitEditing={handleSendComment}
-          editable={!sending}
-        />
-        <TouchableOpacity
-          style={[styles.sendButton, (!commentText.trim() || sending) && styles.sendButtonDisabled]}
-          onPress={handleSendComment}
-          disabled={!commentText.trim() || sending}
-        >
-          {sending ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="send" size={15} color="#fff" />}
-        </TouchableOpacity>
-      </View>
+        <View style={styles.input}>
+          <Text style={styles.inputPlaceholder}>Write a comment...</Text>
+        </View>
+        <View style={styles.sendButton}>
+          <Ionicons name="send" size={15} color="#fff" />
+        </View>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -338,56 +243,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     color: "#2F6FE0",
   },
-  commentsList: {
-    paddingTop: 10,
-    gap: 10,
-  },
-  commentRow: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  commentAvatar: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: "#E4EBFB",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  commentAvatarText: {
-    fontSize: 11,
-    fontFamily: fonts.bold,
-    color: "#2F6FE0",
-  },
-  commentTextWrap: {
-    flex: 1,
-  },
-  commentAuthorRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-  },
-  commentAuthor: {
-    fontSize: 13,
-    fontFamily: fonts.semibold,
-    color: "#111827",
-  },
-  commentAuthorDot: {
-    fontSize: 12,
-    color: "#B0B7C3",
-  },
-  commentDepartment: {
-    flex: 1,
-    fontSize: 11,
-    fontFamily: fonts.regular,
-    color: "#9AA6B2",
-  },
-  commentText: {
-    fontSize: 13,
-    fontFamily: fonts.regular,
-    color: "#4B5563",
-    marginTop: 1,
-  },
   inputRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -407,13 +262,16 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    fontSize: 13,
-    fontFamily: fonts.regular,
-    color: "#111827",
+    justifyContent: "center",
     backgroundColor: "#F3F4F6",
     borderRadius: 18,
     paddingHorizontal: 14,
     paddingVertical: 8,
+  },
+  inputPlaceholder: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#9AA6B2",
   },
   sendButton: {
     width: 32,
@@ -422,8 +280,5 @@ const styles = StyleSheet.create({
     backgroundColor: "#2F6FE0",
     alignItems: "center",
     justifyContent: "center",
-  },
-  sendButtonDisabled: {
-    backgroundColor: "#C7D3EE",
   },
 });

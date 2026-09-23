@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -20,6 +20,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { SkeletonDetailBlock, SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { useAuth } from "@/context/AuthContext";
+import { useRole } from "@/hooks/useRole";
 import { toast } from "@/utils/toast";
 import { confirm } from "@/utils/confirm";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -31,6 +32,9 @@ import {
   type MyProfile,
   type SocialLink,
 } from "@/services/api/profile.api";
+import { getChildProfile } from "@/services/api/parents.api";
+import { getMyTeachingSubjects, type LmsTeachingSubject } from "@/services/api/lms.api";
+import { getMyMentorClasses, type MentorClass } from "@/services/api/class-mentors.api";
 
 function humanize(value: string | null | undefined) {
   if (!value) return value ?? null;
@@ -174,6 +178,54 @@ function ParentGuardianCard({ profile }: { profile: MyProfile }) {
   );
 }
 
+// Faculty-only "Teaching" section - which subjects+classes this faculty
+// handles (GET /me/lms/my-subjects, faculty_subject_class_mapping-scoped)
+// and which class(es) they're the mentor/advisor of (GET /me/mentee-classes,
+// class_mentors-scoped) - same real data the Class tab's own Class Result/
+// LMS pages already use, just surfaced here too. Renders nothing when both
+// lists are empty (e.g. a Faculty account with no mapping data yet), same
+// "don't show an empty card" rule as DetailCard.
+function TeachingCard({
+  subjects,
+  mentorClasses,
+}: {
+  subjects: LmsTeachingSubject[];
+  mentorClasses: MentorClass[];
+}) {
+  if (subjects.length === 0 && mentorClasses.length === 0) return null;
+
+  return (
+    <>
+      <Text style={styles.sectionTitle}>Teaching</Text>
+      <View style={styles.card}>
+        {mentorClasses.length > 0 && (
+          <View style={[styles.serviceRow, styles.teachingBlockCol]}>
+            <Text style={styles.serviceLabel}>Class Advisor</Text>
+            <Text style={styles.teachingBlockValue}>{mentorClasses.map((c) => c.label).join(", ")}</Text>
+          </View>
+        )}
+        {subjects.map((subject, index) => (
+          <View
+            key={subject.subject_id}
+            style={[
+              styles.serviceRow,
+              styles.teachingBlockCol,
+              (index > 0 || mentorClasses.length > 0) && styles.serviceRowDivider,
+            ]}
+          >
+            <Text style={styles.serviceLabel}>
+              {subject.subject_code} {subject.subject_name}
+            </Text>
+            <Text style={styles.teachingBlockValue}>
+              {subject.classes.length > 0 ? subject.classes.map((c) => c.label).join(", ") : "No class mapped yet"}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </>
+  );
+}
+
 function initialsFromName(name: string | null | undefined) {
   if (!name) return "?";
   const parts = name.trim().split(/\s+/);
@@ -205,6 +257,12 @@ export function ProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { logout } = useAuth();
+  const role = useRole();
+  // Principal/Correspondent get no self-service Resume upload or Digital ID
+  // Card - neither concept applies to their role (no resume to maintain, no
+  // physical-ID-equivalent card issued for them), unlike every other staff/
+  // student role this screen otherwise serves identically.
+  const isPrincipalOrCorrespondent = role === "principal" || role === "correspondent";
 
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [profile, setProfile] = useState<MyProfile | null>(null);
@@ -213,6 +271,14 @@ export function ProfileScreen() {
   const [linkTitle, setLinkTitle] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [savingLink, setSavingLink] = useState(false);
+  const [teachingSubjects, setTeachingSubjects] = useState<LmsTeachingSubject[]>([]);
+  const [mentorClasses, setMentorClasses] = useState<MentorClass[]>([]);
+  // Parent only - each linked child's own full profile (Personal/Contact/
+  // Family/resume, same shape the child sees on their own Profile & Resume
+  // page), keyed by student id, fetched once children are known.
+  const [childProfiles, setChildProfiles] = useState<
+    Record<number, { status: "loading" | "success" | "error"; profile?: MyProfile }>
+  >({});
 
   const load = useCallback(() => {
     setStatus("loading");
@@ -220,6 +286,14 @@ export function ProfileScreen() {
       .then((data) => {
         setProfile(data);
         setStatus("success");
+        // Teaching/Class Advisor info is faculty-only - fire-and-forget,
+        // never blocks the rest of the profile on this (a Faculty account
+        // with no mapping data yet just sees no Teaching card at all, same
+        // as EmployeeDashboard's own fallback).
+        if (data.role === "faculty") {
+          getMyTeachingSubjects().then(setTeachingSubjects).catch(() => {});
+          getMyMentorClasses().then(setMentorClasses).catch(() => {});
+        }
       })
       .catch(() => setStatus("error"));
   }, []);
@@ -231,6 +305,25 @@ export function ProfileScreen() {
       load();
     }, [load]),
   );
+
+  // Fetch each linked child's full profile once the parent's own profile
+  // (and its children list) has loaded - fire-and-forget per child, same
+  // "don't block the rest of the page" convention as the faculty
+  // teaching-subjects fetch above.
+  useEffect(() => {
+    if (profile?.role !== "parent" || !profile.children || profile.children.length === 0) return;
+    for (const child of profile.children) {
+      setChildProfiles((prev) => ({ ...prev, [child.id]: { status: "loading" } }));
+      getChildProfile(child.id)
+        .then((childProfile) => {
+          setChildProfiles((prev) => ({ ...prev, [child.id]: { status: "success", profile: childProfile } }));
+        })
+        .catch(() => {
+          setChildProfiles((prev) => ({ ...prev, [child.id]: { status: "error" } }));
+        });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.role, profile?.children]);
 
   async function handleLogout() {
     const ok = await confirm({
@@ -410,6 +503,11 @@ export function ProfileScreen() {
           {/* Parent / guardian (student only) */}
           {profile.role === "student" && <ParentGuardianCard profile={profile} />}
 
+          {/* Teaching / Class Advisor (faculty only) */}
+          {profile.role === "faculty" && (
+            <TeachingCard subjects={teachingSubjects} mentorClasses={mentorClasses} />
+          )}
+
           {/* Professional details (faculty/HoD/HR/Principal) */}
           {profile.role === "faculty" && (
             <DetailCard
@@ -434,7 +532,7 @@ export function ProfileScreen() {
             />
           )}
 
-          {profile.role !== "parent" && (
+          {profile.role !== "parent" && !isPrincipalOrCorrespondent && (
             <>
               {/* Resume row */}
               <TouchableOpacity
@@ -496,57 +594,127 @@ export function ProfileScreen() {
                   </View>
                 ))}
               </View>
+
+              {/* Each child's own full profile - same Personal/Contact/
+                  Family/resume sections the student sees on their own
+                  Profile & Resume page (see DetailCard/ParentGuardianCard
+                  above, reused as-is with the fetched child profile instead
+                  of the parent's own). */}
+              {profile.children?.map((child) => {
+                const entry = childProfiles[child.id];
+                return (
+                  <View key={child.id}>
+                    <Text style={styles.childDetailHeading}>{child.name}'s Details</Text>
+                    {(!entry || entry.status === "loading") && (
+                      <SkeletonDetailBlock style={{ marginBottom: 16 }} />
+                    )}
+                    {entry?.status === "error" && (
+                      <View style={styles.card}>
+                        <Text style={styles.emptyLinksText}>Couldn't load {child.name}'s profile.</Text>
+                      </View>
+                    )}
+                    {entry?.status === "success" && entry.profile && (
+                      <>
+                        <DetailCard
+                          title="Personal Details"
+                          rows={[
+                            { label: "Gender", value: humanize(entry.profile.gender) },
+                            { label: "Date of Birth", value: entry.profile.date_of_birth },
+                            { label: "Blood Group", value: entry.profile.blood_group },
+                            { label: "Nationality", value: entry.profile.nationality },
+                            { label: "Religion", value: entry.profile.religion },
+                            { label: "Community", value: entry.profile.community },
+                          ]}
+                        />
+                        <DetailCard
+                          title="Contact Details"
+                          rows={[
+                            { label: "Mobile", value: entry.profile.mobile },
+                            { label: "Personal Email", value: entry.profile.personal_email },
+                            { label: "Address", value: entry.profile.address },
+                          ]}
+                        />
+                        <ParentGuardianCard profile={entry.profile} />
+                        {entry.profile.resume_url && (
+                          <TouchableOpacity
+                            style={styles.card}
+                            activeOpacity={0.8}
+                            onPress={() =>
+                              Linking.openURL(entry.profile!.resume_url!).catch(() =>
+                                toast.error("Couldn't open the resume"),
+                              )
+                            }
+                          >
+                            <View style={styles.resumeRow}>
+                              <Ionicons name="document-text-outline" size={20} color="#2F6FE0" />
+                              <Text style={styles.resumeText}>View Resume</Text>
+                              <Ionicons name="chevron-forward" size={18} color="#B0B7C3" />
+                            </View>
+                          </TouchableOpacity>
+                        )}
+                      </>
+                    )}
+                  </View>
+                );
+              })}
             </>
           )}
 
-          {/* Social / academic links */}
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Links</Text>
-            <TouchableOpacity
-              onPress={() => setAddLinkOpen(true)}
-              style={styles.addLinkButton}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="add" size={16} color="#2F6FE0" />
-              <Text style={styles.addLinkButtonText}>Add</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.card}>
-            {profile.social_links.length === 0 && (
-              <Text style={styles.emptyLinksText}>
-                No links added yet. Tap "Add" to share your LinkedIn, GitHub, portfolio, or anything else.
-              </Text>
-            )}
-            {profile.social_links.map((link, index) => (
-              <View
-                key={link.id}
-                style={[styles.linkRow, index < profile.social_links.length - 1 && styles.linkRowDivider]}
-              >
+          {/* Social / academic links - not shown for Parent, who has no
+              personal links of their own to share (this section is only
+              ever about the caller's own LinkedIn/GitHub/portfolio, not
+              their child's). */}
+          {profile.role !== "parent" && (
+            <>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionTitle}>Links</Text>
                 <TouchableOpacity
-                  style={styles.linkTouchable}
+                  onPress={() => setAddLinkOpen(true)}
+                  style={styles.addLinkButton}
                   activeOpacity={0.8}
-                  onPress={() => Linking.openURL(link.url).catch(() => toast.error("Couldn't open that link"))}
                 >
-                  <View style={styles.linkIconWrap}>
-                    <Ionicons name={iconForLinkTitle(link.title)} size={18} color="#2F6FE0" />
-                  </View>
-                  <View style={styles.linkTextWrap}>
-                    <Text style={styles.linkLabel}>{link.title}</Text>
-                    <Text style={styles.linkValue} numberOfLines={1}>
-                      {link.url}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => handleRemoveLink(link)}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  style={styles.linkRemoveButton}
-                >
-                  <Ionicons name="close-circle-outline" size={19} color="#B0B7C3" />
+                  <Ionicons name="add" size={16} color="#2F6FE0" />
+                  <Text style={styles.addLinkButtonText}>Add</Text>
                 </TouchableOpacity>
               </View>
-            ))}
-          </View>
+              <View style={styles.card}>
+                {profile.social_links.length === 0 && (
+                  <Text style={styles.emptyLinksText}>
+                    No links added yet. Tap "Add" to share your LinkedIn, GitHub, portfolio, or anything else.
+                  </Text>
+                )}
+                {profile.social_links.map((link, index) => (
+                  <View
+                    key={link.id}
+                    style={[styles.linkRow, index < profile.social_links.length - 1 && styles.linkRowDivider]}
+                  >
+                    <TouchableOpacity
+                      style={styles.linkTouchable}
+                      activeOpacity={0.8}
+                      onPress={() => Linking.openURL(link.url).catch(() => toast.error("Couldn't open that link"))}
+                    >
+                      <View style={styles.linkIconWrap}>
+                        <Ionicons name={iconForLinkTitle(link.title)} size={18} color="#2F6FE0" />
+                      </View>
+                      <View style={styles.linkTextWrap}>
+                        <Text style={styles.linkLabel}>{link.title}</Text>
+                        <Text style={styles.linkValue} numberOfLines={1}>
+                          {link.url}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => handleRemoveLink(link)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      style={styles.linkRemoveButton}
+                    >
+                      <Ionicons name="close-circle-outline" size={19} color="#B0B7C3" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
 
           {/* Service record */}
           <Text style={styles.sectionTitle}>Service Record</Text>
@@ -577,7 +745,7 @@ export function ProfileScreen() {
           </View>
 
           {/* Digital ID card */}
-          {profile.role !== "parent" && (
+          {profile.role !== "parent" && !isPrincipalOrCorrespondent && (
             <TouchableOpacity
               style={styles.idCardButton}
               activeOpacity={0.85}
@@ -651,6 +819,7 @@ export function ProfileScreen() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
     </SafeAreaView>
   );
 }
@@ -671,7 +840,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -849,6 +1017,13 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     marginBottom: 8,
   },
+  childDetailHeading: {
+    fontSize: 14,
+    fontFamily: fonts.bold,
+    color: "#111827",
+    marginTop: 8,
+    marginBottom: 10,
+  },
   addLinkButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -987,6 +1162,17 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     color: "#D7E2FA",
     marginTop: 2,
+  },
+  teachingBlockCol: {
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: 4,
+  },
+  teachingBlockValue: {
+    fontSize: 13,
+    fontFamily: fonts.semibold,
+    color: "#111827",
+    textAlign: "left",
   },
   logoutButton: {
     flexDirection: "row",

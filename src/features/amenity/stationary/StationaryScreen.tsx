@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Modal, FlatList, Platform, StyleSheet } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { View, Text, ScrollView, TouchableOpacity, FlatList, Platform, ActivityIndicator, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -7,18 +7,29 @@ import { useRouter } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
 import * as Sharing from "expo-sharing";
 import * as IntentLauncher from "expo-intent-launcher";
+import { File } from "expo-file-system";
+import { PDFDocument } from "pdf-lib";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import RazorpayCheckout from "react-native-razorpay";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
+import { AnchoredDropdown } from "@/components/ui/dropdown";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { confirm } from "@/utils/confirm";
 import { useAuth } from "@/context/AuthContext";
 import { getApiErrorMessage } from "@/services/api/client";
-import { createStationaryOrder, verifyStationaryPayment } from "@/services/api/stationary.api";
+import {
+  createStationaryOrder,
+  verifyStationaryPayment,
+  getMyStationaryRequests,
+  type MyStationaryRequest,
+} from "@/services/api/stationary.api";
 
-type Tab = "request" | "draft";
+type Tab = "request" | "draft" | "history";
+type LoadStatus = "loading" | "success" | "error";
 
 const PAPER_SIZES = ["A4", "A3", "A5", "Letter", "Legal"] as const;
 const COLOR_MODES = ["Black & White", "Color"] as const;
@@ -37,7 +48,16 @@ type Binding = (typeof BINDINGS)[number];
 type UploadedFile = {
   id: string;
   name: string;
-  pages: number;
+  // null while a PDF's real page count is still being read (see
+  // countPdfPages) - never a fabricated number in the meantime. For a
+  // non-PDF file (DOC/DOCX), this is the user's own manually-entered count
+  // (see isPdf below) since no accurate page count can be read client-side
+  // without fully rendering the document.
+  pages: number | null;
+  // True only for a page count read from the file's own real PDF
+  // structure (via pdf-lib) - false for a manually-entered DOC/DOCX count,
+  // so the UI knows which files' page counts are still editable.
+  isPdf: boolean;
   sizeLabel: string;
   // Always the real on-device file URI - every file in this list came from
   // a real DocumentPicker pick (see pickFiles), so "Preview" can always
@@ -81,15 +101,20 @@ function formatBytes(bytes: number | undefined): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-// A real page count needs an actual PDF parser (not available client-side
-// without a heavy native library) - this screen is design/mock-data only
-// (no backend), so a freshly-picked file gets a plausible mock page count
-// instead, deterministic on its own name+size so re-adding the same file
-// doesn't jitter between renders.
-function mockPageCount(name: string, size: number): number {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) % 97;
-  return 4 + ((hash + Math.floor(size / 1024)) % 60);
+function isPdfAsset(asset: { mimeType?: string | null; name: string }): boolean {
+  return (asset.mimeType ?? "").includes("pdf") || asset.name.toLowerCase().endsWith(".pdf");
+}
+
+// Real page count, read from the file's own PDF structure (pdf-lib, pure
+// JS, no native module) - `getPageCount()` walks the document's actual
+// page tree, so this is never an estimate. `ignoreEncryption: true` lets a
+// password-protected PDF's page count still be read even though its
+// content can't be - the structure (and therefore the count) isn't
+// encrypted the same way the content streams are.
+async function countPdfPages(uri: string): Promise<number> {
+  const bytes = await new File(uri).bytes();
+  const pdf = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+  return pdf.getPageCount();
 }
 
 const PRICE_PER_PAGE = 2;
@@ -103,7 +128,7 @@ function estimateCost(totalPages: number, copies: number): number {
 }
 
 function draftSummaryLine(draft: StationaryDraft): string {
-  const totalPages = draft.files.reduce((sum, f) => sum + f.pages, 0);
+  const totalPages = draft.files.reduce((sum, f) => sum + (f.pages ?? 0), 0);
   const copyLabel = `${draft.settings.copies} ${draft.settings.copies === 1 ? "copy" : "copies"}`;
   const colorShort = draft.settings.colorMode === "Black & White" ? "B&W" : "Color";
   return `${totalPages} pages · ${copyLabel} · ${colorShort} · ${draft.settings.paperSize}`;
@@ -119,13 +144,43 @@ function formatSavedAt(iso: string): string {
   return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 }
 
+const REQUEST_STATUS_LABEL: Record<MyStationaryRequest["status"], string> = {
+  pending_payment: "Payment pending",
+  paid: "Paid",
+  processing: "Processing",
+  ready_for_pickup: "Ready for pickup",
+  completed: "Completed",
+  rejected: "Rejected",
+};
+
+// Set by a Stationary-vendor account (see stationary-vendor.api.ts), never
+// by this student-facing screen - just displayed here once the vendor
+// moves a request along.
+const REQUEST_STATUS_COLORS: Record<MyStationaryRequest["status"], { bg: string; text: string }> = {
+  pending_payment: { bg: "#FEF3C7", text: "#B45309" },
+  paid: { bg: "#DCFCE7", text: "#16A34A" },
+  processing: { bg: "#DBEAFE", text: "#2563EB" },
+  ready_for_pickup: { bg: "#EAF0FD", text: "#2F6FE0" },
+  completed: { bg: "#DCFCE7", text: "#16A34A" },
+  rejected: { bg: "#FEE2E2", text: "#DC2626" },
+};
+
+function requestSummaryLine(request: MyStationaryRequest): string {
+  const copyLabel = `${request.copies} ${request.copies === 1 ? "copy" : "copies"}`;
+  const colorShort = request.color_mode === "color" ? "Color" : "B&W";
+  return `${request.total_pages} pages · ${copyLabel} · ${colorShort}${request.paper_size ? ` · ${request.paper_size}` : ""}`;
+}
+
 // Xerox/print-shop request form, reachable from the Amenity tab's
 // "Stationary" tile. File upload is real (DocumentPicker, see pickFiles) -
 // no starter mock catalogue anymore, every file/draft in this screen came
 // from a real pick or a real previously-saved draft, and Preview always
-// opens the actual on-device file. Per-file page counts are still an
-// estimate (mockPageCount) - no PDF parser exists anywhere in this app to
-// read a real page count from a file's contents. "Save and pay" is a real
+// opens the actual on-device file. A PDF's page count is read for real from
+// its own structure (countPdfPages, via pdf-lib) - never estimated, since
+// the charge amount is derived directly from it. A DOC/DOCX file has no
+// equivalent client-side parser available, so its page count is left for
+// the user to enter themselves (see the manual pages stepper on its file
+// card) rather than guessed. "Save and pay" is a real
 // Razorpay order-then-verify flow against EOSbackend1's stationary module
 // (see stationary.api.ts) - the amount is always server-computed from
 // total_pages/copies, never trusted from the client. Drafts stay local-only
@@ -138,15 +193,25 @@ export function StationaryScreen() {
   const { user } = useAuth();
   const storageKey = `stationary_drafts_v2_${user?.id ?? "guest"}`;
 
+  const scrollMemory = useTabScrollMemory();
+
   const [tab, setTab] = useState<Tab>("request");
   const [drafts, setDrafts] = useState<StationaryDraft[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  const [history, setHistory] = useState<MyStationaryRequest[]>([]);
+  const [historyStatus, setHistoryStatus] = useState<LoadStatus>("loading");
+
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [settings, setSettings] = useState<PrintSettings>(DEFAULT_SETTINGS);
   const [saving, setSaving] = useState(false);
   const [dropdownField, setDropdownField] = useState<DropdownableField | null>(null);
+  // One <AnchoredDropdown> is shared by all 5 fields below (same as before,
+  // just anchored instead of centered) - it needs to measure whichever
+  // field's own trigger was actually tapped, so each field keeps its own
+  // node here rather than all fighting over a single ref.
+  const fieldAnchors = useRef<Partial<Record<DropdownableField, View | null>>>({});
 
   useFocusEffect(
     useCallback(() => {
@@ -165,6 +230,20 @@ export function StationaryScreen() {
       .catch(() => setDrafts([]))
       .finally(() => setLoaded(true));
   }, [storageKey]);
+
+  const loadHistory = useCallback(() => {
+    setHistoryStatus("loading");
+    getMyStationaryRequests()
+      .then((rows) => {
+        setHistory(rows);
+        setHistoryStatus("success");
+      })
+      .catch(() => setHistoryStatus("error"));
+  }, []);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
 
   const persist = useCallback(
     async (next: StationaryDraft[]) => {
@@ -191,15 +270,45 @@ export function StationaryScreen() {
     });
     if (result.canceled || !result.assets?.length) return;
 
-    const added = result.assets.map((asset) => ({
-      id: `${Date.now()}-${asset.name}`,
-      name: asset.name,
-      pages: mockPageCount(asset.name, asset.size ?? 0),
-      sizeLabel: formatBytes(asset.size),
-      uri: asset.uri,
-      mimeType: asset.mimeType ?? "application/octet-stream",
-    }));
+    const added: UploadedFile[] = result.assets.map((asset) => {
+      const isPdf = isPdfAsset(asset);
+      return {
+        id: `${Date.now()}-${asset.name}`,
+        name: asset.name,
+        // PDFs: unknown until countPdfPages resolves below (null, not a
+        // guess). DOC/DOCX: no client-side parser exists for these, so
+        // start at a clearly-a-placeholder 1 and leave it for the user to
+        // correct via the manual stepper on its file card.
+        pages: isPdf ? null : 1,
+        isPdf,
+        sizeLabel: formatBytes(asset.size),
+        uri: asset.uri,
+        mimeType: asset.mimeType ?? "application/octet-stream",
+      };
+    });
     setFiles((prev) => [...prev, ...added]);
+
+    for (const file of added) {
+      if (!file.isPdf) continue;
+      countPdfPages(file.uri)
+        .then((pages) => {
+          setFiles((prev) => prev.map((f) => (f.id === file.id ? { ...f, pages } : f)));
+        })
+        .catch((error) => {
+          console.error(`Couldn't read page count for ${file.name}:`, error);
+          toast.error(`Couldn't read ${file.name}'s page count - enter it manually`);
+          // Falls back to a manually-editable count rather than blocking
+          // the file entirely - e.g. a corrupted or unusually-structured
+          // PDF that pdf-lib can't parse.
+          setFiles((prev) => prev.map((f) => (f.id === file.id ? { ...f, pages: 1, isPdf: false } : f)));
+        });
+    }
+  }
+
+  function adjustManualPages(fileId: string, delta: number) {
+    setFiles((prev) =>
+      prev.map((f) => (f.id === fileId && !f.isPdf ? { ...f, pages: Math.max(1, (f.pages ?? 1) + delta) } : f)),
+    );
   }
 
   // FLAG_GRANT_READ_URI_PERMISSION - the document-picker URI is a content://
@@ -245,12 +354,20 @@ export function StationaryScreen() {
     setFiles((prev) => prev.filter((f) => f.id !== id));
   }
 
-  const totalPages = files.reduce((sum, f) => sum + f.pages, 0);
+  // While any PDF's real page count is still being read, its `pages` is
+  // null - excluded from the running total (never counted as 0 pages) so
+  // the estimate never flashes a wrong, too-low number mid-count.
+  const countingAny = files.some((f) => f.pages === null);
+  const totalPages = files.reduce((sum, f) => sum + (f.pages ?? 0), 0);
   const estimatedTotal = estimateCost(totalPages, settings.copies);
 
   async function handleSaveDraft() {
     if (files.length === 0) {
       toast.warning("Add at least one file first");
+      return;
+    }
+    if (countingAny) {
+      toast.warning("Still reading page counts - one moment");
       return;
     }
     setSaving(true);
@@ -268,6 +385,10 @@ export function StationaryScreen() {
   async function handleSaveAndPay() {
     if (files.length === 0) {
       toast.warning("Add at least one file to print");
+      return;
+    }
+    if (countingAny) {
+      toast.warning("Still reading page counts - one moment");
       return;
     }
 
@@ -311,6 +432,8 @@ export function StationaryScreen() {
       }
       toast.success(`Payment successful - ₹${order.amount} paid`);
       resetForm();
+      loadHistory();
+      setTab("history");
     } catch (error: any) {
       // RazorpayCheckout's own cancel/failure rejection shape ({code,
       // description}) is distinct from our axios error shape - only the
@@ -350,6 +473,7 @@ export function StationaryScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -363,28 +487,29 @@ export function StationaryScreen() {
         >
           <Ionicons name="arrow-back" size={20} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Stationery</Text>
+        <Text style={styles.headerTitle}>Copy Center</Text>
       </LinearGradient>
 
-      <View style={styles.tabSwitch}>
-        <TouchableOpacity
-          style={[styles.tabButton, tab === "request" && styles.tabButtonActive]}
-          onPress={() => setTab("request")}
-        >
-          <Text style={[styles.tabButtonText, tab === "request" && styles.tabButtonTextActive]}>Request</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tabButton, tab === "draft" && styles.tabButtonActive]}
-          onPress={() => setTab("draft")}
-        >
-          <Text style={[styles.tabButtonText, tab === "draft" && styles.tabButtonTextActive]}>
-            Draft {drafts.length > 0 ? `(${drafts.length})` : ""}
-          </Text>
-        </TouchableOpacity>
+      <View style={styles.tabSwitchWrap}>
+        <AnimatedTabBar
+          tabs={[
+            { key: "request" as Tab, label: "Request" },
+            { key: "draft" as Tab, label: `Draft ${drafts.length > 0 ? `(${drafts.length})` : ""}`.trimEnd() },
+            { key: "history" as Tab, label: "History" },
+          ]}
+          active={tab}
+          onChange={setTab}
+          containerStyle={styles.tabSwitch}
+          tabStyle={styles.tabButton}
+          tabTextStyle={styles.tabButtonText}
+          activeTabTextStyle={styles.tabButtonTextActive}
+          indicatorStyle={styles.tabSwitchIndicator}
+        />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <TabTransitionView activeKey={tab} order={["request", "draft", "history"]} style={styles.tabContent}>
         {tab === "request" ? (
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollMemory.bind("request")}>
           <>
             {editingId && (
               <View style={styles.editingBanner}>
@@ -415,9 +540,34 @@ export function StationaryScreen() {
                     <Text style={styles.fileCardName} numberOfLines={1}>
                       {file.name}
                     </Text>
-                    <Text style={styles.fileCardMeta}>
-                      {file.pages} pages · {file.sizeLabel}
-                    </Text>
+                    {file.pages === null ? (
+                      <View style={styles.countingRow}>
+                        <ActivityIndicator size="small" color="#2F6FE0" />
+                        <Text style={styles.fileCardMeta}>Counting pages…</Text>
+                      </View>
+                    ) : file.isPdf ? (
+                      <Text style={styles.fileCardMeta}>
+                        {file.pages} page{file.pages === 1 ? "" : "s"} · {file.sizeLabel}
+                      </Text>
+                    ) : (
+                      <View style={styles.manualPagesRow}>
+                        <Text style={styles.fileCardMeta}>{file.sizeLabel} · </Text>
+                        <TouchableOpacity onPress={() => adjustManualPages(file.id, -1)} hitSlop={6}>
+                          <Ionicons name="remove-circle-outline" size={16} color="#2F6FE0" />
+                        </TouchableOpacity>
+                        <Text style={styles.manualPagesValue}>
+                          {file.pages} page{file.pages === 1 ? "" : "s"}
+                        </Text>
+                        <TouchableOpacity onPress={() => adjustManualPages(file.id, 1)} hitSlop={6}>
+                          <Ionicons name="add-circle-outline" size={16} color="#2F6FE0" />
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                    {!file.isPdf && file.pages !== null && (
+                      <Text style={styles.manualPagesHint}>
+                        Enter the real page count - can't be read automatically for this file type.
+                      </Text>
+                    )}
                     <TouchableOpacity onPress={() => void handlePreviewPress(file)} hitSlop={6}>
                       <Text style={styles.previewLink}>Preview</Text>
                     </TouchableOpacity>
@@ -461,26 +611,31 @@ export function StationaryScreen() {
                 label="Paper size"
                 value={settings.paperSize}
                 onPress={() => setDropdownField("paperSize")}
+                anchorRef={(node) => (fieldAnchors.current.paperSize = node)}
               />
               <DropdownField
                 label="Color"
                 value={settings.colorMode}
                 onPress={() => setDropdownField("colorMode")}
+                anchorRef={(node) => (fieldAnchors.current.colorMode = node)}
               />
               <DropdownField
                 label="Sides"
                 value={settings.sides}
                 onPress={() => setDropdownField("sides")}
+                anchorRef={(node) => (fieldAnchors.current.sides = node)}
               />
               <DropdownField
                 label="Orientation"
                 value={settings.orientation}
                 onPress={() => setDropdownField("orientation")}
+                anchorRef={(node) => (fieldAnchors.current.orientation = node)}
               />
               <DropdownField
                 label="Binding"
                 value={settings.binding}
                 onPress={() => setDropdownField("binding")}
+                anchorRef={(node) => (fieldAnchors.current.binding = node)}
                 last
               />
             </View>
@@ -492,7 +647,8 @@ export function StationaryScreen() {
                 <Text style={styles.costHeaderText}>Estimated cost</Text>
               </View>
               <Text style={styles.costLine}>
-                {totalPages} pages × {settings.copies} {settings.copies === 1 ? "copy" : "copies"}
+                {countingAny ? "Counting pages…" : `${totalPages} pages`} × {settings.copies}{" "}
+                {settings.copies === 1 ? "copy" : "copies"}
               </Text>
               <Text style={styles.costLine}>
                 {settings.colorMode} · {settings.paperSize} · {settings.sides}
@@ -501,7 +657,7 @@ export function StationaryScreen() {
 
               <View style={styles.costTotalRow}>
                 <Text style={styles.costTotalLabel}>Estimated total</Text>
-                <Text style={styles.costTotalValue}>₹{estimatedTotal}</Text>
+                <Text style={styles.costTotalValue}>{countingAny ? "…" : `₹${estimatedTotal}`}</Text>
               </View>
 
               <Text style={styles.costDisclaimer}>
@@ -511,93 +667,167 @@ export function StationaryScreen() {
 
             <View style={styles.actionsRow}>
               <TouchableOpacity
-                style={[styles.draftButton, saving && styles.actionButtonDisabled]}
+                style={[styles.draftButton, (saving || countingAny) && styles.actionButtonDisabled]}
                 onPress={handleSaveDraft}
                 activeOpacity={0.85}
-                disabled={saving}
+                disabled={saving || countingAny}
               >
                 <Text style={styles.draftButtonText}>Save as draft</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.payButton, saving && styles.actionButtonDisabled]}
+                style={[styles.payButton, (saving || countingAny) && styles.actionButtonDisabled]}
                 onPress={handleSaveAndPay}
                 activeOpacity={0.85}
-                disabled={saving}
+                disabled={saving || countingAny}
               >
                 <Text style={styles.payButtonText}>Save and pay</Text>
               </TouchableOpacity>
             </View>
           </>
-        ) : !loaded ? null : drafts.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="document-outline" size={32} color="#B0B7C3" />
-            <Text style={styles.emptyStateText}>No drafts yet</Text>
-            <Text style={styles.emptyStateSubtext}>Requests you save as a draft will show up here.</Text>
-          </View>
+          </ScrollView>
+        ) : tab === "draft" ? (
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollMemory.bind("draft")}>
+            {!loaded ? null : drafts.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="document-outline" size={32} color="#B0B7C3" />
+                <Text style={styles.emptyStateText}>No drafts yet</Text>
+                <Text style={styles.emptyStateSubtext}>Requests you save as a draft will show up here.</Text>
+              </View>
+            ) : (
+              drafts.map((draft) => (
+                <View key={draft.id} style={styles.draftCard}>
+                  <View style={styles.draftTopRow}>
+                    <View style={styles.draftIconWrap}>
+                      <Ionicons name="document-text-outline" size={18} color="#2F6FE0" />
+                    </View>
+                    <View style={styles.draftTextWrap}>
+                      <Text style={styles.draftFileName} numberOfLines={1}>
+                        {draft.files[0]?.name.replace(/\.(pdf|docx?|)$/i, "") ?? "Untitled request"}
+                      </Text>
+                      <Text style={styles.draftSummary}>{draftSummaryLine(draft)}</Text>
+                      <Text style={styles.draftBinding}>{draft.settings.binding}</Text>
+                      <Text style={styles.draftSavedAt}>Saved {formatSavedAt(draft.updatedAt)}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.draftActionsRow}>
+                    <TouchableOpacity style={styles.draftActionButton} onPress={() => resumeDraft(draft)} activeOpacity={0.8}>
+                      <Ionicons name="create-outline" size={14} color="#2F6FE0" />
+                      <Text style={styles.draftActionText}>Edit</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.draftActionButton}
+                      onPress={() => deleteDraft(draft.id)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="trash-outline" size={14} color="#DC2626" />
+                      <Text style={[styles.draftActionText, styles.draftActionTextDanger]}>Delete</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))
+            )}
+          </ScrollView>
         ) : (
-          drafts.map((draft) => (
-            <View key={draft.id} style={styles.draftCard}>
-              <View style={styles.draftTopRow}>
-                <View style={styles.draftIconWrap}>
-                  <Ionicons name="document-text-outline" size={18} color="#2F6FE0" />
-                </View>
-                <View style={styles.draftTextWrap}>
-                  <Text style={styles.draftFileName} numberOfLines={1}>
-                    {draft.files[0]?.name.replace(/\.(pdf|docx?|)$/i, "") ?? "Untitled request"}
-                  </Text>
-                  <Text style={styles.draftSummary}>{draftSummaryLine(draft)}</Text>
-                  <Text style={styles.draftBinding}>{draft.settings.binding}</Text>
-                  <Text style={styles.draftSavedAt}>Saved {formatSavedAt(draft.updatedAt)}</Text>
-                </View>
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollMemory.bind("history")}>
+            {historyStatus === "loading" && (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateSubtext}>Loading your requests…</Text>
               </View>
-              <View style={styles.draftActionsRow}>
-                <TouchableOpacity style={styles.draftActionButton} onPress={() => resumeDraft(draft)} activeOpacity={0.8}>
-                  <Ionicons name="create-outline" size={14} color="#2F6FE0" />
-                  <Text style={styles.draftActionText}>Edit</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.draftActionButton}
-                  onPress={() => deleteDraft(draft.id)}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name="trash-outline" size={14} color="#DC2626" />
-                  <Text style={[styles.draftActionText, styles.draftActionTextDanger]}>Delete</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ))
-        )}
-      </ScrollView>
+            )}
 
-      {/* Dropdown option picker */}
-      <Modal visible={dropdownField !== null} transparent animationType="fade" onRequestClose={() => setDropdownField(null)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setDropdownField(null)}>
-          <TouchableOpacity style={styles.dropdownModalCard} activeOpacity={1}>
-            <Text style={styles.dropdownModalTitle}>{dropdownField ? FIELD_LABEL[dropdownField] : ""}</Text>
-            <FlatList
-              data={dropdownField ? FIELD_OPTIONS[dropdownField] : []}
-              keyExtractor={(item) => item}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.dropdownOptionRow}
-                  activeOpacity={0.8}
-                  onPress={() => {
-                    if (dropdownField) {
-                      setSettings((prev) => ({ ...prev, [dropdownField]: item }));
-                    }
-                    setDropdownField(null);
-                  }}
-                >
-                  <Text style={styles.dropdownOptionText}>{item}</Text>
-                  {dropdownField && settings[dropdownField] === item && (
-                    <Ionicons name="checkmark" size={18} color="#2F6FE0" />
-                  )}
+            {historyStatus === "error" && (
+              <View style={styles.emptyState}>
+                <Ionicons name="alert-circle-outline" size={28} color="#DC2626" />
+                <Text style={styles.emptyStateText}>Couldn't load your requests</Text>
+                <TouchableOpacity onPress={loadHistory} style={styles.retryButton} activeOpacity={0.8}>
+                  <Text style={styles.retryButtonText}>Retry</Text>
                 </TouchableOpacity>
+              </View>
+            )}
+
+            {historyStatus === "success" && history.length === 0 && (
+              <View style={styles.emptyState}>
+                <Ionicons name="receipt-outline" size={32} color="#B0B7C3" />
+                <Text style={styles.emptyStateText}>No requests yet</Text>
+                <Text style={styles.emptyStateSubtext}>Requests you pay for will show up here.</Text>
+              </View>
+            )}
+
+            {historyStatus === "success" &&
+              history.map((request) => (
+                <View key={request.id} style={styles.draftCard}>
+                  <View style={styles.draftTopRow}>
+                    <View style={styles.draftIconWrap}>
+                      <Ionicons name="document-text-outline" size={18} color="#2F6FE0" />
+                    </View>
+                    <View style={styles.draftTextWrap}>
+                      <View style={styles.historyTopRow}>
+                        <Text style={styles.draftFileName} numberOfLines={1}>
+                          {request.file_summary ?? "Untitled request"}
+                        </Text>
+                        <View
+                          style={[
+                            styles.historyStatusBadge,
+                            { backgroundColor: REQUEST_STATUS_COLORS[request.status].bg },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.historyStatusText,
+                              { color: REQUEST_STATUS_COLORS[request.status].text },
+                            ]}
+                          >
+                            {REQUEST_STATUS_LABEL[request.status]}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={styles.draftSummary}>{requestSummaryLine(request)}</Text>
+                      {request.binding && <Text style={styles.draftBinding}>{request.binding}</Text>}
+                      {request.status === "rejected" && request.rejection_reason && (
+                        <Text style={styles.rejectionReasonText}>Reason: {request.rejection_reason}</Text>
+                      )}
+                      <Text style={styles.draftSavedAt}>
+                        ₹{request.amount} · {formatSavedAt(request.created_at)}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              ))}
+          </ScrollView>
+        )}
+      </TabTransitionView>
+
+      {/* Dropdown option picker - one shared instance, anchored under
+          whichever field above was tapped (see fieldAnchors). */}
+      <AnchoredDropdown
+        anchorRef={{ current: dropdownField ? fieldAnchors.current[dropdownField] ?? null : null }}
+        visible={dropdownField !== null}
+        onClose={() => setDropdownField(null)}
+        contentStyle={styles.dropdownModalCard}
+      >
+        <Text style={styles.dropdownModalTitle}>{dropdownField ? FIELD_LABEL[dropdownField] : ""}</Text>
+        <FlatList
+          data={dropdownField ? FIELD_OPTIONS[dropdownField] : []}
+          keyExtractor={(item) => item}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={styles.dropdownOptionRow}
+              activeOpacity={0.8}
+              onPress={() => {
+                if (dropdownField) {
+                  setSettings((prev) => ({ ...prev, [dropdownField]: item }));
+                }
+                setDropdownField(null);
+              }}
+            >
+              <Text style={styles.dropdownOptionText}>{item}</Text>
+              {dropdownField && settings[dropdownField] === item && (
+                <Ionicons name="checkmark" size={18} color="#2F6FE0" />
               )}
-            />
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+            </TouchableOpacity>
+          )}
+        />
+      </AnchoredDropdown>
     </SafeAreaView>
   );
 }
@@ -622,20 +852,24 @@ function DropdownField({
   label,
   value,
   onPress,
+  anchorRef,
   last,
 }: {
   label: string;
   value: string;
   onPress: () => void;
+  anchorRef: (node: View | null) => void;
   last?: boolean;
 }) {
   return (
     <View style={[styles.dropdownField, last && styles.dropdownFieldLast]}>
       <Text style={styles.fieldLabel}>{label}</Text>
-      <TouchableOpacity style={styles.dropdownButton} onPress={onPress} activeOpacity={0.8}>
-        <Text style={styles.dropdownButtonText}>{value}</Text>
-        <Ionicons name="chevron-down" size={16} color="#2F6FE0" />
-      </TouchableOpacity>
+      <View ref={anchorRef} collapsable={false}>
+        <TouchableOpacity style={styles.dropdownButton} onPress={onPress} activeOpacity={0.8}>
+          <Text style={styles.dropdownButtonText}>{value}</Text>
+          <Ionicons name="chevron-down" size={16} color="#2F6FE0" />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -656,7 +890,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -665,11 +898,16 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontFamily: fonts.bold,
   },
+  tabContent: {
+    flex: 1,
+  },
+  tabSwitchWrap: {
+    marginHorizontal: 16,
+    marginTop: 14,
+  },
   tabSwitch: {
     flexDirection: "row",
     backgroundColor: "#fff",
-    marginHorizontal: 16,
-    marginTop: 14,
     borderRadius: 12,
     padding: 4,
     gap: 4,
@@ -686,7 +924,10 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     paddingVertical: 10,
   },
-  tabButtonActive: {
+  tabSwitchIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
     backgroundColor: "#2F6FE0",
   },
   tabButtonText: {
@@ -699,7 +940,8 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
   },
   content: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
     paddingBottom: 32,
   },
   card: {
@@ -806,6 +1048,27 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     fontFamily: fonts.regular,
     color: "#6B7280",
+  },
+  countingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  manualPagesRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  manualPagesValue: {
+    fontSize: 11.5,
+    fontFamily: fonts.bold,
+    color: "#111827",
+  },
+  manualPagesHint: {
+    fontSize: 10,
+    fontFamily: fonts.regular,
+    color: "#B0B7C3",
+    marginTop: 2,
   },
   previewLink: {
     fontSize: 11.5,
@@ -1054,21 +1317,60 @@ const styles = StyleSheet.create({
     color: "#DC2626",
   },
 
-  // Modals
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.5)",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24,
+  // History (real requests)
+  retryButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2F6FE0",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
   },
+  retryButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+  },
+  historyTopRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  historyStatusBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  historyStatusBadgePaid: {
+    backgroundColor: "#DCFCE7",
+  },
+  historyStatusBadgePending: {
+    backgroundColor: "#FEF3C7",
+  },
+  historyStatusText: {
+    fontSize: 10.5,
+    fontFamily: fonts.bold,
+  },
+  historyStatusTextPaid: {
+    color: "#16A34A",
+  },
+  historyStatusTextPending: {
+    color: "#B45309",
+  },
+
+  // Dropdown
   dropdownModalCard: {
-    width: "100%",
-    maxWidth: 320,
-    maxHeight: "60%",
+    width: 260,
+    maxHeight: 320,
     backgroundColor: "#fff",
     borderRadius: 20,
     padding: 18,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   dropdownModalTitle: {
     fontSize: 15,

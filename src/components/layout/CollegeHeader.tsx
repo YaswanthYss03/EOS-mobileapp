@@ -5,7 +5,9 @@ import { fonts } from "@/theme";
 
 // Shared branding bar shown above all 5 bottom tabs (see app/(tabs)/_layout.tsx).
 // No message icon here (unlike HomeHeader) - the Messages entry point is
-// Home-tab-only, by design, for every login.
+// Home-tab-only, by design, for every login. Just the college name, no
+// tagline - matches HomeHeader's own simpler look (logo + name, nothing
+// else), per explicit request that every tab's header be consistent with it.
 const logoSource = require("../../../assets/logo.png");
 
 export function CollegeHeader() {
@@ -23,7 +25,6 @@ export function CollegeHeader() {
       </View>
       <View style={styles.titleWrap}>
         <Text style={styles.title}>Sri Eshwar College of Engineering</Text>
-        <Text style={styles.subtitle}>LEADERSHIP & EXCELLENCE</Text>
       </View>
     </LinearGradient>
   );
@@ -56,7 +57,7 @@ const styles = StyleSheet.create({
   },
   title: {
     color: "#fff",
-    fontSize: 15,
+    fontSize: 16,
     fontFamily: fonts.bold,
     maxWidth: 260,
   },

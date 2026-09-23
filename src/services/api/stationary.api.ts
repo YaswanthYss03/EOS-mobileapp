@@ -62,6 +62,18 @@ export async function verifyStationaryPayment(
   return data.data;
 }
 
+// Every status a request can be in across its whole lifecycle - the first
+// two are set only by this student-payment flow (createOrder/
+// verifyPayment); the rest are set only by a Stationary-vendor account via
+// the separate vendor portal (see stationary-vendor.api.ts) once paid.
+export type StationaryRequestStatus =
+  | "pending_payment"
+  | "paid"
+  | "processing"
+  | "ready_for_pickup"
+  | "completed"
+  | "rejected";
+
 export type MyStationaryRequest = {
   id: number;
   file_summary: string | null;
@@ -73,7 +85,8 @@ export type MyStationaryRequest = {
   sides: StationarySides | null;
   binding: StationaryBinding | null;
   amount: number;
-  status: "pending_payment" | "paid";
+  status: StationaryRequestStatus;
+  rejection_reason: string | null;
   created_at: string;
 };
 

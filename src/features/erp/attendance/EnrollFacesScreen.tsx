@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -7,6 +7,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnchoredDropdown, useDropdown } from "@/components/ui/dropdown";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -17,6 +18,7 @@ import {
   type EnrollmentRosterStudent,
 } from "@/services/api/attendance-cv.api";
 import { FaceCaptureCamera } from "./FaceCaptureCamera";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 function initialsFromName(name: string) {
   return name
@@ -62,7 +64,7 @@ export function EnrollFacesScreen() {
 
   const [loadingClasses, setLoadingClasses] = useState(true);
   const [mentorClasses, setMentorClasses] = useState<MentorClass[]>([]);
-  const [pickerVisible, setPickerVisible] = useState(false);
+  const picker = useDropdown();
   const [selectedClass, setSelectedClass] = useState<MentorClass | null>(null);
 
   const [rosterLoading, setRosterLoading] = useState(false);
@@ -137,6 +139,7 @@ export function EnrollFacesScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -168,29 +171,31 @@ export function EnrollFacesScreen() {
           </View>
         ) : (
           <>
-            <TouchableOpacity
-              style={styles.card}
-              activeOpacity={0.8}
-              onPress={() => setPickerVisible(true)}
-              disabled={mentorClasses.length === 1}
-            >
-              <View style={styles.selectorRow}>
-                <View style={styles.selectorIconWrap}>
-                  <Ionicons name="school-outline" size={18} color="#2F6FE0" />
+            <View ref={picker.anchorRef} collapsable={false}>
+              <TouchableOpacity
+                style={styles.card}
+                activeOpacity={0.8}
+                onPress={() => picker.open()}
+                disabled={mentorClasses.length === 1}
+              >
+                <View style={styles.selectorRow}>
+                  <View style={styles.selectorIconWrap}>
+                    <Ionicons name="school-outline" size={18} color="#2F6FE0" />
+                  </View>
+                  <View style={styles.selectorTextWrap}>
+                    <Text style={styles.selectorTitle}>
+                      {selectedClass
+                        ? `${selectedClass.department.name} · ${selectedClass.section}`
+                        : "Select a class"}
+                    </Text>
+                    <Text style={styles.selectorSubtitle}>
+                      {selectedClass ? selectedClass.academic_year : "Choose the class you mentor"}
+                    </Text>
+                  </View>
+                  {mentorClasses.length > 1 && <Ionicons name="chevron-forward" size={18} color="#B0B7C3" />}
                 </View>
-                <View style={styles.selectorTextWrap}>
-                  <Text style={styles.selectorTitle}>
-                    {selectedClass
-                      ? `${selectedClass.department.name} · ${selectedClass.section}`
-                      : "Select a class"}
-                  </Text>
-                  <Text style={styles.selectorSubtitle}>
-                    {selectedClass ? selectedClass.academic_year : "Choose the class you mentor"}
-                  </Text>
-                </View>
-                {mentorClasses.length > 1 && <Ionicons name="chevron-forward" size={18} color="#B0B7C3" />}
-              </View>
-            </TouchableOpacity>
+              </TouchableOpacity>
+            </View>
 
             {rosterLoading ? (
               <SkeletonListRows count={4} />
@@ -245,46 +250,43 @@ export function EnrollFacesScreen() {
         )}
       </ScrollView>
 
-      <Modal visible={pickerVisible} transparent animationType="fade" onRequestClose={() => setPickerVisible(false)}>
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setPickerVisible(false)}
-        >
-          <TouchableOpacity style={styles.modalSheet} activeOpacity={1}>
-            <View style={styles.modalHandleRow}>
-              <Text style={styles.modalTitle}>Choose a class</Text>
-              <TouchableOpacity onPress={() => setPickerVisible(false)} hitSlop={8}>
-                <Ionicons name="close" size={22} color="#6B7280" />
-              </TouchableOpacity>
-            </View>
-            <ScrollView contentContainerStyle={styles.modalList}>
-              {mentorClasses.map((option) => (
-                <TouchableOpacity
-                  key={option.class_id}
-                  style={styles.optionRow}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    setSelectedClass(option);
-                    setPickerVisible(false);
-                  }}
-                >
-                  <View style={styles.optionIconWrap}>
-                    <Ionicons name="school-outline" size={16} color="#2F6FE0" />
-                  </View>
-                  <View style={styles.optionTextWrap}>
-                    <Text style={styles.optionTitle}>
-                      {option.department.name} · {option.section}
-                    </Text>
-                    <Text style={styles.optionSubtitle}>{option.academic_year}</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={16} color="#B0B7C3" />
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+      <AnchoredDropdown
+        anchorRef={picker.anchorRef}
+        visible={picker.visible}
+        onClose={picker.close}
+        contentStyle={[styles.modalSheet, styles.anchoredCard]}
+      >
+        <View style={styles.modalHandleRow}>
+          <Text style={styles.modalTitle}>Choose a class</Text>
+          <TouchableOpacity onPress={picker.close} hitSlop={8}>
+            <Ionicons name="close" size={22} color="#6B7280" />
           </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+        </View>
+        <ScrollView contentContainerStyle={styles.modalList}>
+          {mentorClasses.map((option) => (
+            <TouchableOpacity
+              key={option.class_id}
+              style={styles.optionRow}
+              activeOpacity={0.7}
+              onPress={() => {
+                setSelectedClass(option);
+                picker.close();
+              }}
+            >
+              <View style={styles.optionIconWrap}>
+                <Ionicons name="school-outline" size={16} color="#2F6FE0" />
+              </View>
+              <View style={styles.optionTextWrap}>
+                <Text style={styles.optionTitle}>
+                  {option.department.name} · {option.section}
+                </Text>
+                <Text style={styles.optionSubtitle}>{option.academic_year}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color="#B0B7C3" />
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </AnchoredDropdown>
     </SafeAreaView>
   );
 }
@@ -305,7 +307,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -444,17 +446,22 @@ const styles = StyleSheet.create({
   enrolledBadgeTextNo: {
     color: "#B45309",
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.5)",
-    justifyContent: "center",
-    padding: 20,
-  },
   modalSheet: {
     backgroundColor: "#fff",
     borderRadius: 20,
     maxHeight: "75%",
     paddingTop: 16,
+  },
+  // Anchored dropdown has no full-screen flex parent to resolve modalSheet's
+  // percentage maxHeight against, so pin a concrete size here.
+  anchoredCard: {
+    width: 280,
+    maxHeight: 360,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   modalHandleRow: {
     flexDirection: "row",

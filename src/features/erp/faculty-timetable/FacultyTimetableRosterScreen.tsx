@@ -16,6 +16,7 @@ import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonDetailBlock, SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { getApiErrorMessage } from "@/services/api/client";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import {
   listTimetableDepartments,
   listFacultyInDepartment,
@@ -167,6 +168,7 @@ export function FacultyTimetableRosterScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -426,7 +428,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },

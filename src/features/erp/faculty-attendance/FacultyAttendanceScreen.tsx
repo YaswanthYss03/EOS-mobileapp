@@ -7,12 +7,14 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { MONTH_NAMES } from "@/utils/calendar";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
 import { listStaffAttendanceForReview } from "@/services/api/staff-attendance.api";
 import { mockOtherStaffAttendance, type StaffAttendanceRow } from "./data/mockFacultyAttendance";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 type Tab = "faculty" | "others";
 type LoadStatus = "loading" | "success" | "error";
@@ -35,7 +37,14 @@ function initialsFromName(name: string) {
 // the My Attendance screen's design). The Others (non-teaching staff) tab
 // has no backend module at all and stays on mock data, same gap as the
 // sibling Leave/OD screens' Others tab.
-export function FacultyAttendanceScreen() {
+// basePath defaults to this screen's original erp-tab route (HR Payroll's
+// own dashboard, which IS the erp tab, so no cross-tab jump there). HOD
+// reaches this same screen from the academics tab (relabeled "Faculty" for
+// that role - see app/(tabs)/_layout.tsx), so its own local route copy
+// passes basePath="/(tabs)/academics/hod-faculty-attendance" instead, same
+// erp/academics-local-route-copy convention used everywhere else in this
+// app (e.g. StudentHostelScreen's own basePath prop).
+export function FacultyAttendanceScreen({ basePath = "/(tabs)/erp/faculty-attendance" }: { basePath?: string } = {}) {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -48,6 +57,7 @@ export function FacultyAttendanceScreen() {
   const [facultyStatus, setFacultyStatus] = useState<LoadStatus>("loading");
   const [facultyError, setFacultyError] = useState<string | null>(null);
   const [facultyRows, setFacultyRows] = useState<StaffAttendanceRow[]>([]);
+  const scrollMemory = useTabScrollMemory();
 
   const loadFacultyRows = useCallback(() => {
     setFacultyStatus("loading");
@@ -96,8 +106,6 @@ export function FacultyAttendanceScreen() {
     });
   }, [navigation]);
 
-  const rows = tab === "faculty" ? facultyRows : mockOtherStaffAttendance;
-
   function goToPreviousMonth() {
     if (viewMonth === 0) {
       setViewMonth(11);
@@ -122,7 +130,7 @@ export function FacultyAttendanceScreen() {
       return;
     }
     router.push({
-      pathname: "/(tabs)/erp/faculty-attendance/[facultyId]",
+      pathname: `${basePath}/[facultyId]` as never,
       params: {
         facultyId: row.id,
         name: row.name,
@@ -139,6 +147,7 @@ export function FacultyAttendanceScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -160,20 +169,19 @@ export function FacultyAttendanceScreen() {
         </View>
       </LinearGradient>
 
-      <View style={styles.tabSwitch}>
-        <TouchableOpacity
-          style={[styles.tabSwitchButton, tab === "faculty" && styles.tabSwitchButtonActive]}
-          onPress={() => switchTab("faculty")}
-        >
-          <Text style={[styles.tabSwitchText, tab === "faculty" && styles.tabSwitchTextActive]}>Faculty</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tabSwitchButton, tab === "others" && styles.tabSwitchButtonActive]}
-          onPress={() => switchTab("others")}
-        >
-          <Text style={[styles.tabSwitchText, tab === "others" && styles.tabSwitchTextActive]}>Others</Text>
-        </TouchableOpacity>
-      </View>
+      <AnimatedTabBar
+        tabs={[
+          { key: "faculty", label: "Faculty" },
+          { key: "others", label: "Others" },
+        ]}
+        active={tab}
+        onChange={switchTab}
+        containerStyle={styles.tabSwitch}
+        tabStyle={styles.tabSwitchButton}
+        tabTextStyle={styles.tabSwitchText}
+        activeTabTextStyle={styles.tabSwitchTextActive}
+        indicatorStyle={styles.tabSwitchIndicator}
+      />
 
       <View style={styles.monthNav}>
         <TouchableOpacity onPress={goToPreviousMonth} style={styles.navButton} hitSlop={8}>
@@ -187,32 +195,49 @@ export function FacultyAttendanceScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {tab === "faculty" && facultyStatus === "loading" ? (
-          <SkeletonListRows count={4} />
-        ) : tab === "faculty" && facultyStatus === "error" ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
-            <Text style={styles.emptyStateText}>{facultyError ?? "Something went wrong."}</Text>
-            <TouchableOpacity onPress={loadFacultyRows} style={styles.retryButton} activeOpacity={0.8}>
-              <Text style={styles.retryButtonText}>Retry</Text>
-            </TouchableOpacity>
-          </View>
+      <TabTransitionView activeKey={tab} order={["faculty", "others"]} style={styles.tabContent}>
+        {tab === "faculty" ? (
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollMemory.bind("faculty")}>
+            {facultyStatus === "loading" ? (
+              <SkeletonListRows count={4} />
+            ) : facultyStatus === "error" ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+                <Text style={styles.emptyStateText}>{facultyError ?? "Something went wrong."}</Text>
+                <TouchableOpacity onPress={loadFacultyRows} style={styles.retryButton} activeOpacity={0.8}>
+                  <Text style={styles.retryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                {facultyRows.map((row) => (
+                  <StaffAttendanceCard key={row.id} row={row} onPress={() => openDetail(row)} />
+                ))}
+
+                {facultyRows.length === 0 && (
+                  <View style={styles.emptyState}>
+                    <Ionicons name="calendar-outline" size={32} color="#B0B7C3" />
+                    <Text style={styles.emptyStateText}>No attendance records here</Text>
+                  </View>
+                )}
+              </>
+            )}
+          </ScrollView>
         ) : (
-          <>
-            {rows.map((row) => (
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollMemory.bind("others")}>
+            {mockOtherStaffAttendance.map((row) => (
               <StaffAttendanceCard key={row.id} row={row} onPress={() => openDetail(row)} />
             ))}
 
-            {rows.length === 0 && (
+            {mockOtherStaffAttendance.length === 0 && (
               <View style={styles.emptyState}>
                 <Ionicons name="calendar-outline" size={32} color="#B0B7C3" />
                 <Text style={styles.emptyStateText}>No attendance records here</Text>
               </View>
             )}
-          </>
+          </ScrollView>
         )}
-      </ScrollView>
+      </TabTransitionView>
     </SafeAreaView>
   );
 }
@@ -273,7 +298,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -309,7 +334,10 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     paddingVertical: 10,
   },
-  tabSwitchButtonActive: {
+  tabSwitchIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
     backgroundColor: "#2F6FE0",
   },
   tabSwitchText: {
@@ -319,6 +347,9 @@ const styles = StyleSheet.create({
   },
   tabSwitchTextActive: {
     color: "#fff",
+  },
+  tabContent: {
+    flex: 1,
   },
   monthNav: {
     flexDirection: "row",

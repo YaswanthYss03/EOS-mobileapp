@@ -19,6 +19,13 @@ export type FacultyLeaveRequest = {
   days: number;
   reason: string;
   status: FacultyLeaveStatus;
-  /** Which register the requester came from — used only to split the two tabs. */
-  kind: "faculty" | "staff" | "unknown";
+  /**
+   * Which register the requester came from — used only to split the two
+   * tabs. "principal" is structurally possible (see requester.kind on
+   * MyFacultyLeave) but never actually occurs here — Principal-authored
+   * requests are excluded from HR Payroll's queue entirely, routed to the
+   * independent Correspondent stage instead (see
+   * FacultyLeavesService.findAll's HR_PAYROLL branch).
+   */
+  kind: "faculty" | "staff" | "unknown" | "principal";
 };

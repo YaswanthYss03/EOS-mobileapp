@@ -14,7 +14,9 @@ import {
   type DriveHistoryItem,
 } from "@/services/api/faculty-placements.api";
 import type { ApplicationStatus } from "@/services/api/placements.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import { useRole } from "@/hooks/useRole";
+import { useSkipSharedHeaderToggle } from "@/hooks/useSkipSharedHeaderToggle";
 
 // Same status labels/colors as PlacementsOverviewScreen's own history view -
 // "Round N cleared" comes straight from drive_application_status_enum, the
@@ -76,6 +78,12 @@ export function StudentPlacementHistoryScreen() {
   const studentId = Number(params.studentId);
   const name = params.name ?? "Student";
   const studentIdNo = params.studentIdNo ?? "";
+  // HoD's Student/Faculty tabs keep the shared Tabs header statically off
+  // (see app/(tabs)/_layout.tsx's isHodActingAsHod) - the getParent toggle
+  // below only ever sets `header`, never `headerShown`, so it's a no-op
+  // while that static off holds (the header just wouldn't render at all).
+  // Render this screen's own StudentHeader inline instead in that case.
+  const skipHeaderToggle = useSkipSharedHeaderToggle();
 
   const [history, setHistory] = useState<DriveHistoryItem[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -84,10 +92,12 @@ export function StudentPlacementHistoryScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (skipHeaderToggle) return undefined;
       navigation.getParent()?.setOptions({
         header: () => <StudentHeader onBack={() => router.back()} name={name} studentIdNo={studentIdNo} />,
       });
-    }, [navigation, router, name, studentIdNo]),
+      return undefined;
+    }, [navigation, router, name, studentIdNo, skipHeaderToggle]),
   );
 
   useEffect(() => {
@@ -115,6 +125,10 @@ export function StudentPlacementHistoryScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
+      {skipHeaderToggle && (
+        <StudentHeader onBack={() => router.back()} name={name} studentIdNo={studentIdNo} />
+      )}
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {loading ? (
           <SkeletonListRows count={4} />
@@ -175,7 +189,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },

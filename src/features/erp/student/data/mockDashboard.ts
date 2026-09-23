@@ -29,6 +29,5 @@ export const campusItems: QuickAccessItem[] = [
   { id: "bonafide", label: "Bonafide", icon: "document-text-outline", route: "/(tabs)/erp/student-bonafide" },
   { id: "hostel", label: "Hostel", icon: "bed-outline", route: "/(tabs)/erp/student-hostel" },
   { id: "library", label: "Library", icon: "library-outline", route: "/(tabs)/erp/student-library" },
-  { id: "feedback", label: "Feedback", icon: "star-outline", route: "/(tabs)/erp/student-feedback" },
   { id: "no-due", label: "No-Due", icon: "shield-checkmark-outline", route: "/(tabs)/erp/student-no-due" },
 ];

@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { ScreenHeader } from "@/components/layout/ScreenHeader";
 import { fonts } from "@/theme";
 import { mockHistory, type PlacementRecord, type Round, type RoundStatus } from "../data/mockHistory";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 const statusStyle: Record<RoundStatus, { icon: keyof typeof Ionicons.glyphMap; color: string }> = {
   cleared: { icon: "checkmark-circle", color: "#1E8A5A" },
@@ -15,6 +16,7 @@ const statusStyle: Record<RoundStatus, { icon: keyof typeof Ionicons.glyphMap; c
 export function PlacementHistoryScreen() {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
+      <WatermarkBackground />
       <ScreenHeader title="Placement History" />
       <FlatList
         data={mockHistory}

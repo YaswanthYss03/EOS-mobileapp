@@ -1,0 +1,277 @@
+import { StyleSheet } from "react-native";
+import { fonts } from "@/theme";
+
+// Shared by every Hostel page (hub + Outing/Complaints/Mess feedback) -
+// same visual language across all 4, factored out once these became
+// separate screens instead of one combined screen with in-page tabs (see
+// StudentHostelScreen.tsx's own comment).
+export const hostelFormStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#F7F8FA",
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+  },
+  backButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerTitle: {
+    color: "#fff",
+    fontSize: 20,
+    fontFamily: fonts.bold,
+  },
+  content: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 32,
+  },
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 16,
+    elevation: 2,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontFamily: fonts.semibold,
+    color: "#374151",
+    marginBottom: 6,
+  },
+  fieldLabelSpaced: {
+    marginTop: 4,
+  },
+  readOnlyInput: {
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#F1F3F6",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  readOnlyInputText: {
+    fontSize: 14,
+    fontFamily: fonts.regular,
+    color: "#6B7280",
+  },
+  selectRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#F9FAFB",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 16,
+  },
+  selectValue: {
+    fontSize: 16,
+    fontFamily: fonts.regular,
+    color: "#111827",
+  },
+  rowFields: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 16,
+  },
+  rowField: {
+    flex: 1,
+  },
+  pickerButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#F9FAFB",
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+  },
+  pickerButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.semibold,
+    color: "#111827",
+  },
+  pickerButtonPlaceholder: {
+    color: "#9AA6B2",
+    fontFamily: fonts.regular,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#F9FAFB",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    fontFamily: fonts.regular,
+    color: "#111827",
+  },
+  textArea: {
+    height: 100,
+    textAlignVertical: "top",
+  },
+  inputLast: {
+    marginBottom: 16,
+  },
+  gradeSection: {
+    marginBottom: 16,
+  },
+  gradeRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  gradeBox: {
+    flex: 1,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#F9FAFB",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 2,
+  },
+  gradeBoxSelected: {
+    borderColor: "#2F6FE0",
+    backgroundColor: "#EAF0FD",
+  },
+  gradeLetter: {
+    fontSize: 17,
+    fontFamily: fonts.bold,
+    color: "#111827",
+  },
+  gradeLetterSelected: {
+    color: "#2F6FE0",
+  },
+  gradeSubLabel: {
+    fontSize: 9,
+    fontFamily: fonts.regular,
+    color: "#9AA6B2",
+    marginTop: 3,
+    textAlign: "center",
+  },
+  gradeSubLabelSelected: {
+    color: "#2F6FE0",
+  },
+  submitButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#2F6FE0",
+    borderRadius: 14,
+    paddingVertical: 16,
+    elevation: 3,
+    shadowColor: "#2F6FE0",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  submitButtonText: {
+    fontSize: 15,
+    fontFamily: fonts.bold,
+    color: "#fff",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.5)",
+    justifyContent: "center",
+    padding: 20,
+  },
+  modalCard: {
+    backgroundColor: "#fff",
+    borderRadius: 18,
+    padding: 18,
+    maxHeight: "70%",
+  },
+  anchoredCard: {
+    width: 260,
+    maxHeight: 320,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+  },
+  modalTitle: {
+    fontSize: 15,
+    fontFamily: fonts.bold,
+    color: "#111827",
+    marginBottom: 10,
+  },
+  modalList: {
+    marginBottom: 4,
+  },
+  modalOptionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F3F6",
+  },
+  modalOptionName: {
+    fontSize: 14,
+    fontFamily: fonts.semibold,
+    color: "#111827",
+  },
+  calendarNav: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  navButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#F1F3F6",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  calendarMonthLabel: {
+    fontSize: 15,
+    fontFamily: fonts.bold,
+    color: "#111827",
+  },
+  weekdayRow: {
+    flexDirection: "row",
+    marginBottom: 6,
+  },
+  weekdayLabel: {
+    flex: 1,
+    textAlign: "center",
+    fontSize: 11,
+    fontFamily: fonts.semibold,
+    color: "#9AA6B2",
+  },
+  weekRow: {
+    flexDirection: "row",
+    gap: 4,
+    marginBottom: 6,
+  },
+  dayCell: {
+    flex: 1,
+    aspectRatio: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dayCellText: {
+    fontSize: 13,
+    fontFamily: fonts.semibold,
+    color: "#111827",
+  },
+});

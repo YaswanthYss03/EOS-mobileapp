@@ -43,6 +43,14 @@ export type MyProfile = {
   personal_email?: string | null;
   address?: string | null;
 
+  // Bottom-nav tab decision (Bus/Hostel/neither) - see AuthContext.tsx.
+  // Present for student AND faculty-type roles now (some faculty are hostel
+  // residents or commute by college bus too - see EOS-backend's
+  // profile.service.ts's getFacultyProfile, which derives student_type from
+  // faculty_hostel_mapping's existence). Still absent for parent/other roles.
+  student_type?: "hosteller" | "dayscholar" | null;
+  dayscholar_mode?: "transport" | "own_vehicle" | null;
+
   // Student-only.
   blood_group?: string | null;
   nationality?: string | null;
@@ -92,6 +100,18 @@ export type MyIdCard = {
 
 export async function getMyProfile(): Promise<MyProfile> {
   const { data } = await apiClient.get<{ data: MyProfile }>("/me/my-profile");
+  return data.data;
+}
+
+// Switch Account feature (see AuthContext.tsx) - which of HOD/ADVISOR/
+// SUBJECT_HANDLER the logged-in account actually holds, derived from real
+// backend data; [] for every role other than HOD/Faculty.
+export type AccountResponsibility = "HOD" | "ADVISOR" | "SUBJECT_HANDLER";
+
+export async function getAccountResponsibilities(): Promise<{ responsibilities: AccountResponsibility[] }> {
+  const { data } = await apiClient.get<{ data: { responsibilities: AccountResponsibility[] } }>(
+    "/me/my-profile/account-responsibilities",
+  );
   return data.data;
 }
 

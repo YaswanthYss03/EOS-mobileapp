@@ -20,6 +20,14 @@ export type FacultyOdRequest = {
   /** Place + purpose, combined for display. */
   reason: string;
   status: FacultyOdStatus;
-  /** Which register the requester came from — used only to split the two tabs. */
-  kind: "faculty" | "staff" | "unknown";
+  /**
+   * Which register the requester came from — used only to split the two
+   * tabs. "principal" is included for type parity with the shared
+   * MyFacultyOd.requester.kind union (see faculty-od.api.ts) - HR Payroll's
+   * own findAll() query excludes Principal-authored rows entirely (see
+   * FacultyOdService.findAll's HR_PAYROLL branch), so this value never
+   * actually appears here in practice; if it ever did, it'd just land in
+   * the "Others" tab like "staff"/"unknown" already do.
+   */
+  kind: "faculty" | "staff" | "unknown" | "principal";
 };

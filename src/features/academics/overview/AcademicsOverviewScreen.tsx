@@ -8,32 +8,46 @@ import { Ionicons } from "@expo/vector-icons";
 import { QuickAccessGrid } from "@/features/erp/components/QuickAccessGrid";
 import { fonts } from "@/theme";
 import { useRole } from "@/hooks/useRole";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
+// Order: Daily Task, LMS, Timetable, Calendar, Exam Schedule, No-Due.
+// No-Due and Exam Schedule moved in from the student's own ERP ("Class")
+// dashboard grid (see src/features/erp/student/data/dashboardConfig.ts) -
+// same tiles/routes, just also reachable from here now; removed from there
+// so they aren't offered in two places. Feedback (course feedback) moved
+// OUT of this grid entirely - it's now one of the filter options on the
+// Campus tab's single consolidated Feedback card (see
+// AmenityServiceFeedbackScreen), alongside Hostel Mess feedback and the
+// original Campus service reviews, rather than a separate tile here.
 const academicsItems = [
+  { id: "daily-task", label: "Daily Task", icon: "checkbox-outline", route: "/(tabs)/academics/daily-task" },
   {
-    id: "current-semester",
-    label: "Current Semester",
+    id: "lms",
+    label: "LMS",
     icon: "ribbon-outline",
     route: "/(tabs)/academics/current-semester",
   },
   { id: "timetable", label: "Timetable", icon: "time-outline", route: "/(tabs)/academics/timetable" },
   { id: "calendar", label: "Calendar", icon: "calendar-outline", route: "/(tabs)/academics/calendar" },
-  // Both UI/mock-data prototypes (see each screen's own doc comment). To-Do
-  // deliberately does NOT live here - it's the existing tab inside
-  // Placements (see PlacementsOverviewScreen's TabSwitch showTodo), not a
-  // separate Academics page.
-  { id: "daily-task", label: "Daily Task", icon: "checkbox-outline", route: "/(tabs)/academics/daily-task" },
-  { id: "online-class", label: "Online Class", icon: "videocam-outline", route: "/(tabs)/academics/online-class" },
+  {
+    id: "exam-schedule",
+    label: "Exam schedule",
+    icon: "calendar-outline",
+    route: "/(tabs)/erp/student-exam-schedule",
+  },
+  { id: "no-due", label: "No-Due", icon: "shield-checkmark-outline", route: "/(tabs)/erp/student-no-due" },
 ];
 
 // HR Payroll and Parent both have no "own" current semester (that's a
-// self-service concept for someone actually enrolled/teaching) - only
-// Timetable and Calendar are meaningful for these two roles, both of which
-// branch to a different real data source instead of a self-view (HR: a
-// department-roster browser; Parent: the selected child's own timetable/
-// calendar) - see app/(tabs)/academics/timetable/index.tsx and
-// .../calendar/index.tsx.
-const timetableAndCalendarOnly = academicsItems.filter((item) => item.id !== "current-semester");
+// self-service concept for someone actually enrolled/teaching), and no-due/
+// exam-schedule are student-only self-service too - only Timetable and
+// Calendar are meaningful for these two roles, both of which branch to a
+// different real data source instead of a self-view (HR: a department-
+// roster browser; Parent: the selected child's own timetable/calendar) -
+// see app/(tabs)/academics/timetable/index.tsx and .../calendar/index.tsx.
+const timetableAndCalendarOnly = academicsItems.filter(
+  (item) => item.id === "timetable" || item.id === "calendar",
+);
 
 function AcademicsHeader({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
@@ -52,10 +66,7 @@ function AcademicsHeader({ onBack }: { onBack: () => void }) {
       >
         <Ionicons name="arrow-back" size={20} color="#fff" />
       </TouchableOpacity>
-      <View>
-        <Text style={headerStyles.title}>Timetable & Calendar</Text>
-        <Text style={headerStyles.subtitle}>Semester VI · 2025-26</Text>
-      </View>
+      <Text style={headerStyles.title}>Current Semester</Text>
     </LinearGradient>
   );
 }
@@ -64,12 +75,10 @@ export function AcademicsOverviewScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const role = useRole();
-  const items = (role === "hr-payroll" || role === "parent" ? timetableAndCalendarOnly : academicsItems).filter(
-    // Daily Task is wired to EOS-backend's real /me/lms/* student endpoints
-    // (see DailyTaskScreen.tsx) - those 403 for anyone who isn't a student,
-    // so only a student sees this tile.
-    (item) => item.id !== "daily-task" || role === "student",
-  );
+  // Daily Task/LMS/No-Due/Exam Schedule are all student-only self-service
+  // endpoints (see each item's own backend) - a non-student role only gets
+  // Timetable + Calendar, already handled by timetableAndCalendarOnly.
+  const items = role === "hr-payroll" || role === "parent" ? timetableAndCalendarOnly : academicsItems;
 
   // Same header-swap pattern as AcademicsChooserScreen and the ERP role
   // dashboards - see src/features/academics/AcademicsChooserScreen.tsx.
@@ -86,8 +95,8 @@ export function AcademicsOverviewScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Timetable & Calendar</Text>
         <QuickAccessGrid items={items} size="campus" />
       </View>
     </SafeAreaView>
@@ -106,7 +115,6 @@ const headerStyles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },

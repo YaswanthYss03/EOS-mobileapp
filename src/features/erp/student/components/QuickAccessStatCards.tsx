@@ -1,6 +1,7 @@
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { SkeletonBlock } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import type { StatCardItem } from "../types";
 
@@ -30,15 +31,25 @@ export function QuickAccessStatCards({ items }: { items: StatCardItem[] }) {
           <Text style={styles.label} numberOfLines={1}>
             {item.label}
           </Text>
-          <Text style={styles.value} numberOfLines={1}>
-            {item.value}
-          </Text>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${Math.min(100, item.progress * 100)}%` }]} />
-          </View>
-          <Text style={styles.subtitle} numberOfLines={1}>
-            {item.subtitle}
-          </Text>
+          {item.loading ? (
+            <>
+              <SkeletonBlock width="60%" height={16} style={{ marginBottom: 8 }} />
+              <SkeletonBlock width="100%" height={4} borderRadius={2} style={{ marginBottom: 6 }} />
+              <SkeletonBlock width="45%" height={10} />
+            </>
+          ) : (
+            <>
+              <Text style={styles.value} numberOfLines={1}>
+                {item.value}
+              </Text>
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: `${Math.min(100, item.progress * 100)}%` }]} />
+              </View>
+              <Text style={styles.subtitle} numberOfLines={1}>
+                {item.subtitle}
+              </Text>
+            </>
+          )}
         </Pressable>
       ))}
     </View>

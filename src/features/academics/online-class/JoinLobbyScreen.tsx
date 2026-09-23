@@ -12,6 +12,7 @@ import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
 import { useRole } from "@/hooks/useRole";
 import { startOnlineClass, joinOnlineClass } from "@/services/api/online-class.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 // Real pre-join lobby for a LiveKit online class, pushed from
 // OnlineClassScreen's "Start class"/"Join" button. Requests real camera/mic
@@ -47,6 +48,8 @@ export function JoinLobbyScreen() {
   const navigation = useNavigation();
   const role = useRole();
   const isFaculty = role === "employee" || role === "hod";
+  // Mirrors OnlineClassScreen's own basePath - see that screen's comment.
+  const basePath = isFaculty ? "/(tabs)/erp/online-class" : "/(tabs)/academics/online-class";
   const params = useLocalSearchParams<{
     mode?: string;
     onlineClassId?: string;
@@ -117,7 +120,7 @@ export function JoinLobbyScreen() {
     request
       .then((info) => {
         router.replace({
-          pathname: "/(tabs)/academics/online-class/call",
+          pathname: `${basePath}/call`,
           params: {
             onlineClassId: String(info.onlineClassId),
             roomName: info.roomName,
@@ -139,6 +142,7 @@ export function JoinLobbyScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LobbyHeader onBack={() => router.back()} />
 
       <View style={styles.body}>
@@ -212,7 +216,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },

@@ -10,6 +10,7 @@ import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { listMyAssignmentStatuses } from "@/services/api/no-due.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 type CellValue = boolean | null; // null = not tracked (no assignment/status row yet)
 
@@ -94,6 +95,7 @@ export function StudentNoDueScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -101,7 +103,12 @@ export function StudentNoDueScreen() {
         style={[styles.header, { paddingTop: insets.top + 10 }]}
       >
         <TouchableOpacity
-          onPress={() => router.back()}
+          // Reached cross-tab from the Academics tab's Current Semester page
+          // (see AcademicsOverviewScreen.tsx) - a plain router.back() pops
+          // within THIS (erp) tab's own stack, not back to the tab that
+          // actually pushed it. This screen is student-only (see its own
+          // doc comment), so no role check is needed here.
+          onPress={() => router.replace("/(tabs)/academics/overview")}
           style={styles.backButton}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
@@ -241,7 +248,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -345,6 +352,13 @@ const styles = StyleSheet.create({
   statusCol: {
     flex: 1,
     alignItems: "center",
+    // statusCol doubles as the style for the header row's <Text> labels
+    // (A1/A2/A3/Record) AND the data rows' <View> pill wrappers below them.
+    // alignItems only centers a Text's own nested children, not its own
+    // content, so without this the header labels sat left-aligned while the
+    // pills they sit above were correctly centered - textAlign is a no-op on
+    // View, so this only affects the Text usage.
+    textAlign: "center",
   },
   tableRow: {
     flexDirection: "row",

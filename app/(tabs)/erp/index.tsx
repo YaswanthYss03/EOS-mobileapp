@@ -1,9 +1,12 @@
 import { useRole, type Role } from "@/hooks/useRole";
+import { useAuth } from "@/context/AuthContext";
 import { StudentDashboard } from "@/features/erp/student/StudentDashboard";
 import { EmployeeDashboard } from "@/features/erp/employee/EmployeeDashboard";
 import { HodDashboard } from "@/features/erp/hod/HodDashboard";
+import { HodStudentScreen } from "@/features/erp/hod/HodStudentScreen";
 import { AdminDashboard } from "@/features/erp/admin/AdminDashboard";
 import { PrincipalDashboard } from "@/features/erp/principal/PrincipalDashboard";
+import { CorrespondentDashboard } from "@/features/erp/correspondent/CorrespondentDashboard";
 import { ParentDashboard } from "@/features/erp/parent/ParentDashboard";
 import { IqacDashboard } from "@/features/erp/iqac/IqacDashboard";
 import { WardenDashboard } from "@/features/erp/warden/WardenDashboard";
@@ -33,6 +36,7 @@ const DASHBOARDS: Record<Role, () => React.JSX.Element> = {
   hod: HodDashboard,
   admin: AdminDashboard,
   principal: PrincipalDashboard,
+  correspondent: CorrespondentDashboard,
   parent: ParentDashboard,
   iqac: IqacDashboard,
   warden: WardenDashboard,
@@ -42,10 +46,22 @@ const DASHBOARDS: Record<Role, () => React.JSX.Element> = {
   "hr-payroll": HrPayrollDashboard,
   "media-room": MediaRoomDashboard,
   secretary: SecretaryDashboard,
+  // Unreachable in practice - the Class tab is hidden entirely for alumni
+  // (see app/(tabs)/_layout.tsx's isAlumni), Performance/Exam schedule live
+  // under their own Campus tab instead. Only here to satisfy Record<Role,...>.
+  alumni: EmployeeDashboard,
 };
 
 export default function ErpIndex() {
   const role = useRole();
+  // Switch Account for a HOD (see AuthContext.tsx's ViewMode) - this tab is
+  // "Student" while acting as HOD (see app/(tabs)/_layout.tsx's
+  // isHodActingAsHod) instead of the old HodDashboard, and the plain
+  // EmployeeDashboard while acting as Faculty, same as a real Employee login.
+  const { activeAccountMode } = useAuth();
+  if (role === "hod") {
+    return activeAccountMode === "FACULTY" ? <EmployeeDashboard /> : <HodStudentScreen />;
+  }
   const Dashboard = DASHBOARDS[role];
   return <Dashboard />;
 }

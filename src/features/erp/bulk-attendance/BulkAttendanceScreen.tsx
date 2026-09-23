@@ -1,14 +1,16 @@
 import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { AnchoredDropdown, useDropdown } from "@/components/ui/dropdown";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES } from "@/utils/calendar";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import {
   sectionInfo,
   mockBulkAttendanceStudents,
@@ -47,7 +49,7 @@ export function BulkAttendanceScreen() {
   const insets = useSafeAreaInsets();
 
   const [date, setDate] = useState(new Date(2026, 7, 2)); // 02 Aug 2026
-  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const datePicker = useDropdown();
   const [pickerYear, setPickerYear] = useState(date.getFullYear());
   const [pickerMonth, setPickerMonth] = useState(date.getMonth());
   const [search, setSearch] = useState("");
@@ -83,7 +85,7 @@ export function BulkAttendanceScreen() {
   function openDatePicker() {
     setPickerYear(date.getFullYear());
     setPickerMonth(date.getMonth());
-    setDatePickerOpen(true);
+    datePicker.open();
   }
 
   function goToPreviousPickerMonth() {
@@ -106,7 +108,7 @@ export function BulkAttendanceScreen() {
 
   function handlePickDate(day: number) {
     setDate(new Date(pickerYear, pickerMonth, day));
-    setDatePickerOpen(false);
+    datePicker.close();
   }
 
   function setCorrection(student: BulkAttendanceStudent, status: BulkAttendanceStatus) {
@@ -150,6 +152,7 @@ export function BulkAttendanceScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -184,10 +187,12 @@ export function BulkAttendanceScreen() {
           </TouchableOpacity>
 
           <Text style={styles.fieldLabel}>Date</Text>
-          <TouchableOpacity style={styles.dateRow} onPress={openDatePicker} activeOpacity={0.8}>
-            <Ionicons name="calendar-outline" size={16} color="#2F6FE0" />
-            <Text style={styles.dateText}>{formatDateSlash(date)}</Text>
-          </TouchableOpacity>
+          <View ref={datePicker.anchorRef} collapsable={false}>
+            <TouchableOpacity style={styles.dateRow} onPress={openDatePicker} activeOpacity={0.8}>
+              <Ionicons name="calendar-outline" size={16} color="#2F6FE0" />
+              <Text style={styles.dateText}>{formatDateSlash(date)}</Text>
+            </TouchableOpacity>
+          </View>
 
           <View style={styles.searchBar}>
             <Ionicons name="search-outline" size={16} color="#9AA6B2" />
@@ -283,51 +288,47 @@ export function BulkAttendanceScreen() {
         ))}
       </ScrollView>
 
-      <Modal
-        visible={datePickerOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setDatePickerOpen(false)}
+      <AnchoredDropdown
+        anchorRef={datePicker.anchorRef}
+        visible={datePicker.visible}
+        onClose={datePicker.close}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
       >
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setDatePickerOpen(false)}>
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <View style={styles.calendarNav}>
-              <TouchableOpacity onPress={goToPreviousPickerMonth} style={styles.navButton} hitSlop={8}>
-                <Ionicons name="chevron-back" size={18} color="#2F6FE0" />
-              </TouchableOpacity>
-              <Text style={styles.calendarMonthLabel}>
-                {MONTH_NAMES[pickerMonth]} {pickerYear}
-              </Text>
-              <TouchableOpacity onPress={goToNextPickerMonth} style={styles.navButton} hitSlop={8}>
-                <Ionicons name="chevron-forward" size={18} color="#2F6FE0" />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.weekdayRow}>
-              {WEEKDAY_LABELS.map((label, index) => (
-                <Text key={index} style={styles.weekdayLabel}>
-                  {label}
-                </Text>
-              ))}
-            </View>
-
-            {pickerWeeks.map((week, weekIndex) => (
-              <View key={weekIndex} style={styles.weekRow}>
-                {week.map((day, dayIndex) => {
-                  if (day === null) {
-                    return <View key={dayIndex} style={styles.dayCell} />;
-                  }
-                  return (
-                    <TouchableOpacity key={dayIndex} style={styles.dayCell} onPress={() => handlePickDate(day)}>
-                      <Text style={styles.dayCellText}>{day}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            ))}
+        <View style={styles.calendarNav}>
+          <TouchableOpacity onPress={goToPreviousPickerMonth} style={styles.navButton} hitSlop={8}>
+            <Ionicons name="chevron-back" size={18} color="#2F6FE0" />
           </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+          <Text style={styles.calendarMonthLabel}>
+            {MONTH_NAMES[pickerMonth]} {pickerYear}
+          </Text>
+          <TouchableOpacity onPress={goToNextPickerMonth} style={styles.navButton} hitSlop={8}>
+            <Ionicons name="chevron-forward" size={18} color="#2F6FE0" />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.weekdayRow}>
+          {WEEKDAY_LABELS.map((label, index) => (
+            <Text key={index} style={styles.weekdayLabel}>
+              {label}
+            </Text>
+          ))}
+        </View>
+
+        {pickerWeeks.map((week, weekIndex) => (
+          <View key={weekIndex} style={styles.weekRow}>
+            {week.map((day, dayIndex) => {
+              if (day === null) {
+                return <View key={dayIndex} style={styles.dayCell} />;
+              }
+              return (
+                <TouchableOpacity key={dayIndex} style={styles.dayCell} onPress={() => handlePickDate(day)}>
+                  <Text style={styles.dayCellText}>{day}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ))}
+      </AnchoredDropdown>
     </SafeAreaView>
   );
 }
@@ -348,7 +349,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -601,16 +602,21 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     color: "#2F6FE0",
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.5)",
-    justifyContent: "center",
-    padding: 20,
-  },
   modalCard: {
     backgroundColor: "#fff",
     borderRadius: 18,
     padding: 18,
+  },
+  // Anchored dropdown has no full-screen flex parent to size the calendar
+  // against, so pin a concrete size here.
+  anchoredCard: {
+    width: 320,
+    maxHeight: 400,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   calendarNav: {
     flexDirection: "row",

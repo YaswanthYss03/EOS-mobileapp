@@ -7,18 +7,23 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { formatDate } from "@/utils/calendar";
 import { getApiErrorMessage } from "@/services/api/client";
 import { listFacultyLeavesForReview, reviewFacultyLeaveAsHr } from "@/services/api/faculty-leaves.api";
 import { type FacultyLeaveRequest } from "./data/mockFacultyLeave";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 type Tab = "faculty" | "others";
-type StatusFilter = "pending" | "approved" | "rejected" | "all";
+// "History" covers both approved and rejected together - there's no
+// separate filter for each, just "still needs a decision" (Pending) vs
+// "already decided" (History) - same nested AnimatedTabBar design/style as
+// the outer Faculty/Others tab itself (not a separate bordered-pill filter
+// row).
+type SubTab = "pending" | "history";
 type LoadStatus = "loading" | "success" | "error";
-
-const STATUS_FILTERS: StatusFilter[] = ["pending", "approved", "rejected", "all"];
 
 function initialsFromName(name: string) {
   return name
@@ -57,7 +62,7 @@ export function FacultyLeaveScreen() {
   const insets = useSafeAreaInsets();
 
   const [tab, setTab] = useState<Tab>("faculty");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
+  const [subTab, setSubTab] = useState<SubTab>("pending");
 
   const [facultyStatus, setFacultyStatus] = useState<LoadStatus>("loading");
   const [facultyError, setFacultyError] = useState<string | null>(null);
@@ -69,6 +74,7 @@ export function FacultyLeaveScreen() {
   // API labels every row with requester.kind, so "Others" is a filter over real
   // data rather than a second, mocked list.
   const [staffRequests, setStaffRequests] = useState<FacultyLeaveRequest[]>([]);
+  const scrollMemory = useTabScrollMemory();
 
   const loadFacultyRequests = useCallback(() => {
     setFacultyStatus("loading");
@@ -120,22 +126,18 @@ export function FacultyLeaveScreen() {
     }, [navigation]),
   );
 
-  const requests = tab === "faculty" ? facultyRequests : staffRequests;
+  // Computed per-dataset (not off a single "current tab" slice) since both
+  // per-tab ScrollViews below stay mounted together for the ~210ms of an
+  // actual tab transition - each needs its own pending/history split
+  // regardless of which outer tab is currently active.
+  const facultyPending = useMemo(() => facultyRequests.filter((r) => r.status === "pending"), [facultyRequests]);
+  const facultyHistory = useMemo(() => facultyRequests.filter((r) => r.status !== "pending"), [facultyRequests]);
+  const staffPending = useMemo(() => staffRequests.filter((r) => r.status === "pending"), [staffRequests]);
+  const staffHistory = useMemo(() => staffRequests.filter((r) => r.status !== "pending"), [staffRequests]);
 
-  const counts = useMemo(
-    () => ({
-      pending: requests.filter((r) => r.status === "pending").length,
-      approved: requests.filter((r) => r.status === "approved").length,
-      rejected: requests.filter((r) => r.status === "rejected").length,
-      all: requests.length,
-    }),
-    [requests],
-  );
-
-  const filteredRequests = useMemo(
-    () => (statusFilter === "all" ? requests : requests.filter((r) => r.status === statusFilter)),
-    [requests, statusFilter],
-  );
+  const currentPending = tab === "faculty" ? facultyPending : staffPending;
+  const currentHistory = tab === "faculty" ? facultyHistory : staffHistory;
+  const currentList = subTab === "pending" ? currentPending : currentHistory;
 
   // Both tabs go through the same real endpoint. The Others tab used to mutate
   // local state only, so approving a non-teaching staff member's leave looked
@@ -168,11 +170,12 @@ export function FacultyLeaveScreen() {
 
   function switchTab(nextTab: Tab) {
     setTab(nextTab);
-    setStatusFilter("pending");
+    setSubTab("pending");
   }
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -194,67 +197,81 @@ export function FacultyLeaveScreen() {
         </View>
       </LinearGradient>
 
-      <View style={styles.tabSwitch}>
-        <TouchableOpacity
-          style={[styles.tabSwitchButton, tab === "faculty" && styles.tabSwitchButtonActive]}
-          onPress={() => switchTab("faculty")}
-        >
-          <Text style={[styles.tabSwitchText, tab === "faculty" && styles.tabSwitchTextActive]}>Faculty</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tabSwitchButton, tab === "others" && styles.tabSwitchButtonActive]}
-          onPress={() => switchTab("others")}
-        >
-          <Text style={[styles.tabSwitchText, tab === "others" && styles.tabSwitchTextActive]}>Others</Text>
-        </TouchableOpacity>
-      </View>
+      <AnimatedTabBar
+        tabs={[
+          { key: "faculty", label: "Faculty" },
+          { key: "others", label: "Others" },
+        ]}
+        active={tab}
+        onChange={switchTab}
+        containerStyle={styles.tabSwitch}
+        tabStyle={styles.tabSwitchButton}
+        tabTextStyle={styles.tabSwitchText}
+        activeTabTextStyle={styles.tabSwitchTextActive}
+        indicatorStyle={styles.tabSwitchIndicator}
+      />
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.statusRow}>
-          {STATUS_FILTERS.map((status) => (
-            <TouchableOpacity
-              key={status}
-              style={[styles.statusPill, statusFilter === status && styles.statusPillActive]}
-              onPress={() => setStatusFilter(status)}
-            >
-              <Text style={[styles.statusPillText, statusFilter === status && styles.statusPillTextActive]}>
-                {status.charAt(0).toUpperCase() + status.slice(1)} ({counts[status]})
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {facultyStatus === "loading" ? (
-          <SkeletonListRows count={4} />
-        ) : facultyStatus === "error" ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
-            <Text style={styles.emptyStateText}>{facultyError ?? "Something went wrong."}</Text>
-            <TouchableOpacity onPress={loadFacultyRequests} style={styles.retryButton} activeOpacity={0.8}>
-              <Text style={styles.retryButtonText}>Retry</Text>
-            </TouchableOpacity>
+      <TabTransitionView activeKey={tab} order={["faculty", "others"]} style={styles.tabContent}>
+        <View style={styles.tabContent}>
+          {/* Same AnimatedTabBar design/style as the Faculty/Others tab
+              above, nested one level in - not a separate bordered-pill
+              filter row. */}
+          <View style={styles.subTabSwitchWrap}>
+            <AnimatedTabBar
+              tabs={[
+                { key: "pending" as SubTab, label: `Pending ${currentPending.length > 0 ? `(${currentPending.length})` : ""}`.trimEnd() },
+                { key: "history" as SubTab, label: "History" },
+              ]}
+              active={subTab}
+              onChange={setSubTab}
+              containerStyle={styles.subTabSwitch}
+              tabStyle={styles.subTabButton}
+              tabTextStyle={styles.subTabText}
+              activeTabTextStyle={styles.subTabTextActive}
+              indicatorStyle={styles.subTabIndicator}
+            />
           </View>
-        ) : (
-          <>
-            {filteredRequests.map((request) => (
-              <FacultyLeaveCard
-                key={request.id}
-                request={request}
-                isActing={actingOnId === request.id}
-                onApprove={() => handleApprove(request.id)}
-                onReject={() => handleReject(request.id)}
-              />
-            ))}
 
-            {filteredRequests.length === 0 && (
-              <View style={styles.emptyState}>
-                <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
-                <Text style={styles.emptyStateText}>No requests here</Text>
-              </View>
-            )}
-          </>
-        )}
-      </ScrollView>
+          <TabTransitionView activeKey={subTab} order={["pending", "history"]} style={styles.tabContent}>
+            <ScrollView
+              contentContainerStyle={styles.content}
+              showsVerticalScrollIndicator={false}
+              {...scrollMemory.bind(`${tab}-${subTab}`)}
+            >
+              {facultyStatus === "loading" ? (
+                <SkeletonListRows count={4} />
+              ) : facultyStatus === "error" ? (
+                <View style={styles.emptyState}>
+                  <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+                  <Text style={styles.emptyStateText}>{facultyError ?? "Something went wrong."}</Text>
+                  <TouchableOpacity onPress={loadFacultyRequests} style={styles.retryButton} activeOpacity={0.8}>
+                    <Text style={styles.retryButtonText}>Retry</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <>
+                  {currentList.map((request) => (
+                    <FacultyLeaveCard
+                      key={request.id}
+                      request={request}
+                      isActing={actingOnId === request.id}
+                      onApprove={() => handleApprove(request.id)}
+                      onReject={() => handleReject(request.id)}
+                    />
+                  ))}
+
+                  {currentList.length === 0 && (
+                    <View style={styles.emptyState}>
+                      <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
+                      <Text style={styles.emptyStateText}>No requests here</Text>
+                    </View>
+                  )}
+                </>
+              )}
+            </ScrollView>
+          </TabTransitionView>
+        </View>
+      </TabTransitionView>
     </SafeAreaView>
   );
 }
@@ -370,7 +387,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -406,7 +423,10 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     paddingVertical: 10,
   },
-  tabSwitchButtonActive: {
+  tabSwitchIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
     backgroundColor: "#2F6FE0",
   },
   tabSwitchText: {
@@ -417,37 +437,54 @@ const styles = StyleSheet.create({
   tabSwitchTextActive: {
     color: "#fff",
   },
+  tabContent: {
+    flex: 1,
+  },
   content: {
     padding: 16,
     paddingBottom: 32,
   },
-  statusRow: {
+  // Same white pill-track + sliding-indicator design as tabSwitch above
+  // (the Faculty/Others tab) - no marginHorizontal/marginTop here since
+  // subTabSwitchWrap supplies the equivalent 16px inset instead.
+  subTabSwitchWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
+  subTabSwitch: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 14,
-  },
-  statusPill: {
-    flexGrow: 1,
-    alignItems: "center",
-    borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
     backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
+    borderRadius: 12,
+    padding: 4,
+    gap: 4,
+    marginBottom: 4,
+    elevation: 2,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
   },
-  statusPillActive: {
-    borderColor: "#2F6FE0",
-    borderWidth: 1.5,
+  subTabButton: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 9,
+    paddingVertical: 10,
   },
-  statusPillText: {
-    fontSize: 11,
+  subTabIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
+    backgroundColor: "#2F6FE0",
+  },
+  subTabText: {
+    fontSize: 13,
     fontFamily: fonts.semibold,
     color: "#4B5563",
   },
-  statusPillTextActive: {
-    color: "#2F6FE0",
+  subTabTextActive: {
+    color: "#fff",
+    fontFamily: fonts.bold,
   },
   card: {
     backgroundColor: "#fff",

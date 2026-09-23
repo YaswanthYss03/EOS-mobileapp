@@ -1,13 +1,12 @@
 import { useCallback } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
+import { View, Text, ScrollView, StyleSheet } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
-import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import { fonts } from "@/theme";
 import { QuickAccessGrid } from "@/features/erp/components/QuickAccessGrid";
+import { DashboardHeader } from "@/features/erp/components/DashboardHeader";
 import type { QuickAccessItem } from "@/features/erp/types";
 
 // People: who the institution is made of. Faculty & Staff / Department &
@@ -18,7 +17,7 @@ const peopleItems: QuickAccessItem[] = [
   {
     id: "faculty-staff",
     label: "Faculty & Staff",
-    icon: "id-card-outline",
+    icon: "people-circle-outline",
     route: "/(tabs)/erp/principal/faculty-staff",
   },
   {
@@ -34,6 +33,13 @@ const peopleItems: QuickAccessItem[] = [
 // extra role-targeting capability lives inside that same screen, not a
 // separate one. Calendar reuses PrincipalCalendarScreen, now a standalone
 // pushed screen instead of embedded inline on this dashboard.
+// Moved in from the Campus tab (see AmenityHomeScreen.tsx's own comment -
+// Campus went back to the plain faculty-style card set, these 3 now live
+// here instead, own erp-tab-local route copies so back-navigation stays
+// inside Services). Current Semester/Timetable/Online Class have no
+// principal-specific screen at all (not stubbed, not built) - a
+// principal isn't enrolled in or teaching a subject, so there was
+// nothing to move in for those.
 const academicsItems: QuickAccessItem[] = [
   {
     id: "exams-results",
@@ -41,17 +47,27 @@ const academicsItems: QuickAccessItem[] = [
     icon: "document-text-outline",
     route: "/(tabs)/erp/principal/exams-results",
   },
+  { id: "placements", label: "Placements", icon: "briefcase-outline", route: "/(tabs)/erp/principal/placements" },
   { id: "announcements", label: "Announcements", icon: "megaphone-outline", route: "/(tabs)/erp/announcements" },
+  {
+    id: "higher-education",
+    label: "Higher Education",
+    icon: "ribbon-outline",
+    route: "/(tabs)/erp/principal/higher-education",
+  },
+  {
+    id: "entrepreneur",
+    label: "Entrepreneur",
+    icon: "rocket-outline",
+    route: "/(tabs)/erp/principal/entrepreneur",
+  },
   { id: "calendar", label: "Calendar", icon: "calendar-outline", route: "/(tabs)/erp/principal/calendar" },
-  // No Placements tile here - it already has a real entry point via the
-  // Amenity tab (/(tabs)/amenity/placements, see AmenityHomeScreen.tsx's
-  // principalOptions), which reuses this exact same PrincipalPlacementsBody.
-  // A tile here too would just be a duplicate. Current Semester/Timetable/
-  // Online Class have no principal-specific screen at all (not stubbed, not
-  // built) - a principal isn't enrolled in or teaching a subject, so there
-  // was nothing to move in for those either.
 ];
 
+// Leave Request moved out to this role's own Progress tab (see
+// app/(tabs)/_layout.tsx's isPrincipal, PrincipalProgressScreen.tsx) -
+// alongside the Attendance/OD self-service now added there too, not left
+// solo in this "Services" (formerly Class) tab's dashboard.
 const institutionItems: QuickAccessItem[] = [
   {
     id: "finance-fees",
@@ -59,59 +75,57 @@ const institutionItems: QuickAccessItem[] = [
     icon: "cash-outline",
     route: "/(tabs)/erp/principal/finance-fees",
   },
+  { id: "hostel", label: "Hostel", icon: "bed-outline", route: "/(tabs)/erp/principal/hostel" },
+  { id: "transport", label: "Transport", icon: "bus-outline", route: "/(tabs)/erp/principal/transport" },
+  { id: "library", label: "Library", icon: "library-outline", route: "/(tabs)/erp/principal/library" },
+  { id: "sports", label: "Sports", icon: "football-outline", route: "/(tabs)/erp/principal/sports" },
+  { id: "medical", label: "Medical", icon: "medkit-outline", route: "/(tabs)/erp/principal/medical" },
+  {
+    id: "copy-center",
+    label: "Copy Center",
+    icon: "print-outline",
+    route: "/(tabs)/erp/principal/copy-center",
+  },
+  {
+    id: "feedback",
+    label: "Feedback",
+    icon: "star-outline",
+    route: "/(tabs)/erp/principal/feedback",
+  },
   {
     id: "approvals",
     label: "Approvals",
     icon: "checkmark-done-outline",
     route: "/(tabs)/erp/principal/approvals",
   },
-  { id: "hostel", label: "Hostel", icon: "bed-outline", route: "/(tabs)/erp/principal/hostel" },
-  { id: "library", label: "Library", icon: "library-outline", route: "/(tabs)/erp/principal/library" },
-  { id: "transport", label: "Transport", icon: "bus-outline", route: "/(tabs)/erp/principal/transport" },
-  { id: "medical", label: "Medical", icon: "medkit-outline", route: "/(tabs)/erp/principal/medical" },
-  { id: "sports", label: "Sports", icon: "football-outline", route: "/(tabs)/erp/principal/sports" },
 ];
-
-function PrincipalHeader({ onBack }: { onBack: () => void }) {
-  const insets = useSafeAreaInsets();
-
-  return (
-    <LinearGradient
-      colors={["#2F6FE0", "#1A3D8F"]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={[styles.headerContainer, { paddingTop: insets.top + 10 }]}
-    >
-      <TouchableOpacity onPress={onBack} style={styles.headerIconButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-        <Ionicons name="arrow-back" size={20} color="#fff" />
-      </TouchableOpacity>
-      <View>
-        <Text style={styles.headerTitle}>EIS</Text>
-        <Text style={styles.headerSubtitle}>Principal services</Text>
-      </View>
-    </LinearGradient>
-  );
-}
 
 export function PrincipalDashboard() {
   const navigation = useNavigation();
   const router = useRouter();
 
-  // Same header-swap pattern as the HoD/Employee ERP dashboards - see
-  // HodDashboard.tsx.
+  // Same shared DashboardHeader every other role's dashboard root uses now
+  // (plain "Sri Eshwar College of Engineering", no per-role subtitle, per
+  // explicit request - was a custom "EIS / Principal services" header
+  // before). Explicitly re-asserts headerShown:true (not just `header`) on
+  // every focus, rather than depending on some leaf screen's own blur
+  // cleanup to restore it - those leaf screens no longer do that cleanup at
+  // all (see PrincipalStudentsScreen.tsx's comment), since it raced against
+  // sibling screens within the same Stack and caused a double-header bug.
+  // This screen now owns its own header state unconditionally instead.
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({
-        header: () => <PrincipalHeader onBack={() => router.replace("/(tabs)/home")} />,
+        headerShown: true,
+        header: () => <DashboardHeader onBack={() => router.replace("/(tabs)/home")} />,
       });
-      return () => {
-        navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
-      };
+      return undefined;
     }, [navigation, router]),
   );
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>People</Text>
@@ -151,31 +165,5 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textTransform: "uppercase",
     marginBottom: 4,
-  },
-  headerContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingBottom: 14,
-  },
-  headerIconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontFamily: fonts.bold,
-  },
-  headerSubtitle: {
-    color: "#D7E2FA",
-    fontSize: 12,
-    fontFamily: fonts.medium,
-    marginTop: 2,
   },
 });

@@ -12,8 +12,23 @@ import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
 import { getTaskSubmissions, gradeSubmission, type LmsSubmission } from "@/services/api/lms.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
-export function TaskSubmissionsScreen({ taskId, title }: { taskId: number; title?: string }) {
+export function TaskSubmissionsScreen({
+  taskId,
+  title,
+  onClose,
+}: {
+  taskId: number;
+  title?: string;
+  // Set when rendered inline inside a Modal (see FacultyTaskTab.tsx) instead
+  // of as its own routed screen (see the erp/academics lms/task/[taskId]
+  // route wrappers, which still reach this the original way) - the back
+  // button calls this instead of router.back(), and the shared-header-hide
+  // effect below is skipped entirely, since a modal overlay has no route of
+  // its own to affect the Tabs header for.
+  onClose?: () => void;
+}) {
   const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -42,9 +57,11 @@ export function TaskSubmissionsScreen({ taskId, title }: { taskId: number; title
   // CollegeHeader (mounted at the Tabs level) while focused, restoring it
   // on blur. Deferred a tick so it reliably wins over a sibling screen's
   // own blur cleanup - see StudentAttendanceScreen's doc comment for the
-  // exact race this avoids.
+  // exact race this avoids. Skipped when embedded (onClose set) - see that
+  // prop's own comment.
   useFocusEffect(
     useCallback(() => {
+      if (onClose) return undefined;
       const timer = setTimeout(() => {
         navigation.getParent()?.setOptions({ headerShown: false });
       }, 50);
@@ -52,7 +69,7 @@ export function TaskSubmissionsScreen({ taskId, title }: { taskId: number; title
         clearTimeout(timer);
         navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
       };
-    }, [navigation]),
+    }, [navigation, onClose]),
   );
 
   function handleGrade(submission: LmsSubmission) {
@@ -78,6 +95,7 @@ export function TaskSubmissionsScreen({ taskId, title }: { taskId: number; title
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -85,7 +103,7 @@ export function TaskSubmissionsScreen({ taskId, title }: { taskId: number; title
         style={[styles.header, { paddingTop: insets.top + 10 }]}
       >
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={() => (onClose ? onClose() : router.back())}
           style={styles.backButton}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
@@ -202,7 +220,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },

@@ -1,20 +1,48 @@
-import { useCallback } from "react";
-import { View, Text, Pressable, TouchableOpacity, StyleSheet } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { View, Text, Pressable, TouchableOpacity, ActivityIndicator, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import { fonts } from "@/theme";
 import { useRole } from "@/hooks/useRole";
+import { getMyArrearStatus } from "@/services/api/me-alumni.api";
 
 type ChooserOption = {
   id: string;
   title: string;
-  description: string;
+  description?: string;
   icon: keyof typeof Ionicons.glyphMap;
-  route: "/(tabs)/academics/overview" | "/(tabs)/academics/placements";
+  route:
+    | "/(tabs)/academics/overview"
+    | "/(tabs)/academics/placements"
+    | "/(tabs)/erp/student-performance"
+    | "/(tabs)/erp/student-exam-schedule";
+};
+
+// Alumni's own "Campus" tab - Performance always shown; Exam schedule only
+// when they currently have a standing arrear (see
+// MeAlumniExamStatusService.getArrearStatus - a graduated alumnus with no
+// arrears has no exam to schedule for). Both point at the exact same
+// routes/screens the Student ERP dashboard already uses (StudentPerformanceScreen/
+// StudentExamScheduleScreen) - reused as-is, not duplicated, now widened
+// server-side to accept an alumni-role JWT too.
+const alumniPerformanceOption: ChooserOption = {
+  id: "performance",
+  title: "Performance",
+  description: "Your semester marks and marksheets",
+  icon: "stats-chart-outline",
+  route: "/(tabs)/erp/student-performance",
+};
+const alumniExamScheduleOption: ChooserOption = {
+  id: "exam-schedule",
+  title: "Exam schedule",
+  description: "Your upcoming arrear exam",
+  icon: "calendar-outline",
+  route: "/(tabs)/erp/student-exam-schedule",
 };
 
 // Same for hod and faculty (employee) - neither gets a different set of
@@ -25,15 +53,15 @@ type ChooserOption = {
 const options: ChooserOption[] = [
   {
     id: "academics",
-    title: "Academics",
-    description: "Timetable and calendar",
+    title: "Current Semester",
+    description: "Daily task, LMS, timetable, calendar & more",
     icon: "school-outline",
     route: "/(tabs)/academics/overview",
   },
   {
     id: "placements",
     title: "Placements",
-    description: "Drives, eligibility, offers and training",
+    description: "Track drives, applications and offers",
     icon: "briefcase-outline",
     route: "/(tabs)/academics/placements",
   },
@@ -65,7 +93,6 @@ function EduHeader({ onBack }: { onBack: () => void }) {
         <Text style={headerStyles.title} numberOfLines={2}>
           Sri Eshwar College of Engineering
         </Text>
-        <Text style={headerStyles.subtitle}>Teaching & academics</Text>
       </View>
     </LinearGradient>
   );
@@ -75,7 +102,29 @@ export function AcademicsChooserScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const role = useRole();
-  const visibleOptions = role === "hr-payroll" ? hrOptions : options;
+  const isAlumni = role === "alumni";
+
+  const [arrearStatus, setArrearStatus] = useState<"loading" | "yes" | "no" | "error">("loading");
+  useEffect(() => {
+    if (!isAlumni) return;
+    let cancelled = false;
+    getMyArrearStatus()
+      .then(({ hasStandingArrear }) => {
+        if (!cancelled) setArrearStatus(hasStandingArrear ? "yes" : "no");
+      })
+      .catch(() => {
+        if (!cancelled) setArrearStatus("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAlumni]);
+
+  const visibleOptions = isAlumni
+    ? [alumniPerformanceOption, ...(arrearStatus === "yes" ? [alumniExamScheduleOption] : [])]
+    : role === "hr-payroll"
+      ? hrOptions
+      : options;
 
   // Swaps the shared CollegeHeader (mounted at the Tabs level, see
   // app/(tabs)/_layout.tsx) for this screen's own header while it's focused,
@@ -106,17 +155,28 @@ export function AcademicsChooserScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
-      <View style={styles.row}>
-        {visibleOptions.map((option) => (
-          <Pressable key={option.id} style={styles.card} onPress={() => router.push(option.route)}>
-            <View style={styles.iconWrap}>
-              <Ionicons name={option.icon} size={26} color="#2F6FE0" />
-            </View>
-            <Text style={styles.cardTitle}>{option.title}</Text>
-            <Text style={styles.cardDescription}>{option.description}</Text>
-          </Pressable>
-        ))}
-      </View>
+      <WatermarkBackground />
+      {isAlumni && arrearStatus === "loading" ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator color="#2F6FE0" />
+        </View>
+      ) : (
+        <View style={styles.row}>
+          {visibleOptions.map((option) => (
+            <Pressable key={option.id} style={styles.card} onPress={() => router.push(option.route)}>
+              <View style={styles.iconWrap}>
+                <Ionicons name={option.icon} size={26} color="#2F6FE0" />
+              </View>
+              <Text style={styles.cardTitle} numberOfLines={2}>
+                {option.title}
+              </Text>
+              <Text style={styles.cardDescription} numberOfLines={2}>
+                {option.description ?? " "}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -133,7 +193,6 @@ const headerStyles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -145,18 +204,17 @@ const headerStyles = StyleSheet.create({
     fontSize: 16,
     fontFamily: fonts.bold,
   },
-  subtitle: {
-    color: "#D7E2FA",
-    fontSize: 12,
-    fontFamily: fonts.medium,
-    marginTop: 2,
-  },
 });
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#fff",
+  },
+  loadingWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
   row: {
     flexDirection: "row",
@@ -197,6 +255,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: fonts.bold,
     color: "#111",
+    textAlign: "center",
+    // Fixed 2-line height (not just numberOfLines={2} on the Text, which
+    // only caps it) - every card's title block reserves the exact same
+    // space now regardless of whether this particular title actually wraps
+    // to 1 or 2 lines, so the icon above and description below always land
+    // at the same vertical position across cards (e.g. "Placements" is one
+    // line, "Current Semester" is two - without a fixed height the shorter
+    // one's whole content block sits lower, off-center from its neighbor).
+    height: 40,
+    lineHeight: 20,
   },
   cardDescription: {
     fontSize: 12,
@@ -205,5 +273,8 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 2,
     lineHeight: 17,
+    // Same fixed-height reasoning as cardTitle above - every description
+    // reserves 2 lines' worth of space even when its own text is shorter.
+    height: 34,
   },
 });

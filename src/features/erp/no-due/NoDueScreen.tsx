@@ -6,7 +6,6 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
-  Modal,
   StyleSheet,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,10 +14,14 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { useSkipSharedHeaderToggle } from "@/hooks/useSkipSharedHeaderToggle";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnchoredDropdown, useDropdown } from "@/components/ui/dropdown";
+import { TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import {
   getMyDepartmentBatches,
   getNoDueStudents,
@@ -61,20 +64,24 @@ export function NoDueScreen() {
   const [batchesStatus, setBatchesStatus] = useState<LoadStatus>("loading");
   const [batches, setBatches] = useState<NoDueBatch[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const { anchorRef: batchAnchorRef, visible: pickerOpen, open: openPicker, close: closePicker } = useDropdown();
 
   const [studentsStatus, setStudentsStatus] = useState<LoadStatus>("loading");
   const [studentsError, setStudentsError] = useState<string | null>(null);
   const [students, setStudents] = useState<NoDueStudent[]>([]);
   const [approvingId, setApprovingId] = useState<number | null>(null);
+  const scrollMemory = useTabScrollMemory();
+
+  const skipHeaderToggle = useSkipSharedHeaderToggle();
 
   useFocusEffect(
     useCallback(() => {
+      if (skipHeaderToggle) return undefined;
       navigation.getParent()?.setOptions({ headerShown: false });
       return () => {
         navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
       };
-    }, [navigation]),
+    }, [navigation, skipHeaderToggle]),
   );
 
   const loadBatches = useCallback(() => {
@@ -117,7 +124,7 @@ export function NoDueScreen() {
 
   function handlePickBatch(batchId: number | null) {
     setSelectedBatchId(batchId);
-    setPickerOpen(false);
+    closePicker();
   }
 
   function handleApprove(studentId: number) {
@@ -138,28 +145,21 @@ export function NoDueScreen() {
     ? batches.find((b) => b.id === selectedBatchId)?.name ?? "All Batches"
     : "All Batches";
 
-  return (
-    <SafeAreaView style={styles.container} edges={[]}>
-      <LinearGradient
-        colors={["#2F6FE0", "#1A3D8F"]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.header, { paddingTop: insets.top + 10 }]}
-      >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Ionicons name="arrow-back" size={20} color="#fff" />
-        </TouchableOpacity>
-        <View>
-          <Text style={styles.headerTitle}>No-Due Approval</Text>
-          <Text style={styles.headerSubtitle}>Clearance requests</Text>
-        </View>
-      </LinearGradient>
-
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+  // Tab-invariant content (search bar, batch picker, and the tab switcher
+  // itself) that used to scroll away above the ternary pending/cleared
+  // student list inside one shared ScrollView. The switcher sits between
+  // that content and the list rather than being the first thing after the
+  // header, so hoisting it out to a fixed position (like the standard
+  // pattern) would reorder it in front of the search bar - not a pure
+  // animation-only change. So this whole section is duplicated once into
+  // each per-tab ScrollView below (see PlacementsOverviewScreen's
+  // PrincipalPlacementsBody for the same situation), and the switcher keeps
+  // its original instant active/inactive swap rather than converting to
+  // AnimatedTabBar (which needs to stay persistently mounted outside the
+  // transitioning content to glide, which isn't possible here).
+  function renderHeaderSection() {
+    return (
+      <>
         <View style={styles.searchBar}>
           <Ionicons name="search-outline" size={16} color="#9AA6B2" />
           <TextInput
@@ -172,17 +172,19 @@ export function NoDueScreen() {
           />
         </View>
 
-        <TouchableOpacity
-          style={styles.batchButton}
-          activeOpacity={0.8}
-          onPress={() => batchesStatus === "success" && setPickerOpen(true)}
-        >
-          <Ionicons name="layers-outline" size={16} color="#2F6FE0" />
-          <Text style={styles.batchButtonText} numberOfLines={1}>
-            {selectedBatchName}
-          </Text>
-          <Ionicons name="chevron-down" size={16} color="#B0B7C3" />
-        </TouchableOpacity>
+        <View ref={batchAnchorRef} collapsable={false}>
+          <TouchableOpacity
+            style={styles.batchButton}
+            activeOpacity={0.8}
+            onPress={() => batchesStatus === "success" && openPicker()}
+          >
+            <Ionicons name="layers-outline" size={16} color="#2F6FE0" />
+            <Text style={styles.batchButtonText} numberOfLines={1}>
+              {selectedBatchName}
+            </Text>
+            <Ionicons name="chevron-down" size={16} color="#B0B7C3" />
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.tabSwitch}>
           <TouchableOpacity
@@ -202,7 +204,13 @@ export function NoDueScreen() {
             </Text>
           </TouchableOpacity>
         </View>
+      </>
+    );
+  }
 
+  function renderStudentList() {
+    return (
+      <>
         {studentsStatus === "loading" && <SkeletonListRows count={4} />}
 
         {studentsStatus === "error" && (
@@ -233,38 +241,85 @@ export function NoDueScreen() {
               onApprove={() => handleApprove(student.id)}
             />
           ))}
-      </ScrollView>
+      </>
+    );
+  }
 
-      <Modal visible={pickerOpen} transparent animationType="fade" onRequestClose={() => setPickerOpen(false)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setPickerOpen(false)}>
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>Select Batch</Text>
-            <ScrollView style={styles.modalList}>
-              <TouchableOpacity
-                style={styles.modalRow}
-                onPress={() => handlePickBatch(null)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.modalRowText}>All Batches</Text>
-                {selectedBatchId === null && <Ionicons name="checkmark-circle" size={20} color="#2F6FE0" />}
-              </TouchableOpacity>
-              {batches.map((batch) => (
-                <TouchableOpacity
-                  key={batch.id}
-                  style={styles.modalRow}
-                  onPress={() => handlePickBatch(batch.id)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.modalRowText}>{batch.name}</Text>
-                  {selectedBatchId === batch.id && (
-                    <Ionicons name="checkmark-circle" size={20} color="#2F6FE0" />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </TouchableOpacity>
+  return (
+    <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
+      <LinearGradient
+        colors={["#2F6FE0", "#1A3D8F"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[styles.header, { paddingTop: insets.top + 10 }]}
+      >
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backButton}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="arrow-back" size={20} color="#fff" />
         </TouchableOpacity>
-      </Modal>
+        <View>
+          <Text style={styles.headerTitle}>No-Due Approval</Text>
+          <Text style={styles.headerSubtitle}>Clearance requests</Text>
+        </View>
+      </LinearGradient>
+
+      <TabTransitionView activeKey={statusTab} order={["pending", "cleared"]} style={styles.tabContent}>
+        {statusTab === "pending" ? (
+          <ScrollView
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            {...scrollMemory.bind("pending")}
+          >
+            {renderHeaderSection()}
+            {renderStudentList()}
+          </ScrollView>
+        ) : (
+          <ScrollView
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            {...scrollMemory.bind("cleared")}
+          >
+            {renderHeaderSection()}
+            {renderStudentList()}
+          </ScrollView>
+        )}
+      </TabTransitionView>
+
+      <AnchoredDropdown
+        anchorRef={batchAnchorRef}
+        visible={pickerOpen}
+        onClose={closePicker}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
+      >
+        <Text style={styles.modalTitle}>Select Batch</Text>
+        <ScrollView style={styles.modalList}>
+          <TouchableOpacity
+            style={styles.modalRow}
+            onPress={() => handlePickBatch(null)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.modalRowText}>All Batches</Text>
+            {selectedBatchId === null && <Ionicons name="checkmark-circle" size={20} color="#2F6FE0" />}
+          </TouchableOpacity>
+          {batches.map((batch) => (
+            <TouchableOpacity
+              key={batch.id}
+              style={styles.modalRow}
+              onPress={() => handlePickBatch(batch.id)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.modalRowText}>{batch.name}</Text>
+              {selectedBatchId === batch.id && (
+                <Ionicons name="checkmark-circle" size={20} color="#2F6FE0" />
+              )}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </AnchoredDropdown>
     </SafeAreaView>
   );
 }
@@ -300,14 +355,6 @@ function NoDueCard({
             {student.section ? ` · ${student.section}` : ""}
           </Text>
         </View>
-        {/* Only shown on the Cleared tab - within the Pending tab every card
-            is pending by definition, so repeating that word on each row is
-            redundant with the tab you're already on. */}
-        {isCleared && (
-          <View style={[styles.statusBadge, styles.statusBadgeCleared]}>
-            <Text style={[styles.statusBadgeText, { color: "#2F6FE0" }]}>Cleared</Text>
-          </View>
-        )}
       </View>
 
       <View style={styles.divider} />
@@ -372,7 +419,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -390,6 +437,9 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
+  },
+  tabContent: {
+    flex: 1,
   },
   searchBar: {
     flexDirection: "row",
@@ -544,21 +594,6 @@ const styles = StyleSheet.create({
     color: "#9AA6B2",
     marginTop: 1,
   },
-  statusBadge: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  statusBadgeCleared: {
-    backgroundColor: "#EAF0FD",
-  },
-  statusBadgePending: {
-    backgroundColor: "#FEF3C7",
-  },
-  statusBadgeText: {
-    fontSize: 11,
-    fontFamily: fonts.bold,
-  },
   divider: {
     height: 1,
     backgroundColor: "#F1F3F6",
@@ -633,17 +668,20 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     color: "#fff",
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.5)",
-    justifyContent: "center",
-    padding: 20,
-  },
   modalCard: {
     backgroundColor: "#fff",
     borderRadius: 18,
     padding: 18,
     maxHeight: "70%",
+  },
+  anchoredCard: {
+    width: 280,
+    maxHeight: 360,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   modalTitle: {
     fontSize: 15,

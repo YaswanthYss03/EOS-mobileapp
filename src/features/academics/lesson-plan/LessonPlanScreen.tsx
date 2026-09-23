@@ -3,11 +3,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { ScreenHeader } from "@/components/layout/ScreenHeader";
 import { fonts } from "@/theme";
 import { mockLessonPlans, type LessonPlanSubject } from "./data/mockLessonPlans";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 // TODO: replace mockLessonPlans with a real call once the lesson-plan backend endpoint exists
 export function LessonPlanScreen() {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
+      <WatermarkBackground />
       <ScreenHeader title="Lesson Plan" />
       <FlatList
         data={mockLessonPlans}

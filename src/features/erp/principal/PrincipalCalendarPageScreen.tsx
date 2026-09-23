@@ -5,9 +5,9 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
 import { PrincipalCalendarScreen } from "./PrincipalCalendarScreen";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 // Thin standalone-route wrapper around PrincipalCalendarScreen (which is
 // content-only, no header of its own - it was originally embedded directly
@@ -23,14 +23,14 @@ export function PrincipalCalendarPageScreen() {
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({ headerShown: false });
-      return () => {
-        navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
-      };
+      // No cleanup - see PrincipalStudentsScreen.tsx's comment.
+      return undefined;
     }, [navigation]),
   );
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -84,7 +84,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },

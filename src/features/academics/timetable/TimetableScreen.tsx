@@ -15,6 +15,7 @@ import {
   type MyTimetableDay,
   type MyTimetableSlot,
 } from "@/services/api/current-semester.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 const DAY_SHORT = ["", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const DAY_FULL = ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -63,7 +64,6 @@ function TimetableHeader({
   onBack: () => void;
 }) {
   const insets = useSafeAreaInsets();
-  const selectedDate = weekDates[selectedIndex];
 
   return (
     <LinearGradient
@@ -80,12 +80,7 @@ function TimetableHeader({
         >
           <Ionicons name="arrow-back" size={20} color="#fff" />
         </TouchableOpacity>
-        <View>
-          <Text style={styles.headerTitle}>Timetable</Text>
-          <Text style={styles.headerSubtitle}>
-            {DAY_FULL[selectedIndex + 1]}, {selectedDate.getDate()} {MONTH_NAMES[selectedDate.getMonth()]}
-          </Text>
-        </View>
+        <Text style={styles.headerTitle}>Timetable</Text>
       </View>
 
       <View style={styles.daySelector}>
@@ -147,37 +142,20 @@ export function TimetableScreen() {
 
   const selectedIndex = selectedDayOfWeek - 1;
 
+  // Hides the shared Tabs-level header and renders this screen's own
+  // TimetableHeader inline below instead of swapping it in via
+  // navigation.getParent().setOptions({header:...}) - that swap pattern was
+  // observed unreliable for this screen (header sometimes not showing at
+  // all); every other pushed erp sub-screen already uses this same
+  // hide-and-render-inline pattern (CiaMarksScreen/VenueRequestScreen/
+  // SubjectRecordsScreen/AnnouncementsScreen/...).
   useFocusEffect(
     useCallback(() => {
-      navigation.getParent()?.setOptions({
-        header: () => (
-          <TimetableHeader
-            weekDates={weekDates}
-            selectedIndex={selectedIndex}
-            onSelectDay={(index) => setSelectedDayOfWeek(index + 1)}
-            // A faculty member, HoD, or HR Payroll reaches this screen from
-            // the Class tab's own Campus grid (a separate tab's Stack - see
-            // app/(tabs)/_layout.tsx), which pushes across tabs into this
-            // one's own Stack. That Stack's history isn't reset on
-            // re-entry, so a plain router.back() can pop to whatever was
-            // last visited here (e.g. always landing on Calendar) instead
-            // of where they actually came from. A student instead has their
-            // own dedicated Campus tab (this screen's own Stack, via the
-            // Academics chooser) - router.back() there correctly pops back
-            // to Academics within that same stack. Principal never reaches
-            // this screen at all (no Class tab, no Campus tile either - see
-            // PrincipalDashboard).
-            onBack={() =>
-              role === "employee" || role === "hod" || role === "hr-payroll" ? router.replace("/(tabs)/erp") : router.back()
-            }
-          />
-        ),
-      });
+      navigation.getParent()?.setOptions({ headerShown: false });
       return () => {
-        navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
+        navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
       };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [navigation, router, selectedIndex, weekDates]),
+    }, [navigation]),
   );
 
   const slots = useMemo(
@@ -193,6 +171,25 @@ export function TimetableScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
+      <TimetableHeader
+        weekDates={weekDates}
+        selectedIndex={selectedIndex}
+        onSelectDay={(index) => setSelectedDayOfWeek(index + 1)}
+        // A faculty member, HoD, or HR Payroll reaches this screen from the
+        // Class tab's own grid (a separate tab's Stack - see
+        // app/(tabs)/_layout.tsx), which pushes across tabs into this one's
+        // own Stack. That Stack's history isn't reset on re-entry, so a
+        // plain router.back() can pop to whatever was last visited here
+        // (e.g. always landing on Calendar) instead of where they actually
+        // came from. A student instead has their own dedicated Academics
+        // tab (this screen's own Stack) - router.back() there correctly
+        // pops back within that same stack. Principal never reaches this
+        // screen at all (no Class tab, no Campus tile either).
+        onBack={() =>
+          role === "employee" || role === "hod" || role === "hr-payroll" ? router.replace("/(tabs)/erp") : router.back()
+        }
+      />
       {status === "loading" && (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <SkeletonStatCards count={3} style={styles.statsRow} />
@@ -317,7 +314,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },

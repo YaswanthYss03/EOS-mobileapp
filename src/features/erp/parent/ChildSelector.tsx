@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { View, Text, TouchableOpacity, ScrollView, Modal, StyleSheet } from "react-native";
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "@/theme";
+import { AnchoredDropdown, useDropdown } from "@/components/ui/dropdown";
 import type { ParentChild } from "@/services/api/parents.api";
 
 function initialsFromName(name: string) {
@@ -33,53 +33,51 @@ export function ChildSelector({
   selected: ParentChild;
   onSelect: (child: ParentChild) => void;
 }) {
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const { anchorRef, visible, close, toggle } = useDropdown();
   const canSwitch = children.length > 1;
 
   return (
     <>
-      <TouchableOpacity
-        style={styles.card}
-        onPress={() => canSwitch && setPickerOpen(true)}
-        activeOpacity={canSwitch ? 0.8 : 1}
-      >
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{initialsFromName(selected.name)}</Text>
-        </View>
-        <View style={styles.textWrap}>
-          <Text style={styles.name}>{selected.name}</Text>
-          <Text style={styles.subtitle}>{childSubtitle(selected)}</Text>
-        </View>
-        {canSwitch && <Ionicons name="chevron-down" size={18} color="#B0B7C3" />}
-      </TouchableOpacity>
+      <View ref={anchorRef} collapsable={false}>
+        <TouchableOpacity
+          style={styles.card}
+          onPress={() => canSwitch && toggle()}
+          activeOpacity={canSwitch ? 0.8 : 1}
+        >
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{initialsFromName(selected.name)}</Text>
+          </View>
+          <View style={styles.textWrap}>
+            <Text style={styles.name}>{selected.name}</Text>
+            <Text style={styles.subtitle}>{childSubtitle(selected)}</Text>
+          </View>
+          {canSwitch && <Ionicons name="chevron-down" size={18} color="#B0B7C3" />}
+        </TouchableOpacity>
+      </View>
 
       {canSwitch && (
-        <Modal visible={pickerOpen} transparent animationType="fade" onRequestClose={() => setPickerOpen(false)}>
-          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setPickerOpen(false)}>
-            <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-              <Text style={styles.modalTitle}>Select child</Text>
-              <ScrollView style={styles.modalList}>
-                {children.map((child) => (
-                  <TouchableOpacity
-                    key={child.id}
-                    style={styles.modalOptionRow}
-                    onPress={() => {
-                      onSelect(child);
-                      setPickerOpen(false);
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <View style={styles.modalOptionTextWrap}>
-                      <Text style={styles.modalOptionName}>{child.name}</Text>
-                      <Text style={styles.modalOptionSubtitle}>{childSubtitle(child)}</Text>
-                    </View>
-                    {child.id === selected.id && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </Modal>
+        <AnchoredDropdown anchorRef={anchorRef} visible={visible} onClose={close} contentStyle={styles.modalCard}>
+          <Text style={styles.modalTitle}>Select child</Text>
+          <ScrollView style={styles.modalList}>
+            {children.map((child) => (
+              <TouchableOpacity
+                key={child.id}
+                style={styles.modalOptionRow}
+                onPress={() => {
+                  onSelect(child);
+                  close();
+                }}
+                activeOpacity={0.8}
+              >
+                <View style={styles.modalOptionTextWrap}>
+                  <Text style={styles.modalOptionName}>{child.name}</Text>
+                  <Text style={styles.modalOptionSubtitle}>{childSubtitle(child)}</Text>
+                </View>
+                {child.id === selected.id && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </AnchoredDropdown>
       )}
     </>
   );
@@ -127,17 +125,17 @@ const styles = StyleSheet.create({
     color: "#9AA6B2",
     marginTop: 1,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.5)",
-    justifyContent: "center",
-    padding: 20,
-  },
   modalCard: {
     backgroundColor: "#fff",
     borderRadius: 18,
     padding: 18,
-    maxHeight: "70%",
+    width: 280,
+    maxHeight: 360,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   modalTitle: {
     fontSize: 15,

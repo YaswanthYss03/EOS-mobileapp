@@ -19,6 +19,7 @@ import {
   type MyAcademicCalendar,
   type MyCalendarEvent,
 } from "@/services/api/academic-calendar.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -54,20 +55,8 @@ function formatShortMonthYear(dateOnly: string): string {
   return `${MONTH_NAMES[date.getMonth()].slice(0, 3)} ${date.getFullYear()}`;
 }
 
-function AcademicCalendarHeader({ onBack, calendar }: { onBack: () => void; calendar: MyAcademicCalendar | null }) {
+function AcademicCalendarHeader({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
-  const range =
-    calendar?.start_date && calendar?.end_date
-      ? `${formatShortMonthYear(calendar.start_date)} – ${formatShortMonthYear(calendar.end_date)}`
-      : null;
-  // A faculty member teaching into several semesters at once has no single
-  // semester number to show (see getMergedAcademicCalendarForFaculty) - the
-  // real merged date range is still shown on its own rather than a
-  // fabricated "Semester N".
-  const subtitle =
-    calendar?.semester !== null && calendar?.semester !== undefined
-      ? `Semester ${calendar.semester}${range ? ` · ${range}` : ""}`
-      : range ?? "Academic calendar";
 
   return (
     <LinearGradient
@@ -83,10 +72,7 @@ function AcademicCalendarHeader({ onBack, calendar }: { onBack: () => void; cale
       >
         <Ionicons name="arrow-back" size={20} color="#fff" />
       </TouchableOpacity>
-      <View>
-        <Text style={styles.headerTitle}>Academic Calendar</Text>
-        <Text style={styles.headerSubtitle}>{subtitle}</Text>
-      </View>
+      <Text style={styles.headerTitle}>Academic Calendar</Text>
     </LinearGradient>
   );
 }
@@ -170,7 +156,6 @@ export function AcademicCalendarScreen() {
             onBack={() =>
               role === "employee" || role === "hod" || role === "hr-payroll" ? router.replace("/(tabs)/erp") : router.back()
             }
-            calendar={calendar}
           />
         ),
       });
@@ -214,6 +199,7 @@ export function AcademicCalendarScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       {status === "loading" && (
         <View style={styles.content}>
           <SkeletonCalendarBlock style={{ marginBottom: 20 }} />
@@ -323,7 +309,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },

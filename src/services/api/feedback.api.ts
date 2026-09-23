@@ -34,8 +34,15 @@ export type FeedbackFormDetail = {
   questions: FeedbackFormQuestion[];
 };
 
-export async function listMyFeedbackForms(): Promise<FeedbackFormSummary[]> {
-  const { data } = await apiClient.get<{ data: FeedbackFormSummary[] }>("/feedback/student/forms");
+// The 5 Campus-tab services a form can be tagged for (see EOS-backend's
+// feedback_service_type_enum) - distinct from the academic list above,
+// which explicitly excludes any service-tagged form (and vice versa).
+export type FeedbackServiceType = "food_court" | "medical" | "library" | "stationary" | "copy_center";
+
+export async function listMyFeedbackForms(serviceType?: FeedbackServiceType): Promise<FeedbackFormSummary[]> {
+  const { data } = await apiClient.get<{ data: FeedbackFormSummary[] }>("/feedback/student/forms", {
+    params: serviceType ? { service_type: serviceType } : undefined,
+  });
   return data.data;
 }
 

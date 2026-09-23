@@ -6,7 +6,9 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { getApiErrorMessage } from "@/services/api/client";
 import {
@@ -43,15 +45,20 @@ function formatFileSize(bytes: number | null): string | null {
 }
 
 // Wired to EOS-backend's library module: GET /me/library/borrow-records
-// (student-only, self-scoped) for Borrowed/History, GET /library/books and
+// (self-scoped to the caller - student_id/faculty_id/staff_user_id,
+// whichever real row applies) for Borrowed/History, GET /library/books and
 // GET /library/e-resources (shared catalogue reads) for Search/E-books.
-// Reachable from the Student dashboard's Campus "Library" item.
+// Reachable from any role's Campus "Library" card (Student, Employee/HoD,
+// HR Payroll, Principal - see AmenityHomeScreen.tsx), not student-only
+// despite the file/component name (kept for history - this predates the
+// Campus tab being shared across roles).
 export function StudentLibraryScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
   const [tab, setTab] = useState<Tab>("borrowed");
+  const scrollMemory = useTabScrollMemory();
 
   const [borrowedStatus, setBorrowedStatus] = useState<LoadStatus>("loading");
   const [borrowed, setBorrowed] = useState<MyBorrowRecord[]>([]);
@@ -143,8 +150,32 @@ export function StudentLibraryScreen() {
     return formatShortDate(earliest.due_date);
   }, [borrowed]);
 
+  // Stats card sits directly above the tab switch in the original layout
+  // (same card-less spacing, no border of its own between them) - hoisted
+  // together with the switch below instead of duplicated per-tab, since
+  // splitting them would introduce a visual seam that isn't there today.
+  function renderStatsCard() {
+    return (
+      <View style={styles.statsCard}>
+        <View style={styles.statsCol}>
+          <Text style={styles.statsValue}>{borrowedStatus === "success" ? borrowed.length : "—"}</Text>
+          <Text style={styles.statsLabel}>Books issued</Text>
+        </View>
+        <View style={styles.statsCol}>
+          <Text style={styles.statsValue}>{borrowedStatus === "success" ? nextDueShort : "—"}</Text>
+          <Text style={styles.statsLabel}>Next due</Text>
+        </View>
+        <View style={styles.statsCol}>
+          <Text style={styles.statsValue}>{borrowedStatus === "success" ? overdueCount : "—"}</Text>
+          <Text style={styles.statsLabel}>Overdue</Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -152,6 +183,9 @@ export function StudentLibraryScreen() {
         style={[styles.header, { paddingTop: insets.top + 10 }]}
       >
         <TouchableOpacity
+          // Reached from the Campus tab's own local route copy (see
+          // app/(tabs)/amenity/library/index.tsx) - same-Stack now, so a
+          // plain back is correct and matches hardware back/swipe gestures.
           onPress={() => router.back()}
           style={styles.backButton}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -161,51 +195,37 @@ export function StudentLibraryScreen() {
         <Text style={styles.headerTitle}>Library</Text>
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.statsCard}>
-          <View style={styles.statsCol}>
-            <Text style={styles.statsValue}>{borrowedStatus === "success" ? borrowed.length : "—"}</Text>
-            <Text style={styles.statsLabel}>Books issued</Text>
-          </View>
-          <View style={styles.statsCol}>
-            <Text style={styles.statsValue}>{borrowedStatus === "success" ? nextDueShort : "—"}</Text>
-            <Text style={styles.statsLabel}>Next due</Text>
-          </View>
-          <View style={styles.statsCol}>
-            <Text style={styles.statsValue}>{borrowedStatus === "success" ? overdueCount : "—"}</Text>
-            <Text style={styles.statsLabel}>Overdue</Text>
-          </View>
-        </View>
+      <View style={styles.tabSwitchWrap}>
+        {renderStatsCard()}
 
-        <View style={styles.tabSwitch}>
-          {TABS.map((t) => (
-            <TouchableOpacity
-              key={t.id}
-              style={[styles.tabButton, tab === t.id && styles.tabButtonActive]}
-              onPress={() => setTab(t.id)}
+        <AnimatedTabBar
+          tabs={TABS.map((t) => ({ key: t.id, label: t.label }))}
+          active={tab}
+          onChange={setTab}
+          containerStyle={styles.tabSwitch}
+          tabStyle={styles.tabButton}
+          tabTextStyle={styles.tabButtonText}
+          activeTabTextStyle={styles.tabButtonTextActive}
+          indicatorStyle={styles.tabSwitchIndicator}
+        />
+      </View>
+
+      <TabTransitionView activeKey={tab} order={TABS.map((t) => t.id)} style={styles.tabContent}>
+        {tab === "borrowed" ? (
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollMemory.bind("borrowed")}>
+            <AsyncSection
+              status={borrowedStatus}
+              onRetry={loadBorrowed}
+              emptyText="You have no books borrowed right now."
+              isEmpty={borrowed.length === 0}
             >
-              <Text style={[styles.tabButtonText, tab === t.id && styles.tabButtonTextActive]}>
-                {t.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {tab === "borrowed" && (
-          <AsyncSection
-            status={borrowedStatus}
-            onRetry={loadBorrowed}
-            emptyText="You have no books borrowed right now."
-            isEmpty={borrowed.length === 0}
-          >
-            {borrowed.map((book) => (
-              <BorrowedCard key={book.id} book={book} />
-            ))}
-          </AsyncSection>
-        )}
-
-        {tab === "ebooks" && (
-          <>
+              {borrowed.map((book) => (
+                <BorrowedCard key={book.id} book={book} />
+              ))}
+            </AsyncSection>
+          </ScrollView>
+        ) : tab === "ebooks" ? (
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollMemory.bind("ebooks")}>
             <SearchBar
               placeholder="Search e-books by title"
               value={ebookQuery}
@@ -221,11 +241,9 @@ export function StudentLibraryScreen() {
                 <EbookCard key={book.id} book={book} />
               ))}
             </AsyncSection>
-          </>
-        )}
-
-        {tab === "search" && (
-          <>
+          </ScrollView>
+        ) : tab === "search" ? (
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollMemory.bind("search")}>
             <SearchBar
               placeholder="Search the library catalogue"
               value={catalogueQuery}
@@ -241,22 +259,22 @@ export function StudentLibraryScreen() {
                 <CatalogueCard key={item.id} item={item} />
               ))}
             </AsyncSection>
-          </>
+          </ScrollView>
+        ) : (
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollMemory.bind("history")}>
+            <AsyncSection
+              status={historyStatus}
+              onRetry={loadHistory}
+              emptyText="No return history yet."
+              isEmpty={history.length === 0}
+            >
+              {history.map((item) => (
+                <HistoryCard key={item.id} item={item} />
+              ))}
+            </AsyncSection>
+          </ScrollView>
         )}
-
-        {tab === "history" && (
-          <AsyncSection
-            status={historyStatus}
-            onRetry={loadHistory}
-            emptyText="No return history yet."
-            isEmpty={history.length === 0}
-          >
-            {history.map((item) => (
-              <HistoryCard key={item.id} item={item} />
-            ))}
-          </AsyncSection>
-        )}
-      </ScrollView>
+      </TabTransitionView>
     </SafeAreaView>
   );
 }
@@ -405,7 +423,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -414,8 +431,15 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontFamily: fonts.bold,
   },
+  tabContent: {
+    flex: 1,
+  },
+  tabSwitchWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
   content: {
-    padding: 16,
+    paddingHorizontal: 16,
     paddingBottom: 32,
   },
   errorNotice: {
@@ -489,7 +513,10 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     paddingVertical: 12,
   },
-  tabButtonActive: {
+  tabSwitchIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
     backgroundColor: "#2F6FE0",
   },
   tabButtonText: {

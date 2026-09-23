@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   View,
@@ -6,7 +6,6 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
-  Modal,
   StyleSheet,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,10 +14,14 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { useSkipSharedHeaderToggle } from "@/hooks/useSkipSharedHeaderToggle";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnchoredDropdown, useDropdown } from "@/components/ui/dropdown";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
+import { parseClassLabel } from "@/services/api/subject-records.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import {
   getMyDepartment,
   getMyDepartmentBatches,
@@ -62,6 +65,19 @@ export function AssignFacultyScreen() {
   const [batchesStatus, setBatchesStatus] = useState<LoadStatus>("loading");
   const [batches, setBatches] = useState<MappingBatch[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
+  const batchPicker = useDropdown();
+
+  // Section isn't a real query param on GET /me/faculty-mapping/lookup/
+  // subjects - it's parsed client-side from each row's own class.label
+  // (same "Section (Batch)" format parseClassLabel already handles for the
+  // Subject Records/CIA Marks screens), so filtering happens locally over
+  // whatever the batch fetch already returned rather than a new backend
+  // call. Semester has no equivalent anywhere in this label or endpoint -
+  // class_subjects.semester genuinely isn't exposed here, so unlike
+  // batch/section it can't be added without a small backend change; not
+  // faked with a placeholder.
+  const [sectionFilter, setSectionFilter] = useState<string | null>(null);
+  const sectionPicker = useDropdown();
 
   const [subjectsStatus, setSubjectsStatus] = useState<LoadStatus>("loading");
   const [subjectsError, setSubjectsError] = useState<string | null>(null);
@@ -72,14 +88,21 @@ export function AssignFacultyScreen() {
   const [facultyOptions, setFacultyOptions] = useState<FacultyOption[]>([]);
   const [pickerSubject, setPickerSubject] = useState<MappingSubject | null>(null);
   const [saving, setSaving] = useState(false);
+  // One <AnchoredDropdown> is shared by every subject row's faculty picker -
+  // it needs to measure whichever row was actually tapped, so each row keeps
+  // its own node here (keyed by class_subject_id) rather than a single ref.
+  const subjectAnchors = useRef<Record<number, View | null>>({});
+
+  const skipHeaderToggle = useSkipSharedHeaderToggle();
 
   useFocusEffect(
     useCallback(() => {
+      if (skipHeaderToggle) return undefined;
       navigation.getParent()?.setOptions({ headerShown: false });
       return () => {
         navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
       };
-    }, [navigation]),
+    }, [navigation, skipHeaderToggle]),
   );
 
   const loadFacultyOptions = useCallback((departmentId: number) => {
@@ -144,6 +167,22 @@ export function AssignFacultyScreen() {
     return () => clearTimeout(timer);
   }, [loadSubjects]);
 
+  useEffect(() => {
+    setSectionFilter(null);
+  }, [selectedBatchId]);
+
+  const sectionOptions = useMemo(
+    () => Array.from(new Set(subjects.map((s) => parseClassLabel(s.class.label).section))).sort(),
+    [subjects],
+  );
+  const filteredSubjects = useMemo(
+    () =>
+      sectionFilter
+        ? subjects.filter((s) => parseClassLabel(s.class.label).section === sectionFilter)
+        : subjects,
+    [subjects, sectionFilter],
+  );
+
   function handleAssign(facultyId: number | null) {
     if (!pickerSubject || saving) return;
     setSaving(true);
@@ -174,6 +213,7 @@ export function AssignFacultyScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -221,34 +261,40 @@ export function AssignFacultyScreen() {
           />
         </View>
 
-        {/* Inline chips instead of a popup - "Sem"/"Section" would go here
-            too, but neither exists as a separate field anywhere in this
-            data yet (class_subjects.semester isn't exposed by this
-            endpoint, and section isn't cleanly separable from the free-text
-            class.label) - would need a small backend addition to do
-            properly rather than guessing at a string format. */}
+        {/* Batch/Section as anchored dropdowns (same below-trigger pattern as
+            the faculty picker itself) instead of the old chip row. Semester
+            has no field anywhere in this endpoint's data (see the state
+            declarations above) - not shown rather than faked. */}
         {batchesStatus === "success" && batches.length > 0 && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.filterRow}
-            contentContainerStyle={styles.filterRowContent}
-          >
-            {batches.map((batch) => (
-              <TouchableOpacity
-                key={batch.id}
-                style={[styles.filterChip, batch.id === selectedBatchId && styles.filterChipActive]}
-                onPress={() => setSelectedBatchId(batch.id)}
-                activeOpacity={0.85}
-              >
-                <Text
-                  style={[styles.filterChipText, batch.id === selectedBatchId && styles.filterChipTextActive]}
-                >
-                  {batch.name}
-                </Text>
+          <View style={styles.filterFieldRow}>
+            <View ref={batchPicker.anchorRef} collapsable={false} style={styles.filterFieldCol}>
+              <TouchableOpacity style={styles.filterField} onPress={batchPicker.toggle} activeOpacity={0.8}>
+                <Text style={styles.filterFieldLabel}>BATCH</Text>
+                <View style={styles.filterFieldValueRow}>
+                  <Text style={styles.filterFieldValue} numberOfLines={1}>
+                    {batches.find((b) => b.id === selectedBatchId)?.name ?? "Select"}
+                  </Text>
+                  <Ionicons name="chevron-down" size={14} color="#B0B7C3" />
+                </View>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
+            </View>
+
+            <View ref={sectionPicker.anchorRef} collapsable={false} style={styles.filterFieldCol}>
+              <TouchableOpacity
+                style={styles.filterField}
+                onPress={() => sectionOptions.length > 0 && sectionPicker.toggle()}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.filterFieldLabel}>SECTION</Text>
+                <View style={styles.filterFieldValueRow}>
+                  <Text style={styles.filterFieldValue} numberOfLines={1}>
+                    {sectionFilter ?? "All"}
+                  </Text>
+                  <Ionicons name="chevron-down" size={14} color="#B0B7C3" />
+                </View>
+              </TouchableOpacity>
+            </View>
+          </View>
         )}
 
         {batchesStatus === "success" && batches.length === 0 && (
@@ -267,15 +313,17 @@ export function AssignFacultyScreen() {
           </View>
         )}
 
-        {subjectsStatus === "success" && subjects.length === 0 && (
+        {subjectsStatus === "success" && filteredSubjects.length === 0 && (
           <View style={styles.emptyState}>
             <Ionicons name="book-outline" size={32} color="#B0B7C3" />
-            <Text style={styles.emptyStateText}>No subjects found</Text>
+            <Text style={styles.emptyStateText}>
+              {subjects.length === 0 ? "No subjects found" : "No subjects match this section"}
+            </Text>
           </View>
         )}
 
         {subjectsStatus === "success" &&
-          subjects.map((item) => {
+          filteredSubjects.map((item) => {
             const assigned = item.assigned_faculty;
             return (
               <View key={item.class_subject_id} style={styles.card}>
@@ -291,95 +339,161 @@ export function AssignFacultyScreen() {
                   {item.subject.subject_code} · {item.class.label}
                 </Text>
 
-                <TouchableOpacity
-                  style={styles.facultyRow}
-                  onPress={() => setPickerSubject(item)}
-                  activeOpacity={0.8}
+                <View
+                  ref={(node) => {
+                    subjectAnchors.current[item.class_subject_id] = node;
+                  }}
+                  collapsable={false}
                 >
-                  <View style={[styles.facultyAvatar, !assigned && styles.facultyAvatarEmpty]}>
-                    <Text style={styles.facultyAvatarText}>
-                      {assigned ? initialsFromName(assigned.name) : "–"}
+                  <TouchableOpacity
+                    style={styles.facultyRow}
+                    onPress={() => setPickerSubject(item)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={[styles.facultyAvatar, !assigned && styles.facultyAvatarEmpty]}>
+                      <Text style={styles.facultyAvatarText}>
+                        {assigned ? initialsFromName(assigned.name) : "–"}
+                      </Text>
+                    </View>
+                    <Text style={[styles.facultyName, !assigned && styles.facultyNamePlaceholder]}>
+                      {assigned ? assigned.name : "Select a faculty member"}
                     </Text>
-                  </View>
-                  <Text style={[styles.facultyName, !assigned && styles.facultyNamePlaceholder]}>
-                    {assigned ? assigned.name : "Select a faculty member"}
-                  </Text>
-                  <Ionicons name="chevron-down" size={18} color="#B0B7C3" />
-                </TouchableOpacity>
+                    <Ionicons name="chevron-down" size={18} color="#B0B7C3" />
+                  </TouchableOpacity>
+                </View>
               </View>
             );
           })}
       </ScrollView>
 
-      <Modal
+      <AnchoredDropdown
+        anchorRef={{
+          current: pickerSubject ? subjectAnchors.current[pickerSubject.class_subject_id] ?? null : null,
+        }}
         visible={pickerSubject !== null}
-        animationType="fade"
-        transparent
-        onRequestClose={() => setPickerSubject(null)}
+        onClose={() => setPickerSubject(null)}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
       >
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setPickerSubject(null)}>
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>{pickerSubject?.subject.name}</Text>
-            <Text style={styles.modalSubtitle}>Select a faculty member</Text>
+        <Text style={styles.modalTitle}>{pickerSubject?.subject.name}</Text>
+        <Text style={styles.modalSubtitle}>Select a faculty member</Text>
 
-            <ScrollView style={styles.modalList}>
-              {facultyOptionsStatus === "loading" && <SkeletonListRows count={3} />}
+        <ScrollView style={styles.modalList}>
+          {facultyOptionsStatus === "loading" && <SkeletonListRows count={3} />}
 
-              {facultyOptionsStatus === "error" && (
-                <View style={styles.errorNotice}>
-                  <Text style={styles.errorNoticeText}>{facultyOptionsError}</Text>
-                  <TouchableOpacity
-                    onPress={() => department && loadFacultyOptions(department.id)}
-                    style={styles.retryButton}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.retryButtonText}>Retry</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {facultyOptionsStatus === "success" && facultyOptions.length === 0 && (
-                <Text style={styles.emptyInlineText}>No faculty found in your department.</Text>
-              )}
-
-              {facultyOptionsStatus === "success" && facultyOptions.map((option) => {
-                const selected = pickerSubject?.assigned_faculty?.id === option.id;
-                const name = `${option.first_name} ${option.last_name}`;
-                return (
-                  <TouchableOpacity
-                    key={option.id}
-                    style={styles.modalOptionRow}
-                    onPress={() => handleAssign(option.id)}
-                    activeOpacity={0.8}
-                    disabled={saving}
-                  >
-                    <View style={styles.modalOptionAvatar}>
-                      <Text style={styles.modalOptionAvatarText}>{initialsFromName(name)}</Text>
-                    </View>
-                    <Text style={styles.modalOptionName}>{name}</Text>
-                    {selected && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-
-            {pickerSubject?.assigned_faculty && (
+          {facultyOptionsStatus === "error" && (
+            <View style={styles.errorNotice}>
+              <Text style={styles.errorNoticeText}>{facultyOptionsError}</Text>
               <TouchableOpacity
-                style={styles.modalClearButton}
-                onPress={() => handleAssign(null)}
+                onPress={() => department && loadFacultyOptions(department.id)}
+                style={styles.retryButton}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {facultyOptionsStatus === "success" && facultyOptions.length === 0 && (
+            <Text style={styles.emptyInlineText}>No faculty found in your department.</Text>
+          )}
+
+          {facultyOptionsStatus === "success" && facultyOptions.map((option) => {
+            const selected = pickerSubject?.assigned_faculty?.id === option.id;
+            const name = `${option.first_name} ${option.last_name}`;
+            return (
+              <TouchableOpacity
+                key={option.id}
+                style={styles.modalOptionRow}
+                onPress={() => handleAssign(option.id)}
                 activeOpacity={0.8}
                 disabled={saving}
               >
-                {saving ? (
-                  <ActivityIndicator color="#DC2626" size="small" />
-                ) : (
-                  <Text style={styles.modalClearButtonText}>Clear assignment</Text>
-                )}
+                <View style={styles.modalOptionAvatar}>
+                  <Text style={styles.modalOptionAvatarText}>{initialsFromName(name)}</Text>
+                </View>
+                <Text style={styles.modalOptionName}>{name}</Text>
+                {selected && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
               </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
+        {pickerSubject?.assigned_faculty && (
+          <TouchableOpacity
+            style={styles.modalClearButton}
+            onPress={() => handleAssign(null)}
+            activeOpacity={0.8}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator color="#DC2626" size="small" />
+            ) : (
+              <Text style={styles.modalClearButtonText}>Clear assignment</Text>
             )}
           </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+        )}
+      </AnchoredDropdown>
+
+      <AnchoredDropdown
+        anchorRef={batchPicker.anchorRef}
+        visible={batchPicker.visible}
+        onClose={batchPicker.close}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
+      >
+        <Text style={styles.modalTitle}>Select Batch</Text>
+        <ScrollView style={styles.modalList}>
+          {batches.map((batch) => (
+            <TouchableOpacity
+              key={batch.id}
+              style={styles.modalOptionRow}
+              onPress={() => {
+                setSelectedBatchId(batch.id);
+                batchPicker.close();
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.modalOptionName}>{batch.name}</Text>
+              {batch.id === selectedBatchId && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </AnchoredDropdown>
+
+      <AnchoredDropdown
+        anchorRef={sectionPicker.anchorRef}
+        visible={sectionPicker.visible}
+        onClose={sectionPicker.close}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
+      >
+        <Text style={styles.modalTitle}>Select Section</Text>
+        <ScrollView style={styles.modalList}>
+          <TouchableOpacity
+            style={styles.modalOptionRow}
+            onPress={() => {
+              setSectionFilter(null);
+              sectionPicker.close();
+            }}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.modalOptionName}>All</Text>
+            {!sectionFilter && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
+          </TouchableOpacity>
+          {sectionOptions.map((section) => (
+            <TouchableOpacity
+              key={section}
+              style={styles.modalOptionRow}
+              onPress={() => {
+                setSectionFilter(section);
+                sectionPicker.close();
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.modalOptionName}>{section}</Text>
+              {section === sectionFilter && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </AnchoredDropdown>
     </SafeAreaView>
   );
 }
@@ -400,7 +514,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -476,31 +590,40 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     color: "#111827",
   },
-  filterRow: {
+  filterFieldRow: {
+    flexDirection: "row",
+    gap: 8,
     marginBottom: 14,
   },
-  filterRowContent: {
-    gap: 8,
+  filterFieldCol: {
+    flex: 1,
   },
-  filterChip: {
+  filterField: {
     backgroundColor: "#fff",
-    borderRadius: 999,
-    borderWidth: 1,
+    borderRadius: 12,
+    borderWidth: 1.5,
     borderColor: "#E5E7EB",
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingVertical: 9,
   },
-  filterChipActive: {
-    backgroundColor: "#2F6FE0",
-    borderColor: "#2F6FE0",
-  },
-  filterChipText: {
-    fontSize: 13,
+  filterFieldLabel: {
+    fontSize: 9,
     fontFamily: fonts.bold,
-    color: "#4B5563",
+    color: "#9AA6B2",
+    letterSpacing: 0.5,
+    marginBottom: 2,
   },
-  filterChipTextActive: {
-    color: "#fff",
+  filterFieldValueRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 6,
+  },
+  filterFieldValue: {
+    flex: 1,
+    fontSize: 12.5,
+    fontFamily: fonts.bold,
+    color: "#111827",
   },
   errorNotice: {
     alignItems: "center",
@@ -626,17 +749,22 @@ const styles = StyleSheet.create({
     color: "#9AA6B2",
     fontFamily: fonts.regular,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.5)",
-    justifyContent: "center",
-    padding: 20,
-  },
   modalCard: {
     backgroundColor: "#fff",
     borderRadius: 18,
     padding: 18,
     maxHeight: "70%",
+  },
+  // Anchored dropdown has no full-screen flex parent to resolve modalCard's
+  // percentage maxHeight against, so pin a concrete size here.
+  anchoredCard: {
+    width: 280,
+    maxHeight: 360,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   modalTitle: {
     fontSize: 15,

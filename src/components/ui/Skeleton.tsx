@@ -109,6 +109,70 @@ export function SkeletonStatCards({
   );
 }
 
+// Matches PostCard/AnnouncementPostCard's real shape (Home feed) - an
+// edge-to-edge card with an avatar+name header, a couple of text lines, and
+// a large image block - unlike the generic bordered SkeletonListRows shape,
+// which looks nothing like an actual feed post (no avatar, no image, a
+// rounded border the real cards don't have) and read as "wrong" while the
+// feed was loading.
+export function SkeletonFeedCards({
+  count = 3,
+  style,
+}: {
+  count?: number;
+  style?: StyleProp<ViewStyle>;
+}) {
+  return (
+    <View style={style}>
+      {Array.from({ length: count }).map((_, i) => (
+        <View key={i} style={styles.feedCard}>
+          <View style={styles.feedHeaderRow}>
+            <SkeletonBlock width={30} height={30} borderRadius={8} />
+            <View style={styles.feedHeaderTextWrap}>
+              <SkeletonBlock width="55%" height={12} style={{ marginBottom: 6 }} />
+              <SkeletonBlock width="35%" height={10} />
+            </View>
+          </View>
+          <SkeletonBlock width="80%" height={13} style={{ marginTop: 12, marginBottom: 8 }} />
+          <SkeletonBlock width="95%" height={11} style={{ marginBottom: 12 }} />
+          <SkeletonBlock width="100%" height={180} borderRadius={12} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// Matches ProductCard's own shape (Stationery Store) - an image block, a
+// name line, a price/stock row, and an add-button block - unlike
+// SkeletonListRows, which has no image or button and reads as "wrong" for a
+// product grid. `cardStyle` lets the caller reuse the exact width the real
+// ProductCard uses at each call site (a fixed width in a horizontal row, a
+// "47%" in a wrapping grid) so the skeleton lines up with what replaces it.
+export function SkeletonProductGrid({
+  count = 6,
+  cardStyle,
+  style,
+}: {
+  count?: number;
+  cardStyle?: StyleProp<ViewStyle>;
+  style?: StyleProp<ViewStyle>;
+}) {
+  return (
+    <View style={[styles.productGrid, style]}>
+      {Array.from({ length: count }).map((_, i) => (
+        <View key={i} style={[styles.productCard, cardStyle]}>
+          <SkeletonBlock width="100%" height={78} borderRadius={0} />
+          <View style={styles.productCardBody}>
+            <SkeletonBlock width="85%" height={11} style={{ marginBottom: 6 }} />
+            <SkeletonBlock width="55%" height={11} style={{ marginBottom: 8 }} />
+            <SkeletonBlock width="100%" height={26} borderRadius={10} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 // A single detail-page block - a couple of full-width lines then a
 // paragraph-height block, for screens that show one record's details
 // rather than a list (e.g. a borrow record, a leave request).
@@ -181,9 +245,39 @@ const styles = StyleSheet.create({
     borderColor: "#EEF0F4",
     padding: 16,
   },
+  feedCard: {
+    backgroundColor: "#fff",
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 12,
+  },
+  feedHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  feedHeaderTextWrap: {
+    flex: 1,
+  },
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
+  },
+  productGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+  productCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#EEF0F4",
+    overflow: "hidden",
+  },
+  productCardBody: {
+    padding: 10,
   },
   gridItem: {
     width: "33.33%",

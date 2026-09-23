@@ -3,9 +3,13 @@ import { apiClient } from "./client";
 // Mirrors EOS-backend's POST/GET /me/leaves and POST /me/leaves/:id/attachment
 // (see EOS-backend/src/modules/admissions/students/me-profile/me-leaves.service.ts
 // and me-leaves-list.service.ts). Self-scoped to the calling student via the
-// JWT. The real approval chain is two stages - faculty then HOD - not the
-// simple pending/approved/rejected a UI mockup might assume.
-export type LeaveStatus = "pending" | "faculty_approved" | "hod_approved" | "rejected";
+// JWT. Two distinct approval paths share this one endpoint/table - the
+// academic Leave tab's request goes Faculty -> HOD (statuses
+// pending/faculty_approved/hod_approved/rejected); a request with
+// routed_to_warden=true (set only by the Hostel tab's own Leave form, see
+// StudentHostelLeaveScreen) skips both and is decided by the Warden alone
+// (pending -> warden_approved/rejected).
+export type LeaveStatus = "pending" | "faculty_approved" | "hod_approved" | "rejected" | "warden_approved";
 
 export type MyLeave = {
   id: number;
@@ -14,9 +18,11 @@ export type MyLeave = {
   reason: string | null;
   status: LeaveStatus;
   also_on_hostel_leave: boolean;
+  routed_to_warden: boolean;
   attachment_url: string | null;
   approved_by_faculty: string | null;
   approved_by_hod: string | null;
+  approved_by_warden: string | null;
   created_at: string;
 };
 
@@ -32,6 +38,7 @@ export type CreateLeavePayload = {
   to_date: string;
   reason?: string;
   also_on_hostel_leave?: boolean;
+  routed_to_warden?: boolean;
 };
 
 export async function createMyLeave(payload: CreateLeavePayload): Promise<MyLeave> {
@@ -41,6 +48,7 @@ export async function createMyLeave(payload: CreateLeavePayload): Promise<MyLeav
 
 export async function listMyLeaves(params?: {
   status?: LeaveStatus;
+  routed_to_warden?: boolean;
   page?: number;
   page_size?: number;
 }): Promise<MyLeavesListResponse> {

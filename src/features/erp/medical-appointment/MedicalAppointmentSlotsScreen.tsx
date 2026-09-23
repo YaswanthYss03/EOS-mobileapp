@@ -14,6 +14,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import { SkeletonIconGrid } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
@@ -221,6 +222,7 @@ export function MedicalAppointmentSlotsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <SlotsHeader onBack={() => router.back()} dateLabel={dateLabel} />
 
       {status === "loading" && (
@@ -350,7 +352,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },

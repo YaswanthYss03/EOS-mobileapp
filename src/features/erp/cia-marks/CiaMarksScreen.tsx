@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   View,
@@ -15,6 +15,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnchoredDropdown } from "@/components/ui/dropdown";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -24,6 +25,7 @@ import {
   parseClassLabel,
   type SubjectRecordMapping,
 } from "@/services/api/subject-records.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import {
   getExamMarksRoster,
   enterExamMarks,
@@ -101,21 +103,22 @@ export function CiaMarksScreen() {
   const [selectedGroupKey, setSelectedGroupKey] = useState<string | null>(null);
   const [selectedExamMappingId, setSelectedExamMappingId] = useState<number | null>(null);
 
-  // Inline Batch/Section/Subject filters (replaces the old "Class & Subject"
-  // popup) - each one narrows the group list; "openFilter" is which one's
-  // option panel is currently expanded below the row (never more than one
-  // at a time, and it's inline content, not a modal).
-  const [batchFilter, setBatchFilter] = useState<string | null>(null);
-  const [sectionFilter, setSectionFilter] = useState<string | null>(null);
-  const [subjectFilter, setSubjectFilter] = useState<string | null>(null);
-  const [openFilter, setOpenFilter] = useState<"batch" | "section" | "subject" | null>(null);
+  // Class (each option already shows class+subject together) and Exam type
+  // (CIA1/CIA2/Quiz/Presentation/Semester, whatever the COE actually
+  // created for that class+subject) are both picked via a dropdown -
+  // anchored to each row's own node, same AnchoredDropdown component/
+  // pattern as VenueRequestScreen's list pickers.
+  const [classDropdownOpen, setClassDropdownOpen] = useState(false);
+  const classAnchorRef = useRef<View | null>(null);
+  const [examTypeDropdownOpen, setExamTypeDropdownOpen] = useState(false);
+  const examTypeAnchorRef = useRef<View | null>(null);
 
   const [rosterStatus, setRosterStatus] = useState<LoadStatus>("loading");
   const [rosterError, setRosterError] = useState<string | null>(null);
   const [students, setStudents] = useState<ExamMarksRosterStudent[]>([]);
   const [locked, setLocked] = useState(false);
   const [maxMarks, setMaxMarks] = useState<number>(CIA_MAX_MARKS);
-  const [convertedFrom60, setConvertedFrom60] = useState(false);
+  const [convertedToHundred, setConvertedToHundred] = useState(false);
   const [draftMarks, setDraftMarks] = useState<MarksMap>({});
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -156,7 +159,7 @@ export function CiaMarksScreen() {
         setStudents(roster.students);
         setLocked(roster.locked);
         setMaxMarks(roster.max_marks !== null ? Number(roster.max_marks) : CIA_MAX_MARKS);
-        setConvertedFrom60(false);
+        setConvertedToHundred(false);
         const initialDraft: MarksMap = {};
         for (const s of roster.students) {
           if (s.marks_obtained !== null) {
@@ -192,54 +195,9 @@ export function CiaMarksScreen() {
     [selectedGroup, selectedExamMappingId],
   );
 
-  // Distinct option lists, each cascading from whichever filters are
-  // already picked above it (Section options only cover the selected
-  // Batch, Subject options only cover the selected Batch+Section) - all
-  // derived client-side from data /me/subject-records already returns, no
-  // new query params.
-  const batchOptions = useMemo(
-    () => Array.from(new Set(groups.map((g) => g.batchName))).sort(),
-    [groups],
-  );
-  const sectionOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(groups.filter((g) => !batchFilter || g.batchName === batchFilter).map((g) => g.section)),
-      ).sort(),
-    [groups, batchFilter],
-  );
-  const subjectOptions = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const g of groups) {
-      if (batchFilter && g.batchName !== batchFilter) continue;
-      if (sectionFilter && g.section !== sectionFilter) continue;
-      seen.set(g.subjectCode, `${g.subjectCode} ${g.subjectName}`);
-    }
-    return Array.from(seen.entries()).map(([code, label]) => ({ code, label }));
-  }, [groups, batchFilter, sectionFilter]);
-
-  const filteredGroups = useMemo(
-    () =>
-      groups.filter(
-        (g) =>
-          (!batchFilter || g.batchName === batchFilter) &&
-          (!sectionFilter || g.section === sectionFilter) &&
-          (!subjectFilter || g.subjectCode === subjectFilter),
-      ),
-    [groups, batchFilter, sectionFilter, subjectFilter],
-  );
-
-  // Keep the selected group in sync with the filters - if it's filtered
-  // out, fall back to the first still-visible group instead of showing a
-  // stale roster for a class/subject no longer matching the filters.
-  useEffect(() => {
-    if (filteredGroups.length === 0) return;
-    if (filteredGroups.some((g) => g.key === selectedGroupKey)) return;
-    const next = filteredGroups[0];
-    setSelectedGroupKey(next.key);
-    setSelectedExamMappingId(next.exams[0]?.exam_subject_mapping_id ?? null);
-  }, [filteredGroups, selectedGroupKey]);
-
+  // No Batch/Section/Subject filters here anymore - a faculty only ever
+  // handles a handful of classes (typically 3-4), so every group is shown
+  // directly in the chip strip below rather than filtered down to one.
   const enteredCount = useMemo(
     () => Object.values(draftMarks).filter((value) => value !== "").length,
     [draftMarks],
@@ -250,23 +208,22 @@ export function CiaMarksScreen() {
     setSelectedExamMappingId(group.exams[0]?.exam_subject_mapping_id ?? null);
   }
 
-  function toggleFilter(name: "batch" | "section" | "subject") {
-    setOpenFilter((current) => (current === name ? null : name));
-  }
-
   function handleChangeMark(studentId: number, text: string) {
     const sanitized = sanitizeMark(text, maxMarks);
     setDraftMarks((prev) => ({ ...prev, [studentId]: sanitized }));
   }
 
-  // "if that exam[’s max] is out of 60 it automatically convert[s] to 100" -
-  // the moment the faculty finishes typing into ANY row for an exam whose
-  // real max is 60, every currently-entered value on this roster is
-  // rescaled together onto a /100 basis and the roster's own max switches
-  // to 100 - guarded so this only happens once per roster load (further
-  // edits/clamping then use the new /100 scale, not a second conversion).
+  // "if that exam[’s max] is out of 60 or 50 it automatically convert[s] to
+  // 100" - the moment the faculty finishes typing into ANY row for an exam
+  // whose real max is 50 or 60 (the two conventional CIA scales), every
+  // currently-entered value on this roster is rescaled together onto a /100
+  // basis and the roster's own max switches to 100 - guarded so this only
+  // happens once per roster load (further edits/clamping then use the new
+  // /100 scale, not a second conversion).
   function handleBlurMark() {
-    if (maxMarks !== 60 || convertedFrom60) return;
+    if (convertedToHundred) return;
+    if (maxMarks !== 50 && maxMarks !== 60) return;
+    const fromMax = maxMarks;
     setDraftMarks((prev) => {
       const next: MarksMap = {};
       for (const [studentId, value] of Object.entries(prev)) {
@@ -274,13 +231,13 @@ export function CiaMarksScreen() {
           next[Number(studentId)] = value;
           continue;
         }
-        const scaled = Math.round((Number(value) * 100) / 60);
+        const scaled = Math.round((Number(value) * 100) / fromMax);
         next[Number(studentId)] = String(Math.min(scaled, 100));
       }
       return next;
     });
     setMaxMarks(100);
-    setConvertedFrom60(true);
+    setConvertedToHundred(true);
   }
 
   function handleClearAll() {
@@ -355,6 +312,7 @@ export function CiaMarksScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -369,7 +327,7 @@ export function CiaMarksScreen() {
           <Ionicons name="arrow-back" size={20} color="#fff" />
         </TouchableOpacity>
         <View>
-          <Text style={styles.headerTitle}>CIA Marks</Text>
+          <Text style={styles.headerTitle}>Exam Marks</Text>
           <Text style={styles.headerSubtitle}>Continuous internal assessment</Text>
         </View>
       </LinearGradient>
@@ -391,180 +349,80 @@ export function CiaMarksScreen() {
         {groupsStatus === "success" && groups.length > 0 && selectedGroup && (
           <>
             <View style={styles.filterRow}>
-              <TouchableOpacity
-                style={[styles.filterField, openFilter === "batch" && styles.filterFieldOpen]}
-                onPress={() => toggleFilter("batch")}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.filterFieldLabel}>BATCH</Text>
-                <Text style={styles.filterFieldValue} numberOfLines={1}>
-                  {batchFilter ?? "All"}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.filterField, openFilter === "section" && styles.filterFieldOpen]}
-                onPress={() => toggleFilter("section")}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.filterFieldLabel}>SECTION</Text>
-                <Text style={styles.filterFieldValue} numberOfLines={1}>
-                  {sectionFilter ?? "All"}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.filterField, openFilter === "subject" && styles.filterFieldOpen]}
-                onPress={() => toggleFilter("subject")}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.filterFieldLabel}>SUBJECT</Text>
-                <Text style={styles.filterFieldValue} numberOfLines={1}>
-                  {subjectFilter ?? "All"}
-                </Text>
-              </TouchableOpacity>
+              <View ref={classAnchorRef} collapsable={false} style={styles.filterFieldFlex}>
+                <TouchableOpacity
+                  style={[styles.filterField, classDropdownOpen && styles.filterFieldOpen]}
+                  onPress={() => setClassDropdownOpen((open) => !open)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.filterFieldLabel}>CLASS</Text>
+                  <Text style={styles.filterFieldValue} numberOfLines={1}>
+                    {selectedGroup.classLabel} · {selectedGroup.subjectCode} {selectedGroup.subjectName}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {selectedGroup.exams.length > 0 && (
+                <View ref={examTypeAnchorRef} collapsable={false} style={styles.filterFieldFlex}>
+                  <TouchableOpacity
+                    style={[styles.filterField, examTypeDropdownOpen && styles.filterFieldOpen]}
+                    onPress={() => setExamTypeDropdownOpen((open) => !open)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.filterFieldLabel}>EXAM TYPE</Text>
+                    <Text style={styles.filterFieldValue} numberOfLines={1}>
+                      {examTabLabel(selectedExam?.exam.type ?? "Select")}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
 
-            {openFilter === "batch" && (
-              <View style={styles.filterPanel}>
+            <AnchoredDropdown
+              anchorRef={classAnchorRef}
+              visible={classDropdownOpen}
+              onClose={() => setClassDropdownOpen(false)}
+              contentStyle={styles.examTypeDropdownCard}
+            >
+              {groups.map((group) => (
                 <TouchableOpacity
+                  key={group.key}
                   style={styles.filterOptionRow}
                   onPress={() => {
-                    setBatchFilter(null);
-                    setOpenFilter(null);
+                    handlePickGroup(group);
+                    setClassDropdownOpen(false);
                   }}
                 >
-                  <Text style={styles.filterOptionText}>All</Text>
-                  {!batchFilter && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
+                  <Text style={styles.filterOptionText} numberOfLines={1}>
+                    {group.classLabel} · {group.subjectCode} {group.subjectName}
+                  </Text>
+                  {group.key === selectedGroupKey && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
                 </TouchableOpacity>
-                {batchOptions.map((option) => (
-                  <TouchableOpacity
-                    key={option}
-                    style={styles.filterOptionRow}
-                    onPress={() => {
-                      setBatchFilter(option);
-                      setSectionFilter(null);
-                      setSubjectFilter(null);
-                      setOpenFilter(null);
-                    }}
-                  >
-                    <Text style={styles.filterOptionText}>{option}</Text>
-                    {batchFilter === option && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
+              ))}
+            </AnchoredDropdown>
 
-            {openFilter === "section" && (
-              <View style={styles.filterPanel}>
+            <AnchoredDropdown
+              anchorRef={examTypeAnchorRef}
+              visible={examTypeDropdownOpen}
+              onClose={() => setExamTypeDropdownOpen(false)}
+              contentStyle={styles.examTypeDropdownCard}
+            >
+              {selectedGroup.exams.map((exam) => (
                 <TouchableOpacity
+                  key={exam.exam_subject_mapping_id}
                   style={styles.filterOptionRow}
                   onPress={() => {
-                    setSectionFilter(null);
-                    setOpenFilter(null);
+                    setSelectedExamMappingId(exam.exam_subject_mapping_id);
+                    setExamTypeDropdownOpen(false);
                   }}
                 >
-                  <Text style={styles.filterOptionText}>All</Text>
-                  {!sectionFilter && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
+                  <Text style={styles.filterOptionText}>{examTabLabel(exam.exam.type)}</Text>
+                  {exam.exam_subject_mapping_id === selectedExamMappingId && (
+                    <Ionicons name="checkmark" size={16} color="#2F6FE0" />
+                  )}
                 </TouchableOpacity>
-                {sectionOptions.map((option) => (
-                  <TouchableOpacity
-                    key={option}
-                    style={styles.filterOptionRow}
-                    onPress={() => {
-                      setSectionFilter(option);
-                      setSubjectFilter(null);
-                      setOpenFilter(null);
-                    }}
-                  >
-                    <Text style={styles.filterOptionText}>{option}</Text>
-                    {sectionFilter === option && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-
-            {openFilter === "subject" && (
-              <View style={styles.filterPanel}>
-                <TouchableOpacity
-                  style={styles.filterOptionRow}
-                  onPress={() => {
-                    setSubjectFilter(null);
-                    setOpenFilter(null);
-                  }}
-                >
-                  <Text style={styles.filterOptionText}>All</Text>
-                  {!subjectFilter && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
-                </TouchableOpacity>
-                {subjectOptions.map((option) => (
-                  <TouchableOpacity
-                    key={option.code}
-                    style={styles.filterOptionRow}
-                    onPress={() => {
-                      setSubjectFilter(option.code);
-                      setOpenFilter(null);
-                    }}
-                  >
-                    <Text style={styles.filterOptionText}>{option.label}</Text>
-                    {subjectFilter === option.code && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-
-            {filteredGroups.length > 1 && (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.groupSwitch}
-                contentContainerStyle={styles.groupSwitchContent}
-              >
-                {filteredGroups.map((group) => (
-                  <TouchableOpacity
-                    key={group.key}
-                    style={[styles.groupChip, group.key === selectedGroupKey && styles.groupChipActive]}
-                    onPress={() => handlePickGroup(group)}
-                    activeOpacity={0.85}
-                  >
-                    <Text
-                      style={[
-                        styles.groupChipText,
-                        group.key === selectedGroupKey && styles.groupChipTextActive,
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {group.classLabel} · {group.subjectCode}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            )}
-
-            <Text style={styles.selectedGroupLabel} numberOfLines={1}>
-              {selectedGroup.classLabel} · {selectedGroup.subjectCode} {selectedGroup.subjectName}
-            </Text>
-
-            {selectedGroup.exams.length > 0 && (
-              <View style={styles.examSwitch}>
-                {selectedGroup.exams.map((exam) => (
-                  <TouchableOpacity
-                    key={exam.exam_subject_mapping_id}
-                    style={[
-                      styles.examSwitchButton,
-                      exam.exam_subject_mapping_id === selectedExamMappingId && styles.examSwitchButtonActive,
-                    ]}
-                    onPress={() => setSelectedExamMappingId(exam.exam_subject_mapping_id)}
-                  >
-                    <Text
-                      style={[
-                        styles.examSwitchText,
-                        exam.exam_subject_mapping_id === selectedExamMappingId && styles.examSwitchTextActive,
-                      ]}
-                    >
-                      {examTabLabel(exam.exam.type)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
+              ))}
+            </AnchoredDropdown>
 
             {rosterStatus === "loading" && <SkeletonListRows count={5} />}
 
@@ -688,7 +546,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -751,11 +609,6 @@ const styles = StyleSheet.create({
     color: "#9AA6B2",
     textAlign: "center",
   },
-  filterRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 8,
-  },
   filterField: {
     flex: 1,
     backgroundColor: "#fff",
@@ -780,14 +633,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     color: "#111827",
   },
-  filterPanel: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#EEF0F4",
-    marginBottom: 8,
-    paddingHorizontal: 12,
-  },
   filterOptionRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -801,69 +646,25 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     color: "#111827",
   },
-  groupSwitch: {
-    marginBottom: 10,
-  },
-  groupSwitchContent: {
-    gap: 8,
-  },
-  groupChip: {
-    backgroundColor: "#fff",
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    maxWidth: 220,
-  },
-  groupChipActive: {
-    backgroundColor: "#2F6FE0",
-    borderColor: "#2F6FE0",
-  },
-  groupChipText: {
-    fontSize: 12.5,
-    fontFamily: fonts.bold,
-    color: "#4B5563",
-  },
-  groupChipTextActive: {
-    color: "#fff",
-  },
-  selectedGroupLabel: {
-    fontSize: 12,
-    fontFamily: fonts.medium,
-    color: "#9AA6B2",
-    marginBottom: 10,
-  },
-  examSwitch: {
+  filterRow: {
     flexDirection: "row",
+    gap: 8,
+    marginBottom: 14,
+  },
+  filterFieldFlex: {
+    flex: 1,
+  },
+  examTypeDropdownCard: {
+    width: 220,
+    maxHeight: 320,
     backgroundColor: "#fff",
     borderRadius: 12,
-    padding: 4,
-    gap: 4,
-    marginBottom: 14,
-    elevation: 2,
+    paddingHorizontal: 12,
+    elevation: 6,
     shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-  },
-  examSwitchButton: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 9,
-    paddingVertical: 10,
-  },
-  examSwitchButtonActive: {
-    backgroundColor: "#2F6FE0",
-  },
-  examSwitchText: {
-    fontSize: 13,
-    fontFamily: fonts.semibold,
-    color: "#4B5563",
-  },
-  examSwitchTextActive: {
-    color: "#fff",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   infoRow: {
     flexDirection: "row",

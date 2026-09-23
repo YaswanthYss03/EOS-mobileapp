@@ -28,6 +28,10 @@ export type StudentLeaveRequest = {
   approved_by_faculty_id: number | null;
   approved_by_hod_user_id: number | null;
   created_at: string;
+  // True once any of the student's linked parents has acknowledged this
+  // request on their own Progress tab's Acknowledge page - see
+  // parents.api.ts. Not the Advisor's own decision, purely informational.
+  parent_acknowledged: boolean;
 };
 
 // Fetched once, unfiltered (limit generous enough for a single mentor's

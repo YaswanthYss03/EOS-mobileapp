@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, ScrollView, TextInput, TouchableOpacity, Modal, ActivityIndicator, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -7,9 +7,11 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnchoredDropdown, useDropdown } from "@/components/ui/dropdown";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import {
   getHandledClasses,
   getAssignmentsFor,
@@ -62,14 +64,14 @@ export function AssignmentStatusScreen() {
   const [classes, setClasses] = useState<HandledClass[] | null>(null);
   const [classesLoading, setClassesLoading] = useState(true);
   const [classesErrored, setClassesErrored] = useState(false);
-  const [classPickerOpen, setClassPickerOpen] = useState(false);
+  const classPicker = useDropdown();
   const [classSearch, setClassSearch] = useState("");
   const [selectedMapping, setSelectedMapping] = useState<HandledClass | null>(null);
 
   const [assignments, setAssignments] = useState<Assignment[] | null>(null);
   const [assignmentsLoading, setAssignmentsLoading] = useState(false);
   const [assignmentsErrored, setAssignmentsErrored] = useState(false);
-  const [assignmentPickerOpen, setAssignmentPickerOpen] = useState(false);
+  const assignmentPicker = useDropdown();
   const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
 
   const [students, setStudents] = useState<AssignmentStudent[] | null>(null);
@@ -206,6 +208,7 @@ export function AssignmentStatusScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -237,13 +240,15 @@ export function AssignmentStatusScreen() {
             <Text style={styles.emptyStateText}>You aren't mapped to teach any class yet.</Text>
           </View>
         ) : (
-          <TouchableOpacity style={styles.pickerButton} onPress={() => setClassPickerOpen(true)} activeOpacity={0.8}>
-            <Ionicons name="school-outline" size={16} color="#2F6FE0" />
-            <Text style={[styles.pickerButtonText, !selectedMapping && styles.pickerButtonPlaceholder]}>
-              {selectedMapping ? classLabel(selectedMapping) : "Select class & subject"}
-            </Text>
-            <Ionicons name="chevron-down" size={16} color="#9AA6B2" />
-          </TouchableOpacity>
+          <View ref={classPicker.anchorRef} collapsable={false}>
+            <TouchableOpacity style={styles.pickerButton} onPress={classPicker.toggle} activeOpacity={0.8}>
+              <Ionicons name="school-outline" size={16} color="#2F6FE0" />
+              <Text style={[styles.pickerButtonText, !selectedMapping && styles.pickerButtonPlaceholder]}>
+                {selectedMapping ? classLabel(selectedMapping) : "Select class & subject"}
+              </Text>
+              <Ionicons name="chevron-down" size={16} color="#9AA6B2" />
+            </TouchableOpacity>
+          </View>
         )}
 
         {selectedMapping && (
@@ -259,17 +264,19 @@ export function AssignmentStatusScreen() {
                 <Text style={styles.emptyStateText}>No assignments created for this class yet.</Text>
               </View>
             ) : assignments && assignments.length > 1 ? (
-              <TouchableOpacity
-                style={styles.pickerButton}
-                onPress={() => setAssignmentPickerOpen(true)}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="document-text-outline" size={16} color="#2F6FE0" />
-                <Text style={[styles.pickerButtonText, !selectedAssignment && styles.pickerButtonPlaceholder]}>
-                  {selectedAssignment ? assignmentLabel(selectedAssignment) : "Select assignment"}
-                </Text>
-                <Ionicons name="chevron-down" size={16} color="#9AA6B2" />
-              </TouchableOpacity>
+              <View ref={assignmentPicker.anchorRef} collapsable={false}>
+                <TouchableOpacity
+                  style={styles.pickerButton}
+                  onPress={assignmentPicker.toggle}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="document-text-outline" size={16} color="#2F6FE0" />
+                  <Text style={[styles.pickerButtonText, !selectedAssignment && styles.pickerButtonPlaceholder]}>
+                    {selectedAssignment ? assignmentLabel(selectedAssignment) : "Select assignment"}
+                  </Text>
+                  <Ionicons name="chevron-down" size={16} color="#9AA6B2" />
+                </TouchableOpacity>
+              </View>
             ) : (
               selectedAssignment && (
                 <View style={styles.staticAssignmentRow}>
@@ -348,110 +355,91 @@ export function AssignmentStatusScreen() {
         )}
       </ScrollView>
 
-      <Modal
-        visible={classPickerOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          setClassPickerOpen(false);
+      <AnchoredDropdown
+        anchorRef={classPicker.anchorRef}
+        visible={classPicker.visible}
+        onClose={() => {
+          classPicker.close();
           setClassSearch("");
         }}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
       >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => {
-            setClassPickerOpen(false);
-            setClassSearch("");
-          }}
-        >
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>Class &amp; subject</Text>
+        <Text style={styles.modalTitle}>Class &amp; subject</Text>
 
-            {(classes ?? []).length > 8 && (
-              <View style={styles.searchInputWrap}>
-                <Ionicons name="search-outline" size={15} color="#9AA6B2" />
-                <TextInput
-                  style={styles.searchInput}
-                  placeholder="Search by subject, section or year"
-                  placeholderTextColor="#9AA6B2"
-                  value={classSearch}
-                  onChangeText={setClassSearch}
-                  autoFocus
-                />
-                {classSearch.length > 0 && (
-                  <TouchableOpacity onPress={() => setClassSearch("")} hitSlop={8}>
-                    <Ionicons name="close-circle" size={16} color="#9AA6B2" />
-                  </TouchableOpacity>
-                )}
-              </View>
+        {(classes ?? []).length > 8 && (
+          <View style={styles.searchInputWrap}>
+            <Ionicons name="search-outline" size={15} color="#9AA6B2" />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search by subject, section or year"
+              placeholderTextColor="#9AA6B2"
+              value={classSearch}
+              onChangeText={setClassSearch}
+              autoFocus
+            />
+            {classSearch.length > 0 && (
+              <TouchableOpacity onPress={() => setClassSearch("")} hitSlop={8}>
+                <Ionicons name="close-circle" size={16} color="#9AA6B2" />
+              </TouchableOpacity>
             )}
+          </View>
+        )}
 
-            <ScrollView style={styles.modalList}>
-              {filteredClasses.length === 0 ? (
-                <Text style={styles.modalEmptyText}>No class or subject matches "{classSearch}".</Text>
-              ) : (
-                filteredClasses.map((mapping) => (
-                  <TouchableOpacity
-                    key={`${mapping.class_id}-${mapping.subject_id}`}
-                    style={styles.modalOptionRow}
-                    onPress={() => {
-                      setSelectedMapping(mapping);
-                      setClassPickerOpen(false);
-                      setClassSearch("");
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <View style={styles.modalOptionTextWrap}>
-                      <Text style={styles.modalOptionName}>{classLabel(mapping)}</Text>
-                      <Text style={styles.modalOptionSubtext}>{mapping.subject_code}</Text>
-                    </View>
-                    {selectedMapping?.class_id === mapping.class_id &&
-                      selectedMapping?.subject_id === mapping.subject_id && (
-                        <Ionicons name="checkmark" size={18} color="#2F6FE0" />
-                      )}
-                  </TouchableOpacity>
-                ))
-              )}
-            </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-
-      <Modal
-        visible={assignmentPickerOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setAssignmentPickerOpen(false)}
-      >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setAssignmentPickerOpen(false)}
-        >
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>Assignment</Text>
-            <ScrollView style={styles.modalList}>
-              {(assignments ?? []).map((assignment) => (
-                <TouchableOpacity
-                  key={assignment.id}
-                  style={styles.modalOptionRow}
-                  onPress={() => {
-                    setSelectedAssignment(assignment);
-                    setAssignmentPickerOpen(false);
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.modalOptionName}>{assignmentLabel(assignment)}</Text>
-                  {selectedAssignment?.id === assignment.id && (
+        <ScrollView style={styles.modalList}>
+          {filteredClasses.length === 0 ? (
+            <Text style={styles.modalEmptyText}>No class or subject matches "{classSearch}".</Text>
+          ) : (
+            filteredClasses.map((mapping) => (
+              <TouchableOpacity
+                key={`${mapping.class_id}-${mapping.subject_id}`}
+                style={styles.modalOptionRow}
+                onPress={() => {
+                  setSelectedMapping(mapping);
+                  classPicker.close();
+                  setClassSearch("");
+                }}
+                activeOpacity={0.8}
+              >
+                <View style={styles.modalOptionTextWrap}>
+                  <Text style={styles.modalOptionName}>{classLabel(mapping)}</Text>
+                  <Text style={styles.modalOptionSubtext}>{mapping.subject_code}</Text>
+                </View>
+                {selectedMapping?.class_id === mapping.class_id &&
+                  selectedMapping?.subject_id === mapping.subject_id && (
                     <Ionicons name="checkmark" size={18} color="#2F6FE0" />
                   )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+              </TouchableOpacity>
+            ))
+          )}
+        </ScrollView>
+      </AnchoredDropdown>
+
+      <AnchoredDropdown
+        anchorRef={assignmentPicker.anchorRef}
+        visible={assignmentPicker.visible}
+        onClose={assignmentPicker.close}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
+      >
+        <Text style={styles.modalTitle}>Assignment</Text>
+        <ScrollView style={styles.modalList}>
+          {(assignments ?? []).map((assignment) => (
+            <TouchableOpacity
+              key={assignment.id}
+              style={styles.modalOptionRow}
+              onPress={() => {
+                setSelectedAssignment(assignment);
+                assignmentPicker.close();
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.modalOptionName}>{assignmentLabel(assignment)}</Text>
+              {selectedAssignment?.id === assignment.id && (
+                <Ionicons name="checkmark" size={18} color="#2F6FE0" />
+              )}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </AnchoredDropdown>
     </SafeAreaView>
   );
 }
@@ -472,7 +460,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -645,17 +633,19 @@ const styles = StyleSheet.create({
     color: "#9AA6B2",
     textAlign: "center",
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.5)",
-    justifyContent: "center",
-    padding: 20,
-  },
   modalCard: {
     backgroundColor: "#fff",
     borderRadius: 18,
     padding: 18,
-    maxHeight: "70%",
+  },
+  anchoredCard: {
+    width: 280,
+    maxHeight: 360,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   modalTitle: {
     fontSize: 15,

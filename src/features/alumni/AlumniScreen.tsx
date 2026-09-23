@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -42,6 +44,7 @@ function relativeTime(dateStr: string): string {
 export function AlumniScreen() {
   const router = useRouter();
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
 
   // This screen renders its own header below, so hide the shared
   // CollegeHeader (logo/college name) while it's focused.
@@ -88,8 +91,14 @@ export function AlumniScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      <View style={styles.header}>
+    <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
+      <LinearGradient
+        colors={["#2F6FE0", "#1A3D8F"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[styles.header, { paddingTop: insets.top + 10 }]}
+      >
         <TouchableOpacity onPress={() => router.back()} hitSlop={8}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
@@ -97,7 +106,7 @@ export function AlumniScreen() {
           <Text style={styles.title}>Alumni</Text>
           <Text style={styles.subtitle}>Sri Eshwar College of Engineering Alumni Association</Text>
         </View>
-      </View>
+      </LinearGradient>
 
       {status === "loading" && <SkeletonListRows count={5} style={styles.skeletonWrap} />}
 
@@ -164,9 +173,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 12,
     paddingHorizontal: 16,
-    paddingTop: 12,
     paddingBottom: 14,
-    backgroundColor: "#2F6FE0",
   },
   headerTextWrap: {
     flex: 1,

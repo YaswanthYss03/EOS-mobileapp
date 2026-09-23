@@ -5,11 +5,11 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonStatCards, SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { getApiErrorMessage } from "@/services/api/client";
 import { getPrincipalFinanceOverview, type PrincipalFinanceOverview } from "@/services/api/principal-finance.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 function formatRupees(amount: number): string {
   if (amount >= 1_00_00_000) return `₹${(amount / 1_00_00_000).toFixed(2)} Cr`;
@@ -27,9 +27,8 @@ export function FinanceFeesScreen() {
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({ headerShown: false });
-      return () => {
-        navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
-      };
+      // No cleanup - see PrincipalStudentsScreen.tsx's comment.
+      return undefined;
     }, [navigation]),
   );
 
@@ -52,6 +51,7 @@ export function FinanceFeesScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}

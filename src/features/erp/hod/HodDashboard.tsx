@@ -4,16 +4,36 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import { fonts } from "@/theme";
+import { useAuth } from "@/context/AuthContext";
 import { QuickAccessGrid } from "../components/QuickAccessGrid";
 import { DashboardHeader } from "../components/DashboardHeader";
-import { studentSectionItems, employeeSectionItems } from "./data/mockDashboard";
+import { employeeSectionItems } from "./data/mockDashboard";
+import {
+  HOD_STUDENT_MODULES,
+  ADVISOR_STUDENT_MODULES,
+  SUBJECT_HANDLER_STUDENT_MODULES,
+} from "../data/accountModeStudentModules";
 
 // TODO: hod RBAC - view-only pages for this role go here as siblings/subfolders.
 // Anything with complex operations (bulk edits, approvals, config) stays on the web app.
 export function HodDashboard() {
   const navigation = useNavigation();
   const router = useRouter();
+  // Switch Account (see AuthContext.tsx) - only the Student section reacts
+  // to this; the Employee section below is unaffected in every mode, per
+  // the feature's own requirement. A HOD always holds the HOD
+  // responsibility (see getAccountResponsibilities), so activeAccountMode
+  // defaults to "HOD" and only ever moves to ADVISOR/SUBJECT_HANDLER if
+  // this HOD also mentors a class or personally teaches a subject.
+  const { activeAccountMode } = useAuth();
+  const studentSectionItems =
+    activeAccountMode === "ADVISOR"
+      ? ADVISOR_STUDENT_MODULES
+      : activeAccountMode === "SUBJECT_HANDLER"
+        ? SUBJECT_HANDLER_STUDENT_MODULES
+        : HOD_STUDENT_MODULES;
 
   // Swaps the shared CollegeHeader (mounted at the Tabs level, see
   // app/(tabs)/_layout.tsx) for this screen's own header while it's focused,
@@ -32,6 +52,7 @@ export function HodDashboard() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Student</Text>

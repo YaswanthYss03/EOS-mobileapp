@@ -10,6 +10,7 @@ import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
 import { resolveWalletQrToken, transferWalletFunds } from "@/services/api/wallet.api";
 import { PinPad } from "./PinPad";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 const QR_PREFIX = "eos-wallet:";
 
@@ -156,6 +157,7 @@ export function ScanToPayScreen() {
   // stage === "confirm" | "sending"
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <ScanHeader onBack={() => router.back()} />
       <View style={styles.confirmWrap}>
         <View style={styles.receiverCard}>
@@ -254,7 +256,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -7,6 +7,8 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnchoredDropdown } from "@/components/ui/dropdown";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -18,6 +20,7 @@ import {
   type MyVenueBooking,
 } from "@/services/api/venues.api";
 import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, formatDate } from "@/utils/calendar";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 type Tab = "apply" | "history";
 type DateField = "from" | "to" | null;
@@ -85,11 +88,17 @@ export function VenueRequestScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [datePickerFor, setDatePickerFor] = useState<DateField>(null);
   const [listPickerFor, setListPickerFor] = useState<ListPickerField>(null);
+  // One <AnchoredDropdown> is shared by all 3 list fields below - it needs
+  // to measure whichever field's own trigger was actually tapped, so each
+  // field keeps its own node here rather than fighting over a single ref.
+  const listFieldAnchors = useRef<Partial<Record<Exclude<ListPickerField, null>, View | null>>>({});
   const [pickerYear, setPickerYear] = useState(today.getFullYear());
   const [pickerMonth, setPickerMonth] = useState(today.getMonth());
 
   const [venues, setVenues] = useState<Venue[]>([]);
   const [venuesStatus, setVenuesStatus] = useState<LoadStatus>("loading");
+
+  const scrollMemory = useTabScrollMemory();
 
   const [historyStatus, setHistoryStatus] = useState<LoadStatus>("loading");
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -242,6 +251,7 @@ export function VenueRequestScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -256,47 +266,54 @@ export function VenueRequestScreen() {
           <Ionicons name="arrow-back" size={20} color="#fff" />
         </TouchableOpacity>
         <View>
-          <Text style={styles.headerTitle}>Venue</Text>
-          <Text style={styles.headerSubtitle}>Booking requests</Text>
+          <Text style={styles.headerTitle}>Venue Booking</Text>
         </View>
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.tabSwitch}>
-          <TouchableOpacity
-            style={[styles.tabSwitchButton, tab === "apply" && styles.tabSwitchButtonActive]}
-            onPress={() => setTab("apply")}
-          >
-            <Text style={[styles.tabSwitchText, tab === "apply" && styles.tabSwitchTextActive]}>Apply</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabSwitchButton, tab === "history" && styles.tabSwitchButtonActive]}
-            onPress={() => setTab("history")}
-          >
-            <Text style={[styles.tabSwitchText, tab === "history" && styles.tabSwitchTextActive]}>History</Text>
-          </TouchableOpacity>
-        </View>
+      <View style={styles.tabSwitchWrap}>
+        <AnimatedTabBar
+          tabs={[
+            { key: "apply", label: "Apply" },
+            { key: "history", label: "History" },
+          ]}
+          active={tab}
+          onChange={setTab}
+          containerStyle={styles.tabSwitch}
+          tabStyle={styles.tabSwitchButton}
+          tabTextStyle={styles.tabSwitchText}
+          activeTabTextStyle={styles.tabSwitchTextActive}
+          indicatorStyle={styles.tabSwitchIndicator}
+        />
+      </View>
 
+      <TabTransitionView activeKey={tab} order={["apply", "history"]} style={styles.tabContent}>
         {tab === "apply" ? (
-          <>
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollMemory.bind("apply")}>
             <Text style={styles.sectionTitle}>New Venue Request</Text>
             <View style={styles.card}>
               <Text style={styles.fieldLabel}>Venue Name</Text>
-              <TouchableOpacity
-                style={styles.selectRow}
-                onPress={() => setListPickerFor("venue")}
-                activeOpacity={0.8}
-                disabled={venuesStatus !== "success"}
+              <View
+                ref={(node) => {
+                  listFieldAnchors.current.venue = node;
+                }}
+                collapsable={false}
               >
-                <Text style={[styles.selectValue, !venue && styles.selectValuePlaceholder]}>
-                  {venue?.name ?? (venuesStatus === "loading" ? "Loading venues…" : "Select venue")}
-                </Text>
-                {venuesStatus === "loading" ? (
-                  <ActivityIndicator size="small" color="#B0B7C3" />
-                ) : (
-                  <Ionicons name="chevron-down" size={18} color="#B0B7C3" />
-                )}
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.selectRow}
+                  onPress={() => setListPickerFor("venue")}
+                  activeOpacity={0.8}
+                  disabled={venuesStatus !== "success"}
+                >
+                  <Text style={[styles.selectValue, !venue && styles.selectValuePlaceholder]}>
+                    {venue?.name ?? (venuesStatus === "loading" ? "Loading venues…" : "Select venue")}
+                  </Text>
+                  {venuesStatus === "loading" ? (
+                    <ActivityIndicator size="small" color="#B0B7C3" />
+                  ) : (
+                    <Ionicons name="chevron-down" size={18} color="#B0B7C3" />
+                  )}
+                </TouchableOpacity>
+              </View>
 
               <View style={styles.dateRow}>
                 <View style={styles.dateCol}>
@@ -330,29 +347,43 @@ export function VenueRequestScreen() {
               <View style={styles.dateRow}>
                 <View style={styles.dateCol}>
                   <Text style={styles.fieldLabel}>From Time</Text>
-                  <TouchableOpacity
-                    style={styles.dateButton}
-                    onPress={() => setListPickerFor("fromTime")}
-                    activeOpacity={0.8}
+                  <View
+                    ref={(node) => {
+                      listFieldAnchors.current.fromTime = node;
+                    }}
+                    collapsable={false}
                   >
-                    <Ionicons name="time-outline" size={14} color="#2F6FE0" />
-                    <Text style={[styles.dateButtonText, !fromTime && styles.dateButtonPlaceholder]}>
-                      {fromTime ?? "Select time"}
-                    </Text>
-                  </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.dateButton}
+                      onPress={() => setListPickerFor("fromTime")}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="time-outline" size={14} color="#2F6FE0" />
+                      <Text style={[styles.dateButtonText, !fromTime && styles.dateButtonPlaceholder]}>
+                        {fromTime ?? "Select time"}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
                 <View style={styles.dateCol}>
                   <Text style={styles.fieldLabel}>To Time</Text>
-                  <TouchableOpacity
-                    style={styles.dateButton}
-                    onPress={() => setListPickerFor("toTime")}
-                    activeOpacity={0.8}
+                  <View
+                    ref={(node) => {
+                      listFieldAnchors.current.toTime = node;
+                    }}
+                    collapsable={false}
                   >
-                    <Ionicons name="time-outline" size={14} color="#2F6FE0" />
-                    <Text style={[styles.dateButtonText, !toTime && styles.dateButtonPlaceholder]}>
-                      {toTime ?? "Select time"}
-                    </Text>
-                  </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.dateButton}
+                      onPress={() => setListPickerFor("toTime")}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="time-outline" size={14} color="#2F6FE0" />
+                      <Text style={[styles.dateButtonText, !toTime && styles.dateButtonPlaceholder]}>
+                        {toTime ?? "Select time"}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
 
@@ -403,52 +434,56 @@ export function VenueRequestScreen() {
                 ))
               )}
             </View>
-          </>
-        ) : historyStatus === "loading" ? (
-          <SkeletonListRows count={4} />
-        ) : historyStatus === "error" ? (
-          <View style={styles.errorNotice}>
-            <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
-            <Text style={styles.errorNoticeText}>{historyError ?? "Something went wrong."}</Text>
-            <TouchableOpacity onPress={loadHistory} style={styles.retryButton} activeOpacity={0.8}>
-              <Text style={styles.retryButtonText}>Retry</Text>
-            </TouchableOpacity>
-          </View>
-        ) : history.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
-            <Text style={styles.emptyStateText}>No booking history yet</Text>
-          </View>
+          </ScrollView>
         ) : (
-          history.map((item) => <HistoryCard key={item.id} item={item} />)
-        )}
-      </ScrollView>
-
-      <Modal
-        visible={listPickerFor !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setListPickerFor(null)}
-      >
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setListPickerFor(null)}>
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>{listPickerTitle}</Text>
-            <ScrollView style={styles.modalList}>
-              {listPickerOptions.map((option) => (
-                <TouchableOpacity
-                  key={option}
-                  style={styles.modalOptionRow}
-                  onPress={() => handleSelectListOption(option)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.modalOptionName}>{option}</Text>
-                  {listPickerSelected === option && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
+          <ScrollView
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            {...scrollMemory.bind("history")}
+          >
+            {historyStatus === "loading" ? (
+              <SkeletonListRows count={4} />
+            ) : historyStatus === "error" ? (
+              <View style={styles.errorNotice}>
+                <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+                <Text style={styles.errorNoticeText}>{historyError ?? "Something went wrong."}</Text>
+                <TouchableOpacity onPress={loadHistory} style={styles.retryButton} activeOpacity={0.8}>
+                  <Text style={styles.retryButtonText}>Retry</Text>
                 </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+              </View>
+            ) : history.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
+                <Text style={styles.emptyStateText}>No booking history yet</Text>
+              </View>
+            ) : (
+              history.map((item) => <HistoryCard key={item.id} item={item} />)
+            )}
+          </ScrollView>
+        )}
+      </TabTransitionView>
+
+      <AnchoredDropdown
+        anchorRef={{ current: listPickerFor ? listFieldAnchors.current[listPickerFor] ?? null : null }}
+        visible={listPickerFor !== null}
+        onClose={() => setListPickerFor(null)}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
+      >
+        <Text style={styles.modalTitle}>{listPickerTitle}</Text>
+        <ScrollView style={styles.modalList}>
+          {listPickerOptions.map((option) => (
+            <TouchableOpacity
+              key={option}
+              style={styles.modalOptionRow}
+              onPress={() => handleSelectListOption(option)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.modalOptionName}>{option}</Text>
+              {listPickerSelected === option && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </AnchoredDropdown>
 
       <Modal
         visible={datePickerFor !== null}
@@ -590,7 +625,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -605,9 +640,21 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     marginTop: 2,
   },
+  // Split from one shared value into two: the tab bar was hoisted out of the
+  // scrolling content (so it stays fixed while content transitions - see
+  // tabSwitchWrap), so `content`'s own top inset moved to tabSwitchWrap's
+  // paddingTop, keeping the same total header->tabs->content spacing as
+  // before instead of doubling up.
   content: {
-    padding: 16,
+    paddingHorizontal: 16,
     paddingBottom: 32,
+  },
+  tabContent: {
+    flex: 1,
+  },
+  tabSwitchWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
   },
   tabSwitch: {
     flexDirection: "row",
@@ -629,7 +676,10 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     paddingVertical: 10,
   },
-  tabSwitchButtonActive: {
+  tabSwitchIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
     backgroundColor: "#2F6FE0",
   },
   tabSwitchText: {
@@ -857,6 +907,18 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 18,
     maxHeight: "70%",
+  },
+  // Anchored dropdown (venue/from-time/to-time) has no full-screen flex
+  // parent to size against, unlike the still-centered date-picker Modal
+  // below which keeps modalCard/modalOverlay as-is.
+  anchoredCard: {
+    width: 260,
+    maxHeight: 320,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   modalTitle: {
     fontSize: 15,

@@ -8,9 +8,14 @@ import { fonts } from "@/theme";
 // swapped in for the shared CollegeHeader (logo + college name + tagline)
 // while that role's dashboard is focused, same useFocusEffect pattern each
 // dashboard already used individually before this was extracted. Title is
-// always "Class" (matches this tab's own bottom-bar label, not the college
-// name/logo) - subtitle is optional per role (Student's own dashboard omits it).
-export function DashboardHeader({ subtitle, onBack }: { subtitle?: string; onBack: () => void }) {
+// always just the college name, same text on every tab in every login, per
+// explicit request - no per-role subtitle ("Parent services"/"Employee
+// services"/...) anymore. `subtitle` is still accepted (most call sites
+// still pass one) but deliberately unused/unrendered now, rather than
+// touching every one of those call sites for a prop that's inert either
+// way - remove it from a call site's own props only when touching that
+// file for another reason.
+export function DashboardHeader({ onBack }: { subtitle?: string; onBack: () => void }) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -27,9 +32,10 @@ export function DashboardHeader({ subtitle, onBack }: { subtitle?: string; onBac
       >
         <Ionicons name="arrow-back" size={20} color="#fff" />
       </TouchableOpacity>
-      <View>
-        <Text style={styles.title}>Class</Text>
-        {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
+      <View style={styles.titleWrap}>
+        <Text style={styles.title} numberOfLines={2}>
+          Sri Eshwar College of Engineering
+        </Text>
       </View>
     </LinearGradient>
   );
@@ -47,13 +53,15 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
+  titleWrap: {
+    flex: 1,
+  },
   title: {
     color: "#fff",
-    fontSize: 18,
+    fontSize: 16,
     fontFamily: fonts.bold,
   },
   subtitle: {

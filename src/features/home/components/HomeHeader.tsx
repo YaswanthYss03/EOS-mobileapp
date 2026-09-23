@@ -20,8 +20,15 @@ export function HomeHeader() {
   const router = useRouter();
   const role = useRole();
   // Every role has a wallet except Parent - see EOSbackend1's wallet
-  // module's @Roles (everything but ROLES.PARENT).
-  const hasWallet = role !== "parent";
+  // module's @Roles (everything but ROLES.PARENT). Alumni has no wallet
+  // either - a graduated alumnus has no fees/canteen/stationery spend to
+  // track anymore, per the alumni-specific Home tab spec. Principal/
+  // Correspondent also have no wallet - institution leadership doesn't have
+  // a personal campus spend account to track either. HOD dropped per
+  // explicit request - hidden in both HOD account modes (useRole() reports
+  // "hod" regardless of the Student/Faculty activeAccountMode toggle).
+  const hasWallet =
+    role !== "parent" && role !== "alumni" && role !== "principal" && role !== "correspondent" && role !== "hod";
 
   return (
     <LinearGradient
@@ -70,7 +77,7 @@ const styles = StyleSheet.create({
   title: {
     flex: 1,
     color: "#fff",
-    fontSize: 14,
+    fontSize: 16,
     fontFamily: fonts.bold,
   },
   actions: {

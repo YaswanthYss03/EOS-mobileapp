@@ -14,12 +14,15 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { useSkipSharedHeaderToggle } from "@/hooks/useSkipSharedHeaderToggle";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { confirm } from "@/utils/confirm";
 import { formatDate } from "@/utils/calendar";
 import { getApiErrorMessage } from "@/services/api/client";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import {
   listAppraisalRequestsForReview,
   reviewAppraisalRequest,
@@ -27,24 +30,13 @@ import {
   type AppraisalStatus,
 } from "@/services/api/appraisal-requests.api";
 
-type StatusFilter = "pending" | "forwarded" | "rejected" | "all";
-
-const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
-  { id: "pending", label: "Pending" },
-  { id: "forwarded", label: "Forwarded" },
-  { id: "rejected", label: "Rejected" },
-  { id: "all", label: "All" },
-];
-
-// hod_reviewed/hr_scored/management_approved are all "already forwarded to
-// HR" from a HoD's own point of view - HR/management's own further stages
-// aren't this screen's concern, just whether the HoD still has something to
-// act on (submitted) or not.
-function toFilterBucket(status: AppraisalStatus): Exclude<StatusFilter, "all"> {
-  if (status === "submitted") return "pending";
-  if (status === "rejected") return "rejected";
-  return "forwarded";
-}
+// "History" covers every already-decided request (forwarded to HR, scored,
+// management-approved, or rejected) together - there's no separate filter
+// for each, just "still needs this HoD's decision" (Approval) vs "already
+// decided" (History), same 2-tab AnimatedTabBar/TabTransitionView design as
+// the Employee's own Leave Request screen (see erp/leave-request/
+// LeaveRequestScreen.tsx).
+type Tab = "approval" | "history";
 
 const STATUS_META: Record<AppraisalStatus, { label: string; bg: string; text: string }> = {
   submitted: { label: "Pending review", bg: "#FEF3C7", text: "#D97706" },
@@ -70,7 +62,8 @@ export function ReviewAppraisalScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
+  const [tab, setTab] = useState<Tab>("approval");
+  const scrollMemory = useTabScrollMemory();
   const [requests, setRequests] = useState<MyAppraisalRequest[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [errored, setErrored] = useState(false);
@@ -78,13 +71,16 @@ export function ReviewAppraisalScreen() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [decidingId, setDecidingId] = useState<number | null>(null);
 
+  const skipHeaderToggle = useSkipSharedHeaderToggle();
+
   useFocusEffect(
     useCallback(() => {
+      if (skipHeaderToggle) return undefined;
       navigation.getParent()?.setOptions({ headerShown: false });
       return () => {
         navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
       };
-    }, [navigation]),
+    }, [navigation, skipHeaderToggle]),
   );
 
   useEffect(() => {
@@ -110,20 +106,17 @@ export function ReviewAppraisalScreen() {
     };
   }, [reloadToken]);
 
-  const counts = useMemo(() => {
-    const list = requests ?? [];
-    return {
-      pending: list.filter((r) => toFilterBucket(r.status) === "pending").length,
-      forwarded: list.filter((r) => toFilterBucket(r.status) === "forwarded").length,
-      rejected: list.filter((r) => toFilterBucket(r.status) === "rejected").length,
-      all: list.length,
-    };
-  }, [requests]);
-
-  const filteredRequests = useMemo(
-    () => (requests ?? []).filter((r) => statusFilter === "all" || toFilterBucket(r.status) === statusFilter),
-    [requests, statusFilter],
+  const approvalRequests = useMemo(
+    () => (requests ?? []).filter((r) => r.status === "submitted"),
+    [requests],
   );
+
+  const historyRequests = useMemo(
+    () => (requests ?? []).filter((r) => r.status !== "submitted"),
+    [requests],
+  );
+
+  const filteredRequests = tab === "approval" ? approvalRequests : historyRequests;
 
   // Every loaded request shares the same department (server-scoped to the
   // HoD's own) - safe to read it off the first one for the header subtitle.
@@ -157,6 +150,7 @@ export function ReviewAppraisalScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -176,10 +170,12 @@ export function ReviewAppraisalScreen() {
         </View>
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {loading ? (
+      {loading ? (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <SkeletonListRows count={4} />
-        ) : errored ? (
+        </ScrollView>
+      ) : errored ? (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.centerState}>
             <Ionicons name="cloud-offline-outline" size={32} color="#B0B7C3" />
             <Text style={styles.centerStateText}>Couldn't load appraisal requests.</Text>
@@ -187,43 +183,53 @@ export function ReviewAppraisalScreen() {
               <Text style={styles.retryText}>Tap to retry</Text>
             </TouchableOpacity>
           </View>
-        ) : (
-          <>
-            <View style={styles.statusRow}>
-              {STATUS_FILTERS.map(({ id, label }) => (
-                <TouchableOpacity
-                  key={id}
-                  style={[styles.statusPill, statusFilter === id && styles.statusPillActive]}
-                  onPress={() => setStatusFilter(id)}
-                >
-                  <Text style={[styles.statusPillText, statusFilter === id && styles.statusPillTextActive]}>
-                    {label} ({counts[id]})
-                  </Text>
-                </TouchableOpacity>
+        </ScrollView>
+      ) : (
+        <>
+          <View style={styles.tabSwitchWrap}>
+            <AnimatedTabBar
+              tabs={[
+                { key: "approval" as Tab, label: `Approval ${approvalRequests.length > 0 ? `(${approvalRequests.length})` : ""}`.trimEnd() },
+                { key: "history" as Tab, label: "History" },
+              ]}
+              active={tab}
+              onChange={setTab}
+              containerStyle={styles.tabSwitch}
+              tabStyle={styles.tabSwitchButton}
+              tabTextStyle={styles.tabSwitchText}
+              activeTabTextStyle={styles.tabSwitchTextActive}
+              indicatorStyle={styles.tabSwitchIndicator}
+            />
+          </View>
+
+          <TabTransitionView activeKey={tab} order={["approval", "history"]} style={styles.tabContentArea}>
+            <ScrollView
+              contentContainerStyle={styles.content}
+              showsVerticalScrollIndicator={false}
+              {...scrollMemory.bind(tab)}
+            >
+              {filteredRequests.map((request) => (
+                <AppraisalCard
+                  key={request.id}
+                  request={request}
+                  expanded={expandedId === request.id}
+                  deciding={decidingId === request.id}
+                  onToggleExpand={() => setExpandedId((prev) => (prev === request.id ? null : request.id))}
+                  onForward={() => handleDecision(request, "hod_reviewed")}
+                  onSendBack={() => handleDecision(request, "rejected")}
+                />
               ))}
-            </View>
 
-            {filteredRequests.map((request) => (
-              <AppraisalCard
-                key={request.id}
-                request={request}
-                expanded={expandedId === request.id}
-                deciding={decidingId === request.id}
-                onToggleExpand={() => setExpandedId((prev) => (prev === request.id ? null : request.id))}
-                onForward={() => handleDecision(request, "hod_reviewed")}
-                onSendBack={() => handleDecision(request, "rejected")}
-              />
-            ))}
-
-            {filteredRequests.length === 0 && (
-              <View style={styles.emptyState}>
-                <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
-                <Text style={styles.emptyStateText}>No appraisals here</Text>
-              </View>
-            )}
-          </>
-        )}
-      </ScrollView>
+              {filteredRequests.length === 0 && (
+                <View style={styles.emptyState}>
+                  <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
+                  <Text style={styles.emptyStateText}>No appraisals here</Text>
+                </View>
+              )}
+            </ScrollView>
+          </TabTransitionView>
+        </>
+      )}
     </SafeAreaView>
   );
 }
@@ -377,7 +383,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -396,34 +402,49 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 32,
   },
-  statusRow: {
+  tabSwitchWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
+  tabContentArea: {
+    flex: 1,
+  },
+  // Same white pill-track + sliding-indicator design as the Employee's own
+  // Leave Request screen (see erp/leave-request/LeaveRequestScreen.tsx).
+  tabSwitch: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 14,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 4,
+    gap: 4,
+    marginBottom: 16,
+    elevation: 2,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
   },
-  statusPill: {
-    flexGrow: 1,
+  tabSwitchButton: {
+    flex: 1,
     alignItems: "center",
-    borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
+    justifyContent: "center",
+    borderRadius: 9,
+    paddingVertical: 10,
   },
-  statusPillActive: {
-    backgroundColor: "#fff",
-    borderColor: "#2F6FE0",
-    borderWidth: 1.5,
+  tabSwitchIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
+    backgroundColor: "#2F6FE0",
   },
-  statusPillText: {
-    fontSize: 11,
+  tabSwitchText: {
+    fontSize: 13,
     fontFamily: fonts.semibold,
     color: "#4B5563",
   },
-  statusPillTextActive: {
-    color: "#2F6FE0",
+  tabSwitchTextActive: {
+    color: "#fff",
+    fontFamily: fonts.bold,
   },
   card: {
     backgroundColor: "#fff",

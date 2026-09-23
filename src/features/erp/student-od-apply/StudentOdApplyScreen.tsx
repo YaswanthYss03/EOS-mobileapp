@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -16,6 +16,8 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonDetailBlock, SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnchoredDropdown, useDropdown } from "@/components/ui/dropdown";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { confirm } from "@/utils/confirm";
@@ -32,6 +34,7 @@ import {
 } from "@/services/api/od.api";
 import { getFacultyDirectory, type FacultyDirectoryEntry } from "@/services/api/faculty.api";
 import { OD_STATUS_META, timeSlots } from "./data/mockStudentOdApply";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 type Tab = "apply" | "history";
 type TeamMode = "create" | "join";
@@ -51,6 +54,7 @@ export function StudentOdApplyScreen() {
   const insets = useSafeAreaInsets();
 
   const [tab, setTab] = useState<Tab>("apply");
+  const scrollMemory = useTabScrollMemory();
   const [mode, setMode] = useState<TeamMode>("create");
 
   const [teams, setTeams] = useState<OdTeam[] | null>(null);
@@ -71,11 +75,16 @@ export function StudentOdApplyScreen() {
   const [reason, setReason] = useState("");
   const [facultyList, setFacultyList] = useState<FacultyDirectoryEntry[] | null>(null);
   const [facultyGuide, setFacultyGuide] = useState<FacultyDirectoryEntry | null>(null);
-  const [facultyPickerOpen, setFacultyPickerOpen] = useState(false);
+  const facultyPicker = useDropdown();
   const [facultySearch, setFacultySearch] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [datePickerFor, setDatePickerFor] = useState<DateField>(null);
   const [timePickerFor, setTimePickerFor] = useState<TimeField>(null);
+  // One <AnchoredDropdown> is shared by both time fields below (and both
+  // conditional trigger rows for each - only one of which is ever mounted
+  // at a time), so each field keeps its own node here rather than fighting
+  // over a single ref.
+  const timeFieldAnchors = useRef<Partial<Record<Exclude<TimeField, null>, View | null>>>({});
   const [pickerYear, setPickerYear] = useState(2026);
   const [pickerMonth, setPickerMonth] = useState(7); // August (0-indexed)
 
@@ -330,6 +339,7 @@ export function StudentOdApplyScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -346,24 +356,26 @@ export function StudentOdApplyScreen() {
         <Text style={styles.headerTitle}>On-duty</Text>
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.tabSwitch}>
-          <TouchableOpacity
-            style={[styles.tabButton, tab === "apply" && styles.tabButtonActive]}
-            onPress={() => setTab("apply")}
-          >
-            <Text style={[styles.tabButtonText, tab === "apply" && styles.tabButtonTextActive]}>Apply</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabButton, tab === "history" && styles.tabButtonActive]}
-            onPress={() => setTab("history")}
-          >
-            <Text style={[styles.tabButtonText, tab === "history" && styles.tabButtonTextActive]}>History</Text>
-          </TouchableOpacity>
-        </View>
+      <View style={styles.tabSwitchWrap}>
+        <AnimatedTabBar
+          tabs={[
+            { key: "apply" as Tab, label: "Apply" },
+            { key: "history" as Tab, label: "History" },
+          ]}
+          active={tab}
+          onChange={setTab}
+          containerStyle={styles.tabSwitch}
+          tabStyle={styles.tabButton}
+          tabTextStyle={styles.tabButtonText}
+          activeTabTextStyle={styles.tabButtonTextActive}
+          indicatorStyle={styles.tabIndicator}
+        />
+      </View>
 
+      <TabTransitionView activeKey={tab} order={["apply", "history"]} style={styles.tabContent}>
         {tab === "apply" ? (
-          teamsLoading ? (
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollMemory.bind("apply")}>
+          {teamsLoading ? (
             <SkeletonDetailBlock />
           ) : teamsErrored ? (
             <View style={styles.emptyState}>
@@ -478,29 +490,43 @@ export function StudentOdApplyScreen() {
                   <View style={styles.rowFields}>
                     <View style={styles.rowField}>
                       <Text style={styles.fieldLabel}>From time (optional)</Text>
-                      <TouchableOpacity
-                        style={styles.pickerButton}
-                        onPress={() => setTimePickerFor("from")}
-                        activeOpacity={0.8}
+                      <View
+                        ref={(node) => {
+                          timeFieldAnchors.current.from = node;
+                        }}
+                        collapsable={false}
                       >
-                        <Ionicons name="time-outline" size={14} color="#2F6FE0" />
-                        <Text style={[styles.pickerButtonText, !fromTime && styles.pickerButtonPlaceholder]}>
-                          {fromTime ? timeSlots.find((s) => s.value === fromTime)?.label ?? fromTime : "Select"}
-                        </Text>
-                      </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.pickerButton}
+                          onPress={() => setTimePickerFor("from")}
+                          activeOpacity={0.8}
+                        >
+                          <Ionicons name="time-outline" size={14} color="#2F6FE0" />
+                          <Text style={[styles.pickerButtonText, !fromTime && styles.pickerButtonPlaceholder]}>
+                            {fromTime ? timeSlots.find((s) => s.value === fromTime)?.label ?? fromTime : "Select"}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
                     <View style={styles.rowField}>
                       <Text style={styles.fieldLabel}>To time (optional)</Text>
-                      <TouchableOpacity
-                        style={styles.pickerButton}
-                        onPress={() => setTimePickerFor("to")}
-                        activeOpacity={0.8}
+                      <View
+                        ref={(node) => {
+                          timeFieldAnchors.current.to = node;
+                        }}
+                        collapsable={false}
                       >
-                        <Ionicons name="time-outline" size={14} color="#2F6FE0" />
-                        <Text style={[styles.pickerButtonText, !toTime && styles.pickerButtonPlaceholder]}>
-                          {toTime ? timeSlots.find((s) => s.value === toTime)?.label ?? toTime : "Select"}
-                        </Text>
-                      </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.pickerButton}
+                          onPress={() => setTimePickerFor("to")}
+                          activeOpacity={0.8}
+                        >
+                          <Ionicons name="time-outline" size={14} color="#2F6FE0" />
+                          <Text style={[styles.pickerButtonText, !toTime && styles.pickerButtonPlaceholder]}>
+                            {toTime ? timeSlots.find((s) => s.value === toTime)?.label ?? toTime : "Select"}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   </View>
 
@@ -515,16 +541,18 @@ export function StudentOdApplyScreen() {
                   />
 
                   <Text style={styles.fieldLabel}>Faculty guide (optional)</Text>
-                  <TouchableOpacity
-                    style={[styles.pickerButton, styles.inputLast]}
-                    onPress={() => setFacultyPickerOpen(true)}
-                    activeOpacity={0.8}
-                  >
-                    <Ionicons name="person-outline" size={14} color="#2F6FE0" />
-                    <Text style={[styles.pickerButtonText, !facultyGuide && styles.pickerButtonPlaceholder]}>
-                      {facultyGuide ? facultyGuide.name : "Select faculty"}
-                    </Text>
-                  </TouchableOpacity>
+                  <View ref={facultyPicker.anchorRef} collapsable={false}>
+                    <TouchableOpacity
+                      style={[styles.pickerButton, styles.inputLast]}
+                      onPress={facultyPicker.open}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="person-outline" size={14} color="#2F6FE0" />
+                      <Text style={[styles.pickerButtonText, !facultyGuide && styles.pickerButtonPlaceholder]}>
+                        {facultyGuide ? facultyGuide.name : "Select faculty"}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
 
                   <View style={styles.lockWarningRow}>
                     <Ionicons name="lock-closed-outline" size={13} color="#D97706" />
@@ -638,43 +666,59 @@ export function StudentOdApplyScreen() {
                   <View style={styles.rowFields}>
                     <View style={styles.rowField}>
                       <Text style={styles.fieldLabel}>From time</Text>
-                      <TouchableOpacity
-                        style={styles.pickerButton}
-                        onPress={() => setTimePickerFor("from")}
-                        activeOpacity={0.8}
+                      <View
+                        ref={(node) => {
+                          timeFieldAnchors.current.from = node;
+                        }}
+                        collapsable={false}
                       >
-                        <Ionicons name="time-outline" size={14} color="#2F6FE0" />
-                        <Text style={[styles.pickerButtonText, !fromTime && styles.pickerButtonPlaceholder]}>
-                          {fromTime ? timeSlots.find((s) => s.value === fromTime)?.label ?? fromTime : "Select"}
-                        </Text>
-                      </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.pickerButton}
+                          onPress={() => setTimePickerFor("from")}
+                          activeOpacity={0.8}
+                        >
+                          <Ionicons name="time-outline" size={14} color="#2F6FE0" />
+                          <Text style={[styles.pickerButtonText, !fromTime && styles.pickerButtonPlaceholder]}>
+                            {fromTime ? timeSlots.find((s) => s.value === fromTime)?.label ?? fromTime : "Select"}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
                     <View style={styles.rowField}>
                       <Text style={styles.fieldLabel}>To time</Text>
-                      <TouchableOpacity
-                        style={styles.pickerButton}
-                        onPress={() => setTimePickerFor("to")}
-                        activeOpacity={0.8}
+                      <View
+                        ref={(node) => {
+                          timeFieldAnchors.current.to = node;
+                        }}
+                        collapsable={false}
                       >
-                        <Ionicons name="time-outline" size={14} color="#2F6FE0" />
-                        <Text style={[styles.pickerButtonText, !toTime && styles.pickerButtonPlaceholder]}>
-                          {toTime ? timeSlots.find((s) => s.value === toTime)?.label ?? toTime : "Select"}
-                        </Text>
-                      </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.pickerButton}
+                          onPress={() => setTimePickerFor("to")}
+                          activeOpacity={0.8}
+                        >
+                          <Ionicons name="time-outline" size={14} color="#2F6FE0" />
+                          <Text style={[styles.pickerButtonText, !toTime && styles.pickerButtonPlaceholder]}>
+                            {toTime ? timeSlots.find((s) => s.value === toTime)?.label ?? toTime : "Select"}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   </View>
 
                   <Text style={styles.fieldLabel}>Faculty guide</Text>
-                  <TouchableOpacity
-                    style={[styles.pickerButton, styles.inputLast]}
-                    onPress={() => setFacultyPickerOpen(true)}
-                    activeOpacity={0.8}
-                  >
-                    <Ionicons name="person-outline" size={14} color="#2F6FE0" />
-                    <Text style={[styles.pickerButtonText, !facultyGuide && styles.pickerButtonPlaceholder]}>
-                      {facultyGuide ? facultyGuide.name : "Select faculty"}
-                    </Text>
-                  </TouchableOpacity>
+                  <View ref={facultyPicker.anchorRef} collapsable={false}>
+                    <TouchableOpacity
+                      style={[styles.pickerButton, styles.inputLast]}
+                      onPress={facultyPicker.open}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="person-outline" size={14} color="#2F6FE0" />
+                      <Text style={[styles.pickerButtonText, !facultyGuide && styles.pickerButtonPlaceholder]}>
+                        {facultyGuide ? facultyGuide.name : "Select faculty"}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
 
                   <TouchableOpacity
                     style={[styles.submitButton, creating && styles.submitButtonDisabled]}
@@ -717,26 +761,31 @@ export function StudentOdApplyScreen() {
                 </View>
               )}
             </>
-          )
-        ) : historyLoading ? (
-          <SkeletonListRows count={4} />
-        ) : historyErrored ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="cloud-offline-outline" size={32} color="#B0B7C3" />
-            <Text style={styles.emptyStateText}>Couldn't load your history</Text>
-            <TouchableOpacity onPress={() => setHistoryReloadToken((n) => n + 1)} activeOpacity={0.8}>
-              <Text style={styles.retryText}>Tap to retry</Text>
-            </TouchableOpacity>
-          </View>
-        ) : !history || history.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
-            <Text style={styles.emptyStateText}>No on-duty applications yet</Text>
-          </View>
+          )}
+          </ScrollView>
         ) : (
-          history.map((item) => <HistoryCard key={item.id} item={item} />)
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollMemory.bind("history")}>
+          {historyLoading ? (
+            <SkeletonListRows count={4} />
+          ) : historyErrored ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="cloud-offline-outline" size={32} color="#B0B7C3" />
+              <Text style={styles.emptyStateText}>Couldn't load your history</Text>
+              <TouchableOpacity onPress={() => setHistoryReloadToken((n) => n + 1)} activeOpacity={0.8}>
+                <Text style={styles.retryText}>Tap to retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : !history || history.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
+              <Text style={styles.emptyStateText}>No on-duty applications yet</Text>
+            </View>
+          ) : (
+            history.map((item) => <HistoryCard key={item.id} item={item} />)
+          )}
+          </ScrollView>
         )}
-      </ScrollView>
+      </TabTransitionView>
 
       <Modal
         visible={datePickerFor !== null}
@@ -784,107 +833,92 @@ export function StudentOdApplyScreen() {
         </TouchableOpacity>
       </Modal>
 
-      <Modal
+      <AnchoredDropdown
+        anchorRef={{ current: timePickerFor ? timeFieldAnchors.current[timePickerFor] ?? null : null }}
         visible={timePickerFor !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setTimePickerFor(null)}
+        onClose={() => setTimePickerFor(null)}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
       >
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setTimePickerFor(null)}>
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>{timePickerFor === "from" ? "From Time" : "To Time"}</Text>
-            <ScrollView style={styles.modalList}>
-              {timeSlots.map((slot) => (
-                <TouchableOpacity
-                  key={slot.value}
-                  style={styles.modalOptionRow}
-                  onPress={() => handlePickTime(slot.value)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.modalOptionName}>{slot.label}</Text>
-                  {(timePickerFor === "from" ? fromTime : toTime) === slot.value && (
-                    <Ionicons name="checkmark" size={18} color="#2F6FE0" />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+        <Text style={styles.modalTitle}>{timePickerFor === "from" ? "From Time" : "To Time"}</Text>
+        <ScrollView style={styles.modalList}>
+          {timeSlots.map((slot) => (
+            <TouchableOpacity
+              key={slot.value}
+              style={styles.modalOptionRow}
+              onPress={() => handlePickTime(slot.value)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.modalOptionName}>{slot.label}</Text>
+              {(timePickerFor === "from" ? fromTime : toTime) === slot.value && (
+                <Ionicons name="checkmark" size={18} color="#2F6FE0" />
+              )}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </AnchoredDropdown>
 
-      <Modal
-        visible={facultyPickerOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          setFacultyPickerOpen(false);
+      <AnchoredDropdown
+        anchorRef={facultyPicker.anchorRef}
+        visible={facultyPicker.visible}
+        onClose={() => {
+          facultyPicker.close();
           setFacultySearch("");
         }}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
       >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => {
-            setFacultyPickerOpen(false);
-            setFacultySearch("");
-          }}
-        >
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>Faculty guide</Text>
+        <Text style={styles.modalTitle}>Faculty guide</Text>
 
-            {facultyList !== null && facultyList.length > 0 && (
-              <View style={styles.searchInputWrap}>
-                <Ionicons name="search-outline" size={15} color="#9AA6B2" />
-                <TextInput
-                  style={styles.searchInput}
-                  placeholder="Search by name or department"
-                  placeholderTextColor="#9AA6B2"
-                  value={facultySearch}
-                  onChangeText={setFacultySearch}
-                  autoFocus
-                />
-                {facultySearch.length > 0 && (
-                  <TouchableOpacity onPress={() => setFacultySearch("")} hitSlop={8}>
-                    <Ionicons name="close-circle" size={16} color="#9AA6B2" />
-                  </TouchableOpacity>
-                )}
-              </View>
+        {facultyList !== null && facultyList.length > 0 && (
+          <View style={styles.searchInputWrap}>
+            <Ionicons name="search-outline" size={15} color="#9AA6B2" />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search by name or department"
+              placeholderTextColor="#9AA6B2"
+              value={facultySearch}
+              onChangeText={setFacultySearch}
+              autoFocus
+            />
+            {facultySearch.length > 0 && (
+              <TouchableOpacity onPress={() => setFacultySearch("")} hitSlop={8}>
+                <Ionicons name="close-circle" size={16} color="#9AA6B2" />
+              </TouchableOpacity>
             )}
+          </View>
+        )}
 
-            <ScrollView style={styles.modalList}>
-              {facultyList === null ? (
-                <View style={styles.modalLoadingRow}>
-                  <ActivityIndicator size="small" color="#2F6FE0" />
-                  <Text style={styles.modalLoadingText}>Loading faculty...</Text>
+        <ScrollView style={styles.modalList}>
+          {facultyList === null ? (
+            <View style={styles.modalLoadingRow}>
+              <ActivityIndicator size="small" color="#2F6FE0" />
+              <Text style={styles.modalLoadingText}>Loading faculty...</Text>
+            </View>
+          ) : facultyList.length === 0 ? (
+            <Text style={styles.modalLoadingText}>Couldn't load the faculty list.</Text>
+          ) : filteredFacultyList && filteredFacultyList.length === 0 ? (
+            <Text style={styles.modalLoadingText}>No faculty match "{facultySearch}".</Text>
+          ) : (
+            filteredFacultyList?.map((entry) => (
+              <TouchableOpacity
+                key={entry.id}
+                style={styles.modalOptionRow}
+                onPress={() => {
+                  setFacultyGuide(entry);
+                  facultyPicker.close();
+                  setFacultySearch("");
+                }}
+                activeOpacity={0.8}
+              >
+                <View style={styles.modalOptionTextWrap}>
+                  <Text style={styles.modalOptionName}>{entry.name}</Text>
+                  <Text style={styles.modalOptionSubtext}>{entry.department_name}</Text>
                 </View>
-              ) : facultyList.length === 0 ? (
-                <Text style={styles.modalLoadingText}>Couldn't load the faculty list.</Text>
-              ) : filteredFacultyList && filteredFacultyList.length === 0 ? (
-                <Text style={styles.modalLoadingText}>No faculty match "{facultySearch}".</Text>
-              ) : (
-                filteredFacultyList?.map((entry) => (
-                  <TouchableOpacity
-                    key={entry.id}
-                    style={styles.modalOptionRow}
-                    onPress={() => {
-                      setFacultyGuide(entry);
-                      setFacultyPickerOpen(false);
-                      setFacultySearch("");
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <View style={styles.modalOptionTextWrap}>
-                      <Text style={styles.modalOptionName}>{entry.name}</Text>
-                      <Text style={styles.modalOptionSubtext}>{entry.department_name}</Text>
-                    </View>
-                    {facultyGuide?.id === entry.id && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
-                  </TouchableOpacity>
-                ))
-              )}
-            </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+                {facultyGuide?.id === entry.id && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
+              </TouchableOpacity>
+            ))
+          )}
+        </ScrollView>
+      </AnchoredDropdown>
     </SafeAreaView>
   );
 }
@@ -962,7 +996,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -972,8 +1006,15 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
   },
   content: {
-    padding: 16,
+    paddingHorizontal: 16,
     paddingBottom: 32,
+  },
+  tabContent: {
+    flex: 1,
+  },
+  tabSwitchWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
   },
   tabSwitch: {
     flexDirection: "row",
@@ -995,7 +1036,10 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     paddingVertical: 12,
   },
-  tabButtonActive: {
+  tabIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
     backgroundColor: "#2F6FE0",
   },
   tabButtonText: {
@@ -1326,6 +1370,19 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 18,
     maxHeight: "70%",
+  },
+  // Anchored dropdowns (time/faculty guide) have no full-screen flex parent
+  // to resolve modalCard's percentage maxHeight against, unlike the
+  // still-centered date-picker Modal below which keeps modalCard/
+  // modalOverlay as-is.
+  anchoredCard: {
+    width: 280,
+    maxHeight: 360,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   modalTitle: {
     fontSize: 15,

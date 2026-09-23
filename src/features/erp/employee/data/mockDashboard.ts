@@ -4,6 +4,12 @@ import type { QuickAccessItem } from "../../types";
 // see src/features/erp/data/employeeSectionItems.ts.
 export { employeeSectionItems } from "../../data/employeeSectionItems";
 
+// Faculty Account mode's Campus/Student section - deliberately just these 9
+// tiles (see the Switch Account feature, AuthContext.tsx's AccountMode /
+// HodDashboard.tsx). This is every Faculty account's own Student-section
+// tile set (also reused as-is, via
+// src/features/erp/data/accountModeStudentModules.ts, by a dual-role
+// HOD+Faculty account when it switches into Faculty Account mode).
 export const studentSectionItems: QuickAccessItem[] = [
   {
     id: "student-attendance",
@@ -15,25 +21,20 @@ export const studentSectionItems: QuickAccessItem[] = [
   { id: "student-leave", label: "Student Leave", icon: "log-out-outline", route: "/(tabs)/erp/student-leave" },
   { id: "student-od", label: "Student OD", icon: "people-outline", route: "/(tabs)/erp/student-od" },
   {
-    id: "assignment-status",
-    label: "Assignment Status",
-    icon: "checkmark-done-outline",
-    route: "/(tabs)/erp/assignment-status",
-  },
-  {
     id: "subject-records",
     label: "Subject Records",
     icon: "book-outline",
     route: "/(tabs)/erp/subject-records",
   },
-  { id: "cia-marks", label: "CIA Marks", icon: "create-outline", route: "/(tabs)/erp/cia-marks" },
+  { id: "class-result", label: "Class Result", icon: "bar-chart-outline", route: "/(tabs)/erp/class-result" },
+  { id: "timetable", label: "Timetable", icon: "time-outline", route: "/(tabs)/erp/timetable" },
   {
     id: "announcements",
     label: "Announcement",
     icon: "megaphone-outline",
     route: "/(tabs)/erp/announcements?audience=faculty",
   },
-  { id: "class-result", label: "Class Result", icon: "bar-chart-outline", route: "/(tabs)/erp/class-result" },
+  { id: "placements", label: "Placement", icon: "briefcase-outline", route: "/(tabs)/erp/placements" },
   // Screen/backend already exist and are shared with students (see
   // src/features/academics/calendar/AcademicCalendarScreen.tsx - GET
   // /me/faculty-academic-calendar) - this dashboard just never linked to it.
@@ -41,22 +42,38 @@ export const studentSectionItems: QuickAccessItem[] = [
     id: "academic-calendar",
     label: "Academic Calendar",
     icon: "calendar-outline",
-    route: "/(tabs)/academics/calendar",
+    route: "/(tabs)/erp/calendar",
   },
+];
 
-  // Moved in from the old Class tab (see app/(tabs)/_layout.tsx - that tab
-  // is now hidden entirely for faculty/HoD too, see isFaculty there). Routes
-  // are unchanged (same academics/* screens, just reached from here instead
-  // of the Class tab's own chooser) - same icons those tiles used there, and
-  // no `library`/`size` override so they render at the same size as every
-  // other tile in this section (see QuickAccessGrid's default SIZES).
+// The Class tab's own fixed grid - replaces the activeAccountMode-based
+// Student/Employee section split above for this dashboard's actual render
+// (see EmployeeDashboard.tsx). Deliberately this exact set and nothing else
+// - every other Employee-section tile (Leave/OD/Payslip/Appraisal/...) now
+// lives on the Progress tab instead (see progressSectionItems.ts). "LMS" and
+// "Exam Marks" are just this tile's own label - the underlying screens
+// (CurrentSemesterScreen/CiaMarksScreen) are unrenamed since CIA Marks'
+// screen is faculty-only but "Current Semester" is shared with the student
+// Academics flow.
+export const classTabItems: QuickAccessItem[] = [
   {
-    id: "current-semester",
-    label: "Current Semester",
-    icon: "ribbon-outline",
-    route: "/(tabs)/academics/current-semester",
+    id: "student-attendance",
+    label: "Student Attendance",
+    icon: "calendar-check-outline",
+    library: "material",
+    route: "/(tabs)/erp/attendance",
   },
-  { id: "timetable", label: "Timetable", icon: "time-outline", route: "/(tabs)/academics/timetable" },
-  { id: "online-class", label: "Online Class", icon: "videocam-outline", route: "/(tabs)/academics/online-class" },
-  { id: "placements", label: "Placements", icon: "briefcase-outline", route: "/(tabs)/academics/placements" },
+  { id: "online-class", label: "Online Class", icon: "videocam-outline", route: "/(tabs)/erp/online-class" },
+  {
+    id: "announcements",
+    label: "Announcement",
+    icon: "megaphone-outline",
+    route: "/(tabs)/erp/announcements?audience=faculty",
+  },
+  { id: "timetable", label: "Timetable", icon: "time-outline", route: "/(tabs)/erp/timetable" },
+  { id: "calendar", label: "Calendar", icon: "calendar-outline", route: "/(tabs)/erp/calendar" },
+  { id: "lms", label: "LMS", icon: "ribbon-outline", route: "/(tabs)/erp/current-semester" },
+  { id: "exam-marks", label: "Exam Marks", icon: "create-outline", route: "/(tabs)/erp/cia-marks" },
+  { id: "subject-records", label: "Subject Records", icon: "book-outline", route: "/(tabs)/erp/subject-records" },
+  { id: "venue-booking", label: "Venue Booking", icon: "location-outline", route: "/(tabs)/erp/venue-request" },
 ];

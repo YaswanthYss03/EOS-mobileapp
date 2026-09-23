@@ -15,7 +15,9 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { useSkipSharedHeaderToggle } from "@/hooks/useSkipSharedHeaderToggle";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -38,6 +40,8 @@ import {
   type AnnouncementRole,
   type Announcement,
 } from "@/services/api/announcements.api";
+import { getMyMentorClasses } from "@/services/api/class-mentors.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 const DESCRIPTION_MAX = 2000;
 
@@ -78,15 +82,27 @@ export function AnnouncementsScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { audience } = useLocalSearchParams<{ audience?: string }>();
+  const { audience, scope } = useLocalSearchParams<{ audience?: string; scope?: string }>();
   const isFacultyAudience = audience === "faculty";
+  // Class Advisor's own dedicated entry point (see AdvisorAcademicsScreen.tsx)
+  // - target classes must be ONLY the Advisor's own mentored class, not the
+  // usual assigned-classes union (mentor class + every class this faculty
+  // also happens to teach a subject in - see EOS-backend's
+  // announcements.service.ts's getAssignedClassIds). Reuses the same
+  // /me/mentee-classes endpoint the Class Result screen already calls -
+  // publishing to that class id still passes the backend's own
+  // assertClassesValid check, since a mentor's class is always a subset of
+  // their assignedClassIds.
+  const isMentorScope = scope === "mentor";
   const role = useRole();
-  // Only Principal (institution-wide broadcast) gets the "Target roles"
-  // section - every other role keeps the existing class/faculty targeting
-  // untouched. Admin has the same backend permission but no dashboard tile
-  // reaches this screen for that role today, so the UI stays scoped to what's
-  // actually reachable.
-  const canTargetRoles = role === "principal";
+  // Only Principal/Correspondent (institution-wide broadcast) get the
+  // "Target roles" section - every other role keeps the existing
+  // class/faculty targeting untouched. Admin has the same backend
+  // permission but no dashboard tile reaches this screen for that role
+  // today, so the UI stays scoped to what's actually reachable.
+  const canTargetRoles = role === "principal" || role === "correspondent";
+
+  const scrollMemory = useTabScrollMemory();
 
   const [tab, setTab] = useState<Tab>("create");
   const [title, setTitle] = useState("");
@@ -128,9 +144,14 @@ export function AnnouncementsScreen() {
     // HoD - an HoD who is themselves mapped to teach/mentor a class gets
     // the same real list; one who isn't just gets an empty array (handled
     // by the "No classes are assigned to you yet" empty state below).
+    // isMentorScope swaps this for the Advisor-only mentee-classes list
+    // instead (see isMentorScope's own comment above).
     setClassesStatus("loading");
     setClassesError(null);
-    getMyAssignedClasses()
+    const request = isMentorScope
+      ? getMyMentorClasses().then((rows) => rows.map((r) => ({ id: r.class_id, label: r.label })))
+      : getMyAssignedClasses();
+    request
       .then((rows) => {
         setClasses(rows);
         setClassesStatus("success");
@@ -139,7 +160,7 @@ export function AnnouncementsScreen() {
         setClassesError(getApiErrorMessage(err, "Couldn't load your classes."));
         setClassesStatus("error");
       });
-  }, [canTargetRoles]);
+  }, [canTargetRoles, isMentorScope]);
 
   const loadFacultyTargets = useCallback(() => {
     if (isFacultyAudience || canTargetRoles) {
@@ -210,13 +231,16 @@ export function AnnouncementsScreen() {
   // This screen renders its own full header below, so hide the shared
   // CollegeHeader while it's focused - same pattern as the other ERP
   // sub-screens (attendance, leave, on duty, no-due, subject records, CIA marks).
+  const skipHeaderToggle = useSkipSharedHeaderToggle();
+
   useFocusEffect(
     useCallback(() => {
+      if (skipHeaderToggle) return undefined;
       navigation.getParent()?.setOptions({ headerShown: false });
       return () => {
         navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
       };
-    }, [navigation]),
+    }, [navigation, skipHeaderToggle]),
   );
 
   const allClassesSelected = classes.length > 0 && selectedClassIds.length === classes.length;
@@ -377,6 +401,7 @@ export function AnnouncementsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -398,25 +423,25 @@ export function AnnouncementsScreen() {
         </View>
       </LinearGradient>
 
-      <View style={styles.tabSwitch}>
-        <TouchableOpacity
-          style={[styles.tabSwitchButton, tab === "create" && styles.tabSwitchButtonActive]}
-          onPress={() => setTab("create")}
-        >
-          <Text style={[styles.tabSwitchText, tab === "create" && styles.tabSwitchTextActive]}>Create Post</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tabSwitchButton, tab === "drafts" && styles.tabSwitchButtonActive]}
-          onPress={() => setTab("drafts")}
-        >
-          <Text style={[styles.tabSwitchText, tab === "drafts" && styles.tabSwitchTextActive]}>
-            Drafts{drafts.length > 0 ? ` (${drafts.length})` : ""}
-          </Text>
-        </TouchableOpacity>
+      <View style={styles.tabSwitchWrap}>
+        <AnimatedTabBar
+          tabs={[
+            { key: "create" as Tab, label: "Create Post" },
+            { key: "drafts" as Tab, label: `Drafts${drafts.length > 0 ? ` (${drafts.length})` : ""}` },
+          ]}
+          active={tab}
+          onChange={setTab}
+          containerStyle={styles.tabSwitch}
+          tabStyle={styles.tabSwitchButton}
+          tabTextStyle={styles.tabSwitchText}
+          activeTabTextStyle={styles.tabSwitchTextActive}
+          indicatorStyle={styles.tabSwitchIndicator}
+        />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <TabTransitionView activeKey={tab} order={["create", "drafts"]} style={styles.tabContent}>
         {tab === "create" ? (
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollMemory.bind("create")}>
           <View style={styles.card}>
             {editingDraftId !== null && (
               <View style={styles.editingBanner}>
@@ -611,43 +636,48 @@ export function AnnouncementsScreen() {
               </TouchableOpacity>
             </View>
           </View>
-        ) : draftsStatus === "loading" ? (
-          <SkeletonListRows count={4} />
-        ) : draftsStatus === "error" ? (
-          <ErrorNotice message={draftsError ?? "Something went wrong."} onRetry={loadDrafts} />
-        ) : drafts.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
-            <Text style={styles.emptyStateText}>No drafts saved yet</Text>
-          </View>
+          </ScrollView>
         ) : (
-          drafts.map((draft) => (
-            <View key={draft.id} style={styles.draftCard}>
-              <View style={styles.draftHeader}>
-                <Text style={styles.draftTitle} numberOfLines={1}>
-                  {draft.title}
-                </Text>
-                <TouchableOpacity onPress={() => handleDeleteDraft(draft.id)} hitSlop={8}>
-                  <Ionicons name="trash-outline" size={18} color="#DC2626" />
-                </TouchableOpacity>
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollMemory.bind("drafts")}>
+            {draftsStatus === "loading" ? (
+              <SkeletonListRows count={4} />
+            ) : draftsStatus === "error" ? (
+              <ErrorNotice message={draftsError ?? "Something went wrong."} onRetry={loadDrafts} />
+            ) : drafts.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
+                <Text style={styles.emptyStateText}>No drafts saved yet</Text>
               </View>
-              {draft.content ? (
-                <Text style={styles.draftDescription} numberOfLines={2}>
-                  {draft.content}
-                </Text>
-              ) : null}
-              <Text style={styles.draftMeta}>
-                {draft.class_ids.length} class{draft.class_ids.length === 1 ? "" : "es"}
-                {draft.file_name ? ` · 1 attachment` : ""}
-              </Text>
-              <TouchableOpacity style={styles.editDraftButton} onPress={() => handleEditDraft(draft)} activeOpacity={0.85}>
-                <Ionicons name="create-outline" size={14} color="#2F6FE0" />
-                <Text style={styles.editDraftButtonText}>Continue editing</Text>
-              </TouchableOpacity>
-            </View>
-          ))
+            ) : (
+              drafts.map((draft) => (
+                <View key={draft.id} style={styles.draftCard}>
+                  <View style={styles.draftHeader}>
+                    <Text style={styles.draftTitle} numberOfLines={1}>
+                      {draft.title}
+                    </Text>
+                    <TouchableOpacity onPress={() => handleDeleteDraft(draft.id)} hitSlop={8}>
+                      <Ionicons name="trash-outline" size={18} color="#DC2626" />
+                    </TouchableOpacity>
+                  </View>
+                  {draft.content ? (
+                    <Text style={styles.draftDescription} numberOfLines={2}>
+                      {draft.content}
+                    </Text>
+                  ) : null}
+                  <Text style={styles.draftMeta}>
+                    {draft.class_ids.length} class{draft.class_ids.length === 1 ? "" : "es"}
+                    {draft.file_name ? ` · 1 attachment` : ""}
+                  </Text>
+                  <TouchableOpacity style={styles.editDraftButton} onPress={() => handleEditDraft(draft)} activeOpacity={0.85}>
+                    <Ionicons name="create-outline" size={14} color="#2F6FE0" />
+                    <Text style={styles.editDraftButtonText}>Continue editing</Text>
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+          </ScrollView>
         )}
-      </ScrollView>
+      </TabTransitionView>
     </SafeAreaView>
   );
 }
@@ -705,7 +735,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -720,11 +749,16 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     marginTop: 2,
   },
+  tabContent: {
+    flex: 1,
+  },
+  tabSwitchWrap: {
+    marginHorizontal: 16,
+    marginTop: 14,
+  },
   tabSwitch: {
     flexDirection: "row",
     backgroundColor: "#fff",
-    marginHorizontal: 16,
-    marginTop: 14,
     borderRadius: 12,
     padding: 4,
     gap: 4,
@@ -741,7 +775,10 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     paddingVertical: 10,
   },
-  tabSwitchButtonActive: {
+  tabSwitchIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
     backgroundColor: "#2F6FE0",
   },
   tabSwitchText: {
@@ -753,7 +790,8 @@ const styles = StyleSheet.create({
     color: "#fff",
   },
   content: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
     paddingBottom: 32,
   },
   card: {

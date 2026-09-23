@@ -7,7 +7,6 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
-  Modal,
   StyleSheet,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -18,11 +17,14 @@ import RazorpayCheckout from "react-native-razorpay";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonStatCards, SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnchoredDropdown, useDropdown } from "@/components/ui/dropdown";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { downloadPdf } from "@/utils/pdfDownload";
 import { useAuth } from "@/context/AuthContext";
 import { getApiErrorMessage } from "@/services/api/client";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import {
   getMyFees,
   createFeePaymentOrder,
@@ -108,8 +110,9 @@ export function StudentFeesScreen() {
   const [data, setData] = useState<MyFeesResponse | null>(null);
 
   const [tab, setTab] = useState<Tab>("pay");
+  const scrollMemory = useTabScrollMemory();
   const [semester, setSemester] = useState(1);
-  const [semesterPickerOpen, setSemesterPickerOpen] = useState(false);
+  const semesterPicker = useDropdown();
   const [payingFeeId, setPayingFeeId] = useState<number | null>(null);
   const [downloadingReceiptId, setDownloadingReceiptId] = useState<number | null>(null);
 
@@ -232,8 +235,54 @@ export function StudentFeesScreen() {
     }
   }
 
+  // Not tab-specific (same semester strip in both Pay and History) - kept as
+  // a closure helper (like StudentHostelScreen's renderRoomCard) so each
+  // per-tab ScrollView below can call it once, reproducing the original
+  // "scrolls away with the rest of the content" behavior.
+  function renderSemesterStrip() {
+    return (
+      <View style={styles.semesterStrip}>
+        <View ref={semesterPicker.anchorRef} collapsable={false}>
+          <TouchableOpacity
+            style={styles.semesterHeaderRow}
+            onPress={semesterPicker.open}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.semesterStripLabel}>Semester</Text>
+            <View style={styles.semesterStripValueRow}>
+              <Text style={styles.semesterStripValue}>Semester {semester}</Text>
+              <Ionicons name="chevron-down" size={14} color="#2F6FE0" />
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.semesterStatsRow}>
+          <View style={styles.semesterStat}>
+            <Text style={styles.semesterStatValue} numberOfLines={1}>
+              {formatRupees(summary.totalPayable)}
+            </Text>
+            <Text style={styles.semesterStatLabel}>Total</Text>
+          </View>
+          <View style={styles.semesterStat}>
+            <Text style={[styles.semesterStatValue, styles.semesterStatValuePaid]} numberOfLines={1}>
+              {formatRupees(summary.paid)}
+            </Text>
+            <Text style={styles.semesterStatLabel}>Paid</Text>
+          </View>
+          <View style={styles.semesterStat}>
+            <Text style={styles.semesterStatValue} numberOfLines={1}>
+              {formatRupees(summary.outstanding)}
+            </Text>
+            <Text style={styles.semesterStatLabel}>Due</Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -268,128 +317,103 @@ export function StudentFeesScreen() {
       )}
 
       {status === "success" && (
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Compact semester strip - label + dropdown value on the left,
-              Total/Paid/Due stat groups inline on the right. */}
-          <TouchableOpacity
-            style={styles.semesterStrip}
-            onPress={() => setSemesterPickerOpen(true)}
-            activeOpacity={0.8}
-          >
-            <View style={styles.semesterStripLeft}>
-              <Text style={styles.semesterStripLabel}>Semester</Text>
-              <View style={styles.semesterStripValueRow}>
-                <Text style={styles.semesterStripValue}>Semester {semester}</Text>
-                <Ionicons name="chevron-down" size={14} color="#2F6FE0" />
-              </View>
-            </View>
-            <View style={styles.semesterStripStats}>
-              <View style={styles.semesterStat}>
-                <Text style={styles.semesterStatValue} numberOfLines={1}>
-                  {formatRupees(summary.totalPayable)}
-                </Text>
-                <Text style={styles.semesterStatLabel}>Total</Text>
-              </View>
-              <View style={styles.semesterStat}>
-                <Text style={[styles.semesterStatValue, styles.semesterStatValuePaid]} numberOfLines={1}>
-                  {formatRupees(summary.paid)}
-                </Text>
-                <Text style={styles.semesterStatLabel}>Paid</Text>
-              </View>
-              <View style={styles.semesterStat}>
-                <Text style={styles.semesterStatValue} numberOfLines={1}>
-                  {formatRupees(summary.outstanding)}
-                </Text>
-                <Text style={styles.semesterStatLabel}>Due</Text>
-              </View>
-            </View>
-          </TouchableOpacity>
+        <>
+          <View style={styles.semesterStripWrap}>{renderSemesterStrip()}</View>
 
-          <View style={styles.tabSwitch}>
-            <TouchableOpacity
-              style={[styles.tabButton, tab === "pay" && styles.tabButtonActive]}
-              onPress={() => setTab("pay")}
-            >
-              <Text style={[styles.tabButtonText, tab === "pay" && styles.tabButtonTextActive]}>Pay</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tabButton, tab === "history" && styles.tabButtonActive]}
-              onPress={() => setTab("history")}
-            >
-              <Text style={[styles.tabButtonText, tab === "history" && styles.tabButtonTextActive]}>History</Text>
-            </TouchableOpacity>
+          <View style={styles.tabSwitchWrap}>
+            <AnimatedTabBar
+              tabs={[
+                { key: "pay", label: "Pay" },
+                { key: "history", label: "History" },
+              ]}
+              active={tab}
+              onChange={setTab}
+              containerStyle={styles.tabSwitch}
+              tabStyle={styles.tabButton}
+              tabTextStyle={styles.tabButtonText}
+              activeTabTextStyle={styles.tabButtonTextActive}
+              indicatorStyle={styles.tabIndicator}
+            />
           </View>
 
-          {tab === "pay" ? (
-            demands.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Ionicons name="cash-outline" size={32} color="#B0B7C3" />
-                <Text style={styles.emptyStateText}>No fees have been raised for you yet</Text>
-              </View>
+          <TabTransitionView activeKey={tab} order={["pay", "history"]} style={styles.tabContent}>
+            {tab === "pay" ? (
+              <ScrollView
+                contentContainerStyle={styles.content}
+                showsVerticalScrollIndicator={false}
+                {...scrollMemory.bind("pay")}
+              >
+                {demands.length === 0 ? (
+                  <View style={styles.emptyState}>
+                    <Ionicons name="cash-outline" size={32} color="#B0B7C3" />
+                    <Text style={styles.emptyStateText}>No fees have been raised for you yet</Text>
+                  </View>
+                ) : (
+                  demands.map((fee) => (
+                    <FeeAccordionCard
+                      key={fee.id}
+                      fee={fee}
+                      paying={payingFeeId === fee.id}
+                      onPay={(amount) => handlePayOne(fee, amount)}
+                    />
+                  ))
+                )}
+              </ScrollView>
             ) : (
-              demands.map((fee) => (
-                <FeeAccordionCard
-                  key={fee.id}
-                  fee={fee}
-                  paying={payingFeeId === fee.id}
-                  onPay={(amount) => handlePayOne(fee, amount)}
-                />
-              ))
-            )
-          ) : paymentsSorted.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="receipt-outline" size={32} color="#B0B7C3" />
-              <Text style={styles.emptyStateText}>No payments yet</Text>
-            </View>
-          ) : (
-            <View style={styles.historyCard}>
-              {paymentsSorted.map((payment, index) => (
-                <PaymentRow
-                  key={payment.id}
-                  payment={payment}
-                  demand={demandById.get(payment.demand_id)}
-                  divider={index > 0}
-                  downloading={downloadingReceiptId === payment.id}
-                  onDownload={() => handleDownloadReceipt(payment)}
-                />
-              ))}
-            </View>
-          )}
-        </ScrollView>
+              <ScrollView
+                contentContainerStyle={styles.content}
+                showsVerticalScrollIndicator={false}
+                {...scrollMemory.bind("history")}
+              >
+                {paymentsSorted.length === 0 ? (
+                  <View style={styles.emptyState}>
+                    <Ionicons name="receipt-outline" size={32} color="#B0B7C3" />
+                    <Text style={styles.emptyStateText}>No payments yet</Text>
+                  </View>
+                ) : (
+                  <View style={styles.historyCard}>
+                    {paymentsSorted.map((payment, index) => (
+                      <PaymentRow
+                        key={payment.id}
+                        payment={payment}
+                        demand={demandById.get(payment.demand_id)}
+                        divider={index > 0}
+                        downloading={downloadingReceiptId === payment.id}
+                        onDownload={() => handleDownloadReceipt(payment)}
+                      />
+                    ))}
+                  </View>
+                )}
+              </ScrollView>
+            )}
+          </TabTransitionView>
+        </>
       )}
 
-      <Modal
-        visible={semesterPickerOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSemesterPickerOpen(false)}
+      <AnchoredDropdown
+        anchorRef={semesterPicker.anchorRef}
+        visible={semesterPicker.visible}
+        onClose={semesterPicker.close}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
       >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setSemesterPickerOpen(false)}
-        >
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>Semester</Text>
-            <ScrollView style={styles.modalList}>
-              {SEMESTERS.map((option) => (
-                <TouchableOpacity
-                  key={option}
-                  style={styles.modalOptionRow}
-                  onPress={() => {
-                    setSemester(option);
-                    setSemesterPickerOpen(false);
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.modalOptionName}>Semester {option}</Text>
-                  {semester === option && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+        <Text style={styles.modalTitle}>Semester</Text>
+        <ScrollView style={styles.modalList}>
+          {SEMESTERS.map((option) => (
+            <TouchableOpacity
+              key={option}
+              style={styles.modalOptionRow}
+              onPress={() => {
+                setSemester(option);
+                semesterPicker.close();
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.modalOptionName}>Semester {option}</Text>
+              {semester === option && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </AnchoredDropdown>
     </SafeAreaView>
   );
 }
@@ -592,7 +616,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -602,8 +625,20 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
   },
   content: {
-    padding: 16,
+    paddingHorizontal: 16,
     paddingBottom: 32,
+  },
+  tabContent: {
+    flex: 1,
+  },
+  // Semester strip's own marginBottom already supplies the gap down to the
+  // tabs, so this only needs the top inset (from the header) once.
+  semesterStripWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
+  tabSwitchWrap: {
+    paddingHorizontal: 16,
   },
   errorNotice: {
     alignItems: "center",
@@ -643,11 +678,11 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
   },
 
-  // Compact semester strip
+  // Semester strip - two stacked rows: the semester filter on its own line,
+  // then the Total/Paid/Due summary spread across the next line (previously
+  // squeezed side-by-side into one row, which crowded both on narrower
+  // screens).
   semesterStrip: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
     backgroundColor: "#fff",
     borderRadius: 14,
     paddingHorizontal: 14,
@@ -659,8 +694,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 6,
   },
-  semesterStripLeft: {
-    marginRight: 12,
+  semesterHeaderRow: {
+    paddingBottom: 12,
+    marginBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F3F6",
   },
   semesterStripLabel: {
     fontSize: 11,
@@ -678,13 +716,13 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     color: "#111827",
   },
-  semesterStripStats: {
+  semesterStatsRow: {
     flexDirection: "row",
-    gap: 16,
+    justifyContent: "space-between",
   },
   semesterStat: {
+    flex: 1,
     alignItems: "center",
-    minWidth: 56,
   },
   semesterStatValue: {
     fontSize: 12.5,
@@ -718,7 +756,10 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     paddingVertical: 12,
   },
-  tabButtonActive: {
+  tabIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
     backgroundColor: "#2F6FE0",
   },
   tabButtonText: {
@@ -922,17 +963,22 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     color: "#9AA6B2",
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.5)",
-    justifyContent: "center",
-    padding: 20,
-  },
   modalCard: {
     backgroundColor: "#fff",
     borderRadius: 18,
     padding: 18,
     maxHeight: "70%",
+  },
+  // Anchored dropdowns have no full-screen flex parent to resolve
+  // modalCard's percentage maxHeight against, so pin a concrete size here.
+  anchoredCard: {
+    width: 260,
+    maxHeight: 320,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   modalTitle: {
     fontSize: 15,

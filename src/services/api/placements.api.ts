@@ -1,4 +1,5 @@
 import { apiClient } from "./client";
+import type { InstitutionDirectoryFilters } from "./institution-directory.api";
 
 // Mirrors EOS-backend's placement/drives module (see
 // EOSbackend1/src/modules/placement/drives/drives.service.ts,
@@ -89,5 +90,52 @@ export type CalendarDrive = {
 
 export async function getDrivesForCalendar(): Promise<CalendarDrive[]> {
   const { data } = await apiClient.get<{ data: CalendarDrive[] }>("/drives/for-calendar");
+  return data.data;
+}
+
+// Principal-only - institution-wide Upcoming/History, replacing the old
+// single "pick a department first" gate with a combinable Batch/Department/
+// Class-with-Section filter row + name-or-roll-no search box (see
+// EOS-backend's DrivesService.searchUpcomingForPrincipal/
+// searchHistoryForPrincipal and shared InstitutionDirectoryFilters in
+// institution-directory.api.ts). Same per-drive shape as
+// DepartmentUpcomingDrive/DepartmentDriveHistoryItem above, just with a
+// richer student summary (batch/class/course, not just section).
+
+export type InstitutionPlacementStudentSummary = PlacementStudentSummary & {
+  class_id: number | null;
+  department_code: string | null;
+  department_name: string | null;
+  batch_name: string | null;
+  course_code: string | null;
+};
+
+export type InstitutionUpcomingDrive = UpcomingDrive & { student: InstitutionPlacementStudentSummary };
+export type InstitutionDriveHistoryItem = DriveHistoryItem & { student: InstitutionPlacementStudentSummary };
+
+export async function searchInstitutionUpcomingDrives(
+  filters: InstitutionDirectoryFilters,
+): Promise<InstitutionUpcomingDrive[]> {
+  const { data } = await apiClient.get<{ data: InstitutionUpcomingDrive[] }>("/drives/institution/upcoming", {
+    params: filters,
+  });
+  return data.data;
+}
+
+export async function searchInstitutionDriveHistory(
+  filters: InstitutionDirectoryFilters,
+): Promise<InstitutionDriveHistoryItem[]> {
+  const { data } = await apiClient.get<{ data: InstitutionDriveHistoryItem[] }>("/drives/institution/history", {
+    params: filters,
+  });
+  return data.data;
+}
+
+// The Batch filter's own dropdown data - GET /drives/batches, already
+// institution-wide/unscoped (no role-specific narrowing on the backend).
+export type PlacementBatch = { id: number; name: string; start_year: number; end_year: number };
+
+export async function getPlacementBatches(): Promise<PlacementBatch[]> {
+  const { data } = await apiClient.get<{ data: PlacementBatch[] }>("/drives/batches");
   return data.data;
 }

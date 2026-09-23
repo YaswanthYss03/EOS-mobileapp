@@ -29,7 +29,25 @@ import {
 // Drive-style: the faculty's own folders for this subject, each already
 // showing every class it's shared to (a folder created once can cover
 // several sections the caller teaches the same subject to).
-export function FacultyMaterialTab({ subjectId, classId }: { subjectId: number; classId: number }) {
+export function FacultyMaterialTab({
+  subjectId,
+  classId,
+  basePath = "/(tabs)/academics/lms",
+}: {
+  subjectId: number;
+  classId: number;
+  // Only Faculty/HoD ever render this tab (see LmsSubjectScreen's
+  // `isTeaching` gate), and they can reach LmsSubjectScreen via either the
+  // Academics tab's own stack (unreachable in practice, since that tab is
+  // hidden for them) or the erp tab's own local copy (see
+  // app/(tabs)/erp/lms/[subjectId].tsx) - the folder drill-down below must
+  // stay inside whichever tab actually led here, or crossing into a hidden
+  // tab corrupts the Tabs navigator's back-stack (the "switching tabs exits
+  // the app" bug). LmsSubjectScreen passes the correct one down; the
+  // Academics-tab default here is just a safe fallback if ever rendered
+  // without it.
+  basePath?: string;
+}) {
   const router = useRouter();
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [folders, setFolders] = useState<LmsFacultyFolder[]>([]);
@@ -148,7 +166,7 @@ export function FacultyMaterialTab({ subjectId, classId }: { subjectId: number; 
             style={styles.row}
             activeOpacity={0.85}
             onPress={() =>
-              router.push({ pathname: "/(tabs)/academics/lms/folder/[folderId]", params: { folderId: String(item.id), title: item.title } })
+              router.push({ pathname: `${basePath}/folder/[folderId]`, params: { folderId: String(item.id), title: item.title } })
             }
           >
             <View style={styles.iconWrap}>

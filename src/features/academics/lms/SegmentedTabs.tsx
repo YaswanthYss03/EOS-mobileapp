@@ -1,8 +1,11 @@
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { StyleSheet } from "react-native";
 import { fonts } from "@/theme";
+import { AnimatedTabBar } from "@/components/ui/tabs";
 
 // Google-Classroom-style underline tabs: flat row, no pill background,
-// active tab called out with bold text + a colored underline bar.
+// active tab called out with bold text + a colored underline bar that now
+// glides to the tapped tab instead of instantly swapping (via the shared
+// AnimatedTabBar motion layer - same at-rest look as before).
 export function SegmentedTabs<T extends string>({
   tabs,
   active,
@@ -13,24 +16,17 @@ export function SegmentedTabs<T extends string>({
   onChange: (key: T) => void;
 }) {
   return (
-    <View style={styles.wrap}>
-      {tabs.map((tab) => {
-        const selected = tab.key === active;
-        return (
-          <TouchableOpacity
-            key={tab.key}
-            style={styles.tab}
-            onPress={() => onChange(tab.key)}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.tabText, selected && styles.tabTextSelected]} numberOfLines={1}>
-              {tab.label}
-            </Text>
-            <View style={[styles.underline, selected && styles.underlineActive]} />
-          </TouchableOpacity>
-        );
-      })}
-    </View>
+    <AnimatedTabBar
+      tabs={tabs}
+      active={active}
+      onChange={onChange}
+      containerStyle={styles.wrap}
+      tabStyle={styles.tab}
+      tabTextStyle={styles.tabText}
+      activeTabTextStyle={styles.tabTextSelected}
+      indicatorStyle={styles.underline}
+      indicatorWidthRatio={0.7}
+    />
   );
 }
 
@@ -59,13 +55,9 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
   },
   underline: {
-    marginTop: 10,
+    bottom: 0,
     height: 3,
-    width: "70%",
     borderRadius: 3,
-    backgroundColor: "transparent",
-  },
-  underlineActive: {
     backgroundColor: "#2F6FE0",
   },
 });

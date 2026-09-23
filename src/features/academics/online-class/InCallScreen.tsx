@@ -11,6 +11,7 @@ import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
 import { useRole } from "@/hooks/useRole";
 import { leaveOnlineClass, endOnlineClass } from "@/services/api/online-class.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 // Real LiveKit in-call screen. <LiveKitRoom> owns the connection (built
 // from the serverUrl/token JoinLobbyScreen fetched from the real backend);
@@ -80,6 +81,7 @@ function CallHeader({ onBack, subject }: { onBack: () => void; subject: string }
 function UnavailableBody({ onBack, subject }: { onBack: () => void; subject: string }) {
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <CallHeader onBack={onBack} subject={subject} />
       <View style={styles.center}>
         <Ionicons name="videocam-off-outline" size={32} color="#6B7280" />
@@ -95,6 +97,9 @@ function UnavailableBody({ onBack, subject }: { onBack: () => void; subject: str
 export function InCallScreen() {
   const router = useRouter();
   const navigation = useNavigation();
+  const role = useRole();
+  // Mirrors OnlineClassScreen's own basePath - see that screen's comment.
+  const basePath = role === "employee" || role === "hod" ? "/(tabs)/erp/online-class" : "/(tabs)/academics/online-class";
   const params = useLocalSearchParams<{
     onlineClassId?: string;
     serverUrl?: string;
@@ -131,7 +136,7 @@ export function InCallScreen() {
   const subject = params.subject ?? "Online class";
 
   function goBack() {
-    router.replace("/(tabs)/academics/online-class" as never);
+    router.replace(basePath as never);
   }
 
   function handleDisconnected() {
@@ -150,6 +155,7 @@ export function InCallScreen() {
   if (!params.serverUrl || !params.token) {
     return (
       <SafeAreaView style={styles.container} edges={[]}>
+        <WatermarkBackground />
         <CallHeader onBack={goBack} subject={subject} />
         <View style={styles.center}>
           <Text style={styles.meta}>Missing connection details - please rejoin.</Text>
@@ -279,6 +285,7 @@ function CallBody({
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <CallHeader onBack={leaveCall} subject={subject} />
 
       <View style={styles.body}>
@@ -501,7 +508,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },

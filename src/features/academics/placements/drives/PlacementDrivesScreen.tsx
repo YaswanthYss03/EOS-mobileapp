@@ -4,11 +4,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { ScreenHeader } from "@/components/layout/ScreenHeader";
 import { fonts } from "@/theme";
 import { mockDrives, type Drive } from "../data/mockDrives";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 // TODO: view-only - replace mockDrives with a real call once the placement backend endpoint exists
 export function PlacementDrivesScreen() {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
+      <WatermarkBackground />
       <ScreenHeader title="Upcoming Drives" />
       <FlatList
         data={mockDrives}

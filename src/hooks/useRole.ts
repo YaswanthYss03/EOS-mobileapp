@@ -6,6 +6,7 @@ export type Role =
   | "employee"
   | "admin"
   | "principal"
+  | "correspondent"
   | "iqac"
   | "warden"
   | "hod"
@@ -14,7 +15,9 @@ export type Role =
   | "billing"
   | "hr-payroll"
   | "media-room"
-  | "secretary";
+  | "secretary"
+  | "alumni"
+  | "stationary";
 
 // EOS-backend has 18 roles (see EOS-backend/prisma/seed.ts) but this app only
 // has dedicated ERP dashboards/tabs for a subset of them - any backend role
@@ -23,6 +26,9 @@ export type Role =
 const BACKEND_ROLE_MAP: Record<string, Role> = {
   admin: "admin",
   principal: "principal",
+  // Strict visual replica of Principal (see CorrespondentDashboard.tsx) plus
+  // its one new capability, Leave Approval - not the generic employee view.
+  correspondent: "correspondent",
   hod: "hod",
   faculty: "employee",
   student: "student",
@@ -38,7 +44,13 @@ const BACKEND_ROLE_MAP: Record<string, Role> = {
   gate_warden: "warden",
   media_room: "media-room",
   academic_coordinator: "employee",
-  alumni: "employee",
+  // Its own dedicated 2-tab (Home/Campus) experience now - see
+  // app/(tabs)/_layout.tsx's isAlumni branch - not the generic employee view.
+  alumni: "alumni",
+  // Its own vendor portal (queue of paid print requests to fulfill) - see
+  // app/(tabs)/erp/index.tsx's DASHBOARDS registry - not the generic
+  // employee view.
+  stationary: "stationary",
 };
 
 export function mapBackendRole(backendRole: string): Role {

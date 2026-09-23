@@ -8,6 +8,8 @@ export const roleAccess: Record<Role, { tabs: string[] }> = {
   employee: { tabs: ["home", "erp", "amenity"] },
   admin: { tabs: ["home", "erp"] },
   principal: { tabs: ["home", "erp", "amenity", "bus-tracking"] },
+  // Strict replica of Principal (see CorrespondentDashboard.tsx) - same tabs.
+  correspondent: { tabs: ["home", "erp", "amenity", "bus-tracking"] },
   iqac: { tabs: ["home", "erp"] },
   warden: { tabs: ["home", "erp"] },
   hod: { tabs: ["home", "erp", "academics"] },
@@ -17,4 +19,6 @@ export const roleAccess: Record<Role, { tabs: string[] }> = {
   "hr-payroll": { tabs: ["home", "erp"] },
   "media-room": { tabs: ["home", "erp"] },
   secretary: { tabs: ["home", "erp", "amenity"] },
+  alumni: { tabs: ["home", "academics"] },
+  stationary: { tabs: ["home", "erp"] },
 };

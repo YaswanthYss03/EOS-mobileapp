@@ -9,6 +9,11 @@ export type MessagePerson = {
   userId: number;
   name: string;
   roleLabel: string;
+  // students.photo_url / faculty.profile_url, normalized to one field name
+  // server-side (see ProfileService.getMyProfile's same convention) - null
+  // falls back to the existing initials-circle avatar, never a second
+  // messaging-specific image.
+  photoUrl: string | null;
 };
 
 export type SuggestedContact = MessagePerson & {
@@ -44,17 +49,44 @@ export type ConversationLastMessage = {
   createdAt: string;
 };
 
+// A DM has otherUser set and isGroup:false; a group has title/imageUrl set,
+// otherUser:null, and isGroup:true - branch on isGroup, not on otherUser
+// being present, since a group's otherUser is always null by design (no
+// single "other party" for 3+ participants).
 export type ConversationSummary = {
   id: number;
-  otherUser: MessagePerson;
+  isGroup: boolean;
+  title: string | null;
+  imageUrl: string | null;
+  memberCount?: number;
+  otherUser: MessagePerson | null;
   lastMessage: ConversationLastMessage | null;
   lastMessageAt: string | null;
   unreadCount: number;
+  // Personal to the caller - pinning a conversation never changes this for
+  // any other participant (see MessagingService.setConversationPinned).
+  isPinned: boolean;
 };
 
-// GET /me/messaging/conversations - only conversations with at least one
-// real message ever appear here (a just-created, never-messaged conversation
-// stays invisible on both sides - see createConversation's own doc comment).
+export type GroupMember = MessagePerson & { isOwner: boolean };
+
+export type GroupDetails = {
+  id: number;
+  title: string | null;
+  imageUrl: string | null;
+  isGroup: boolean;
+  isOwner: boolean;
+  memberCount: number;
+  members: GroupMember[];
+  // Only ever populated for the owner - a student who hasn't accepted yet
+  // has no message_participants row and must never appear in `members`.
+  pendingInvites: MessagePerson[];
+};
+
+// GET /me/messaging/conversations - only DMs with at least one real message
+// ever appear here (a just-created, never-messaged DM stays invisible on
+// both sides - see createConversation's own doc comment). A group appears
+// immediately on creation instead - see createGroupConversation.
 export async function listConversations(beforeId?: number): Promise<ConversationSummary[]> {
   const { data } = await apiClient.get<{ data: ConversationSummary[] }>(
     "/me/messaging/conversations",
@@ -70,6 +102,106 @@ export async function createConversation(otherUserId: number): Promise<Conversat
   const { data } = await apiClient.post<{ data: ConversationSummary }>(
     "/me/messaging/conversations",
     { otherUserId },
+  );
+  return data.data;
+}
+
+// GET /me/messaging/contacts/eligible-students?q= (Faculty/HoD) - any active
+// student in the college, regardless of department/year/section/class.
+// Without q, a capped default page; q searches the full student directory.
+// Server-enforced on every write - this is just what the picker UI shows.
+export async function getEligibleStudents(q?: string): Promise<MessagePerson[]> {
+  const { data } = await apiClient.get<{ data: MessagePerson[] }>(
+    "/me/messaging/contacts/eligible-students",
+    { params: q?.trim() ? { q: q.trim() } : undefined },
+  );
+  return data.data;
+}
+
+// POST /me/messaging/conversations/group { title, studentUserIds } -
+// Faculty/HoD only. Visible to every member immediately (not deferred until
+// a first message, unlike a DM).
+export async function createGroupConversation(
+  title: string,
+  studentUserIds: number[],
+): Promise<ConversationSummary> {
+  const { data } = await apiClient.post<{ data: ConversationSummary }>(
+    "/me/messaging/conversations/group",
+    { title, studentUserIds },
+  );
+  return data.data;
+}
+
+// GET /me/messaging/conversations/:id - any current participant.
+export async function getGroupDetails(conversationId: number): Promise<GroupDetails> {
+  const { data } = await apiClient.get<{ data: GroupDetails }>(
+    `/me/messaging/conversations/${conversationId}`,
+  );
+  return data.data;
+}
+
+// PATCH /me/messaging/conversations/:id { title } - group owner only.
+export async function updateGroupTitle(conversationId: number, title: string): Promise<GroupDetails> {
+  const { data } = await apiClient.patch<{ data: GroupDetails }>(
+    `/me/messaging/conversations/${conversationId}`,
+    { title },
+  );
+  return data.data;
+}
+
+// POST /me/messaging/conversations/:id/image (multipart, field "file") -
+// group owner only. Same FormData shape as profile.api.ts's uploadMyResume.
+export async function uploadGroupImage(
+  conversationId: number,
+  file: { uri: string; name: string; mimeType: string },
+): Promise<GroupDetails> {
+  const formData = new FormData();
+  formData.append("file", { uri: file.uri, name: file.name, type: file.mimeType } as unknown as Blob);
+  const { data } = await apiClient.post<{ data: GroupDetails }>(
+    `/me/messaging/conversations/${conversationId}/image`,
+    formData,
+    { headers: { "Content-Type": "multipart/form-data" } },
+  );
+  return data.data;
+}
+
+// POST /me/messaging/conversations/:id/members { studentUserIds } - group
+// owner only, re-validated server-side against the same eligible-students
+// set. Idempotent - ids already a member are silently skipped.
+export async function addGroupMembers(conversationId: number, studentUserIds: number[]): Promise<GroupDetails> {
+  const { data } = await apiClient.post<{ data: GroupDetails }>(
+    `/me/messaging/conversations/${conversationId}/members`,
+    { studentUserIds },
+  );
+  return data.data;
+}
+
+// DELETE /me/messaging/conversations/:id/members/:userId - group owner only.
+export async function removeGroupMember(conversationId: number, userId: number): Promise<GroupDetails> {
+  const { data } = await apiClient.delete<{ data: GroupDetails }>(
+    `/me/messaging/conversations/${conversationId}/members/${userId}`,
+  );
+  return data.data;
+}
+
+// DELETE /me/messaging/conversations/:id - group owner only.
+export async function deleteGroup(conversationId: number): Promise<void> {
+  await apiClient.delete(`/me/messaging/conversations/${conversationId}`);
+}
+
+// PATCH /me/messaging/conversations/:id/pin | .../unpin - any current
+// participant, personal to the caller only (never visible to other
+// participants' own lists).
+export async function pinConversation(conversationId: number): Promise<ConversationSummary> {
+  const { data } = await apiClient.patch<{ data: ConversationSummary }>(
+    `/me/messaging/conversations/${conversationId}/pin`,
+  );
+  return data.data;
+}
+
+export async function unpinConversation(conversationId: number): Promise<ConversationSummary> {
+  const { data } = await apiClient.patch<{ data: ConversationSummary }>(
+    `/me/messaging/conversations/${conversationId}/unpin`,
   );
   return data.data;
 }
@@ -119,4 +251,106 @@ export async function editMessage(messageId: number, body: string): Promise<void
 // DELETE /me/messaging/messages/:id - sender-only soft delete.
 export async function deleteMessage(messageId: number): Promise<void> {
   await apiClient.delete(`/me/messaging/messages/${messageId}`);
+}
+
+// ─────────────────────── student-to-student chat requests ───────────────────────
+// Students can't DM each other directly - one side must send a request and
+// the other must accept it before the normal DM endpoints above (POST
+// /conversations, message:send) will work between them. See
+// message-requests.service.ts.
+
+export type ChatRequestStatus = "pending" | "accepted" | "rejected";
+
+export type ChatRequest = {
+  requestId: number;
+  senderUserId: number;
+  receiverUserId: number;
+  status: ChatRequestStatus;
+  sender: MessagePerson | null;
+  createdAt: string;
+};
+
+export type RelationshipStatus =
+  | { status: "self" }
+  | { status: "none" }
+  | { status: "pending_sent"; requestId: number }
+  | { status: "pending_received"; requestId: number }
+  | { status: "accepted"; conversationId: number | null };
+
+// POST /me/messaging/requests { receiverUserId } - student only.
+export async function sendChatRequest(receiverUserId: number): Promise<ChatRequest> {
+  const { data } = await apiClient.post<{ data: ChatRequest }>("/me/messaging/requests", {
+    receiverUserId,
+  });
+  return data.data;
+}
+
+// GET /me/messaging/requests/incoming - pending requests sent TO me.
+export async function listIncomingChatRequests(): Promise<ChatRequest[]> {
+  const { data } = await apiClient.get<{ data: ChatRequest[] }>("/me/messaging/requests/incoming");
+  return data.data;
+}
+
+// GET /me/messaging/requests/sent - pending requests I sent.
+export async function listSentChatRequests(): Promise<ChatRequest[]> {
+  const { data } = await apiClient.get<{ data: ChatRequest[] }>("/me/messaging/requests/sent");
+  return data.data;
+}
+
+// GET /me/messaging/requests/status/:userId - drives the "Send Message
+// Request" / "Request Sent" / "Accept · Reject" / "Message" button state on
+// another student's profile/contact row.
+export async function getRelationshipStatus(otherUserId: number): Promise<RelationshipStatus> {
+  const { data } = await apiClient.get<{ data: RelationshipStatus }>(
+    `/me/messaging/requests/status/${otherUserId}`,
+  );
+  return data.data;
+}
+
+// POST /me/messaging/requests/:id/accept - creates/activates the DM
+// conversation and returns it, ready to open immediately.
+export async function acceptChatRequest(requestId: number): Promise<ConversationSummary> {
+  const { data } = await apiClient.post<{ data: ConversationSummary }>(
+    `/me/messaging/requests/${requestId}/accept`,
+  );
+  return data.data;
+}
+
+// POST /me/messaging/requests/:id/reject
+export async function rejectChatRequest(requestId: number): Promise<void> {
+  await apiClient.post(`/me/messaging/requests/${requestId}/reject`);
+}
+
+// ─────────────────────── student-created-group invitations ───────────────────────
+// A student group owner's selections become pending invitations, not active
+// members - see MessagingService.createGroupInvites. Faculty/HoD groups
+// never generate one of these; their adds are immediate.
+
+export type GroupInvite = {
+  requestId: number;
+  conversationId: number | null;
+  groupTitle: string | null;
+  groupImageUrl: string | null;
+  invitedBy: MessagePerson | null;
+  createdAt: string;
+};
+
+// GET /me/messaging/group-invites - pending invitations sent to me.
+export async function listGroupInvites(): Promise<GroupInvite[]> {
+  const { data } = await apiClient.get<{ data: GroupInvite[] }>("/me/messaging/group-invites");
+  return data.data;
+}
+
+// POST /me/messaging/group-invites/:id/accept - adds me as an active member
+// and returns the group's details, ready to open immediately.
+export async function acceptGroupInvite(requestId: number): Promise<GroupDetails> {
+  const { data } = await apiClient.post<{ data: GroupDetails }>(
+    `/me/messaging/group-invites/${requestId}/accept`,
+  );
+  return data.data;
+}
+
+// POST /me/messaging/group-invites/:id/reject
+export async function rejectGroupInvite(requestId: number): Promise<void> {
+  await apiClient.post(`/me/messaging/group-invites/${requestId}/reject`);
 }

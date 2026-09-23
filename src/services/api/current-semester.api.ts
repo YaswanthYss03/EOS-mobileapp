@@ -73,11 +73,17 @@ export async function getLmsNoteCountForSubject(subjectId: number): Promise<numb
   return data.data.meta.total;
 }
 
-// GET /me/profile only for class_section - see
+// GET /me/profile for class_section + current_semester - see
 // EOS-backend/src/modules/admissions/students/me-profile/me-profile.service.ts.
-export async function getMyClassSection(): Promise<string | null> {
-  const { data } = await apiClient.get<{ data: { class_section: string | null } }>("/me/profile");
-  return data.data.class_section;
+// current_semester is the student's own classes.current_semester (their real
+// current semester, e.g. 7) - this is the one place that number can be
+// resolved from, since a student's own semester range isn't exposed
+// anywhere else.
+export type MyClassSection = { class_section: string | null; current_semester: number | null };
+
+export async function getMyClassSection(): Promise<MyClassSection> {
+  const { data } = await apiClient.get<{ data: MyClassSection }>("/me/profile");
+  return { class_section: data.data.class_section, current_semester: data.data.current_semester };
 }
 
 // GET /me/current-semester (Faculty/HoD) - see

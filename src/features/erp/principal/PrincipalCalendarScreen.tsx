@@ -6,11 +6,11 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
-  Modal,
   StyleSheet,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnchoredDropdown, useDropdown } from "@/components/ui/dropdown";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -20,6 +20,7 @@ import {
   type MyAcademicCalendar,
 } from "@/services/api/academic-calendar.api";
 import { getDrivesForCalendar, type CalendarDrive } from "@/services/api/placements.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import {
   listPersonalCalendarEntries,
   createPersonalCalendarEntry,
@@ -70,7 +71,7 @@ export function PrincipalCalendarScreen() {
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
   const [selectedDate, setSelectedDate] = useState(toIsoDate(today));
-  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+  const monthPicker = useDropdown();
 
   const [calendar, setCalendar] = useState<MyAcademicCalendar | null>(null);
   const [calendarStatus, setCalendarStatus] = useState<LoadStatus>("loading");
@@ -85,7 +86,7 @@ export function PrincipalCalendarScreen() {
   const [formEntryId, setFormEntryId] = useState<number | null>(null);
   const [formTitle, setFormTitle] = useState("");
   const [formCategory, setFormCategory] = useState<PersonalCalendarEntryCategory>("personal");
-  const [formCategoryPickerOpen, setFormCategoryPickerOpen] = useState(false);
+  const categoryPicker = useDropdown();
   const [formDetails, setFormDetails] = useState("");
   const [formSaving, setFormSaving] = useState(false);
 
@@ -253,6 +254,7 @@ export function PrincipalCalendarScreen() {
 
   return (
     <View style={styles.container}>
+      <WatermarkBackground />
       <View style={styles.headerRow}>
         <View style={styles.headerTextWrap}>
           <Text style={styles.headerTitle}>Events</Text>
@@ -294,10 +296,12 @@ export function PrincipalCalendarScreen() {
               <TouchableOpacity style={styles.navButton} onPress={() => goToMonth(1)}>
                 <Ionicons name="chevron-forward" size={18} color="#2F6FE0" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.monthPickerButton} onPress={() => setMonthPickerOpen(true)}>
-                <Text style={styles.monthPickerButtonText}>{MONTH_NAMES[viewMonth].slice(0, 3)}</Text>
-                <Ionicons name="chevron-down" size={14} color="#2F6FE0" />
-              </TouchableOpacity>
+              <View ref={monthPicker.anchorRef} collapsable={false}>
+                <TouchableOpacity style={styles.monthPickerButton} onPress={monthPicker.open}>
+                  <Text style={styles.monthPickerButtonText}>{MONTH_NAMES[viewMonth].slice(0, 3)}</Text>
+                  <Ionicons name="chevron-down" size={14} color="#2F6FE0" />
+                </TouchableOpacity>
+              </View>
             </View>
 
             <View style={styles.weekdayRow}>
@@ -385,10 +389,12 @@ export function PrincipalCalendarScreen() {
             />
 
             <Text style={styles.fieldLabel}>Mark this date as</Text>
-            <TouchableOpacity style={styles.selectInput} onPress={() => setFormCategoryPickerOpen(true)} activeOpacity={0.8}>
-              <Text style={styles.selectInputText}>{CATEGORY_LABEL[formCategory]}</Text>
-              <Ionicons name="chevron-down" size={16} color="#6B7280" />
-            </TouchableOpacity>
+            <View ref={categoryPicker.anchorRef} collapsable={false}>
+              <TouchableOpacity style={styles.selectInput} onPress={categoryPicker.open} activeOpacity={0.8}>
+                <Text style={styles.selectInputText}>{CATEGORY_LABEL[formCategory]}</Text>
+                <Ionicons name="chevron-down" size={16} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
 
             <Text style={styles.fieldLabel}>Details</Text>
             <TextInput
@@ -450,55 +456,52 @@ export function PrincipalCalendarScreen() {
       )}
 
       {/* Month picker */}
-      <Modal visible={monthPickerOpen} transparent animationType="fade" onRequestClose={() => setMonthPickerOpen(false)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setMonthPickerOpen(false)}>
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>Jump to month</Text>
-            <ScrollView style={styles.modalList}>
-              {MONTH_NAMES.map((name, index) => (
-                <TouchableOpacity
-                  key={name}
-                  style={styles.modalOptionRow}
-                  onPress={() => {
-                    setViewMonth(index);
-                    setMonthPickerOpen(false);
-                  }}
-                >
-                  <Text style={styles.modalOptionName}>{name}</Text>
-                  {index === viewMonth && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+      <AnchoredDropdown
+        anchorRef={monthPicker.anchorRef}
+        visible={monthPicker.visible}
+        onClose={monthPicker.close}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
+      >
+        <Text style={styles.modalTitle}>Jump to month</Text>
+        <ScrollView style={styles.modalList}>
+          {MONTH_NAMES.map((name, index) => (
+            <TouchableOpacity
+              key={name}
+              style={styles.modalOptionRow}
+              onPress={() => {
+                setViewMonth(index);
+                monthPicker.close();
+              }}
+            >
+              <Text style={styles.modalOptionName}>{name}</Text>
+              {index === viewMonth && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </AnchoredDropdown>
 
       {/* Category picker */}
-      <Modal
-        visible={formCategoryPickerOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setFormCategoryPickerOpen(false)}
+      <AnchoredDropdown
+        anchorRef={categoryPicker.anchorRef}
+        visible={categoryPicker.visible}
+        onClose={categoryPicker.close}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
       >
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setFormCategoryPickerOpen(false)}>
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>Mark this date as</Text>
-            {(Object.keys(CATEGORY_LABEL) as PersonalCalendarEntryCategory[]).map((category) => (
-              <TouchableOpacity
-                key={category}
-                style={styles.modalOptionRow}
-                onPress={() => {
-                  setFormCategory(category);
-                  setFormCategoryPickerOpen(false);
-                }}
-              >
-                <Text style={styles.modalOptionName}>{CATEGORY_LABEL[category]}</Text>
-                {category === formCategory && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
-              </TouchableOpacity>
-            ))}
+        <Text style={styles.modalTitle}>Mark this date as</Text>
+        {(Object.keys(CATEGORY_LABEL) as PersonalCalendarEntryCategory[]).map((category) => (
+          <TouchableOpacity
+            key={category}
+            style={styles.modalOptionRow}
+            onPress={() => {
+              setFormCategory(category);
+              categoryPicker.close();
+            }}
+          >
+            <Text style={styles.modalOptionName}>{CATEGORY_LABEL[category]}</Text>
+            {category === formCategory && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
           </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+        ))}
+      </AnchoredDropdown>
     </View>
   );
 }
@@ -828,17 +831,22 @@ const styles = StyleSheet.create({
   personalIconButton: {
     padding: 4,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.5)",
-    justifyContent: "center",
-    padding: 20,
-  },
   modalCard: {
     backgroundColor: "#fff",
     borderRadius: 18,
     padding: 18,
     maxHeight: "70%",
+  },
+  // Anchored dropdowns have no full-screen flex parent to resolve modalCard's
+  // percentage maxHeight against, so pin a concrete size here instead.
+  anchoredCard: {
+    width: 260,
+    maxHeight: 320,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   modalTitle: {
     fontSize: 15,

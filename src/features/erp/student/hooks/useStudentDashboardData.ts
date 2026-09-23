@@ -11,6 +11,7 @@ import { listMyFeedbackForms } from "@/services/api/feedback.api";
 import { listMyAssignmentStatuses } from "@/services/api/no-due.api";
 import { getMyAppointments } from "@/services/api/medical-appointments.api";
 import { getMyClassSection } from "@/services/api/current-semester.api";
+import { computeCreditWeightedGpa } from "@/utils/grading";
 import { defaultSemester, semesterNumber } from "../../student-performance/data/mockStudentPerformance";
 
 // Same window the Attendance overview screen uses for its own "overall" %
@@ -82,9 +83,18 @@ export function useStudentDashboardData(): StudentDashboardData {
       if (!cancelled) setData((prev) => ({ ...prev, ...patch }));
     };
 
-    getMyClassSection()
-      .then((classSection) => set({ classSection }))
-      .catch(() => {});
+    // Resolves the student's REAL current semester (classes.current_semester,
+    // e.g. 7) rather than the hardcoded defaultSemester fallback below -
+    // querying exam results under the wrong semester number returns nothing
+    // even when that student's real, current-semester marks are fully
+    // published (a different, unrelated cohort can legitimately occupy the
+    // "Semester 5" slot the old hardcoded default pointed at).
+    const currentSemesterPromise = getMyClassSection()
+      .then(({ class_section, current_semester }) => {
+        set({ classSection: class_section });
+        return current_semester ?? semesterNumber(defaultSemester);
+      })
+      .catch(() => semesterNumber(defaultSemester));
 
     const to = new Date();
     const from = new Date();
@@ -103,23 +113,25 @@ export function useStudentDashboardData(): StudentDashboardData {
       })
       .catch(() => set({ attendance: FAILED }));
 
-    getMyExamResults(semesterNumber(defaultSemester))
+    currentSemesterPromise
+      .then((semesterNum) => getMyExamResults(semesterNum))
       .then((res) => {
-        // Prefer the semester exam once it's published; otherwise fall back
-        // to the most recent internal - same precedence a student would
-        // read the Performance screen in (semester exam tab first).
-        const latestInternal = res.internals[res.internals.length - 1] ?? null;
-        const group = res.semester_exam ?? latestInternal;
-        if (!group || group.marks_total <= 0) {
-          set({ performance: { value: "–", subtitle: "No results yet", progress: 0, loading: false } });
+        // Overall CGPA, not a raw percentage - and only ever from the
+        // official end-semester exam (internals are formative assessment,
+        // never part of a real CGPA), same rule the credit-weighted
+        // calculation itself already enforces. No fallback to internals
+        // here: a percentage from an internal isn't a CGPA, so there's
+        // nothing honest to show until the semester exam is published.
+        const gpa = res.semester_exam ? computeCreditWeightedGpa(res.semester_exam.subjects) : null;
+        if (gpa === null) {
+          set({ performance: { value: "–", subtitle: "No CGPA yet", progress: 0, loading: false } });
           return;
         }
-        const pct = (group.marks_obtained / group.marks_total) * 100;
         set({
           performance: {
-            value: `${pct.toFixed(1)}%`,
-            subtitle: group.title,
-            progress: pct / 100,
+            value: gpa.toFixed(2),
+            subtitle: "CGPA",
+            progress: gpa / 10,
             loading: false,
           },
         });

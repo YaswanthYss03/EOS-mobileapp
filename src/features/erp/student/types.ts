@@ -28,6 +28,7 @@ export type StatCardItem = StatCardConfig & {
   value: string;
   subtitle: string;
   progress: number;
+  loading?: boolean;
 };
 
 export type CampusItem = CampusItemConfig & {

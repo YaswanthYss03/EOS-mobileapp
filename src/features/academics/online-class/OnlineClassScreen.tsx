@@ -7,6 +7,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -19,6 +20,7 @@ import {
   type MyTodayClassSlot,
 } from "@/services/api/current-semester.api";
 import { getMyTeachingSubjects, type LmsTeachingSubject } from "@/services/api/lms.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import {
   getTodayOnlineClasses,
   getMyScheduledClasses,
@@ -228,6 +230,7 @@ export function OnlineClassScreen() {
   const [scheduled, setScheduled] = useState<OnlineClass[]>([]);
   const [teachingSubjects, setTeachingSubjects] = useState<LmsTeachingSubject[]>([]);
   const [formOpen, setFormOpen] = useState(false);
+  const scrollMemory = useTabScrollMemory();
 
   const load = useCallback(() => {
     setStatus("loading");
@@ -279,10 +282,18 @@ export function OnlineClassScreen() {
 
   const scheduledItems = useMemo(() => buildScheduledItems(scheduled, teachingSubjects), [scheduled, teachingSubjects]);
 
+  // A faculty/HoD reaches this screen via the erp tab's own local copy (see
+  // app/(tabs)/erp/online-class/index.tsx) so it never crosses into the
+  // Campus tab, which is hidden from their bottom nav entirely - crossing
+  // into a hidden tab left the Tabs navigator's own back-stack corrupted
+  // (the exact "switching tabs exits the app" bug). A student uses their
+  // own dedicated Campus tab instead, unchanged.
+  const basePath = role === "employee" || role === "hod" ? "/(tabs)/erp/online-class" : "/(tabs)/academics/online-class";
+
   function handleJoin(session: TodaySession) {
     if (!session.onlineClassId) return;
     router.push({
-      pathname: "/(tabs)/academics/online-class/join",
+      pathname: `${basePath}/join`,
       params: {
         mode: "join",
         onlineClassId: String(session.onlineClassId),
@@ -297,7 +308,7 @@ export function OnlineClassScreen() {
   function handleStart(session: TodaySession) {
     if (!session.classId) return;
     router.push({
-      pathname: "/(tabs)/academics/online-class/join",
+      pathname: `${basePath}/join`,
       params: {
         mode: "start",
         subjectId: String(session.subjectId),
@@ -312,7 +323,7 @@ export function OnlineClassScreen() {
 
   function handleStartScheduled(item: ScheduledItem) {
     router.push({
-      pathname: "/(tabs)/academics/online-class/join",
+      pathname: `${basePath}/join`,
       params: {
         mode: "start",
         subjectId: String(item.subjectId),
@@ -338,6 +349,7 @@ export function OnlineClassScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <OnlineClassHeader
         // A faculty member or HoD reaches this via the Class tab's own
         // Campus grid (a separate tab's Stack) - see TimetableScreen's
@@ -352,98 +364,125 @@ export function OnlineClassScreen() {
       />
 
       {isFaculty && (
-        <View style={styles.tabRow}>
-          <TouchableOpacity
-            style={[styles.tabButton, tab === "schedule" && styles.tabButtonActive]}
-            onPress={() => setTab("schedule")}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.tabButtonText, tab === "schedule" && styles.tabButtonTextActive]}>Schedule</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabButton, tab === "recordings" && styles.tabButtonActive]}
-            onPress={() => setTab("recordings")}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.tabButtonText, tab === "recordings" && styles.tabButtonTextActive]}>Recordings</Text>
-          </TouchableOpacity>
-        </View>
+        <AnimatedTabBar
+          tabs={[
+            { key: "schedule" as FacultyTab, label: "Schedule" },
+            { key: "recordings" as FacultyTab, label: "Recordings" },
+          ]}
+          active={tab}
+          onChange={setTab}
+          containerStyle={styles.tabRow}
+          tabStyle={styles.tabButton}
+          tabTextStyle={styles.tabButtonText}
+          activeTabTextStyle={styles.tabButtonTextActive}
+          indicatorStyle={styles.tabIndicator}
+        />
       )}
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {(!isFaculty || tab === "schedule") && (
-          <>
-            <Text style={styles.sectionLabel}>Today's sessions</Text>
-            {status === "loading" ? (
-              <SkeletonListRows count={3} />
-            ) : status === "error" ? (
-              <View style={styles.centerState}>
-                <Ionicons name="cloud-offline-outline" size={26} color="#B0B7C3" />
-                <Text style={styles.centerStateText}>Couldn't load today's timetable.</Text>
-                <TouchableOpacity onPress={load} activeOpacity={0.8}>
-                  <Text style={styles.retryText}>Tap to retry</Text>
-                </TouchableOpacity>
-              </View>
-            ) : sessions.length === 0 ? (
-              <View style={styles.centerState}>
-                <Ionicons name="calendar-outline" size={26} color="#B0B7C3" />
-                <Text style={styles.centerStateText}>No more classes scheduled for today.</Text>
-              </View>
-            ) : (
-              sessions.map((session) => (
-                <SessionCard
-                  key={session.id}
-                  session={session}
-                  isFaculty={isFaculty}
-                  onJoin={() => handleJoin(session)}
-                  onStart={() => handleStart(session)}
-                />
-              ))
-            )}
-
-            {isFaculty && (
-              <>
-                <View style={styles.scheduleSectionHeader}>
-                  <Text style={styles.sectionLabel}>Upcoming scheduled</Text>
-                  <TouchableOpacity style={styles.scheduleAddButton} onPress={() => setFormOpen(true)} activeOpacity={0.85}>
-                    <Ionicons name="add" size={16} color="#fff" />
-                    <Text style={styles.scheduleAddButtonText}>Schedule a class</Text>
+      {isFaculty ? (
+        <TabTransitionView activeKey={tab} order={["schedule", "recordings"]} style={styles.tabContent}>
+          {tab === "schedule" ? (
+            <ScrollView
+              contentContainerStyle={styles.content}
+              showsVerticalScrollIndicator={false}
+              {...scrollMemory.bind("schedule")}
+            >
+              <Text style={styles.sectionLabel}>Today's sessions</Text>
+              {status === "loading" ? (
+                <SkeletonListRows count={3} />
+              ) : status === "error" ? (
+                <View style={styles.centerState}>
+                  <Ionicons name="cloud-offline-outline" size={26} color="#B0B7C3" />
+                  <Text style={styles.centerStateText}>Couldn't load today's timetable.</Text>
+                  <TouchableOpacity onPress={load} activeOpacity={0.8}>
+                    <Text style={styles.retryText}>Tap to retry</Text>
                   </TouchableOpacity>
                 </View>
-                {status === "success" && scheduledItems.length === 0 ? (
-                  <View style={styles.centerState}>
-                    <Ionicons name="time-outline" size={26} color="#B0B7C3" />
-                    <Text style={styles.centerStateText}>Nothing scheduled yet.</Text>
-                  </View>
-                ) : (
-                  scheduledItems.map((item) => (
-                    <ScheduledCard key={item.id} item={item} onStart={() => handleStartScheduled(item)} />
-                  ))
-                )}
-              </>
-            )}
-          </>
-        )}
+              ) : sessions.length === 0 ? (
+                <View style={styles.centerState}>
+                  <Ionicons name="calendar-outline" size={26} color="#B0B7C3" />
+                  <Text style={styles.centerStateText}>No more classes scheduled for today.</Text>
+                </View>
+              ) : (
+                sessions.map((session) => (
+                  <SessionCard
+                    key={session.id}
+                    session={session}
+                    isFaculty={isFaculty}
+                    onJoin={() => handleJoin(session)}
+                    onStart={() => handleStart(session)}
+                  />
+                ))
+              )}
 
-        {isFaculty && tab === "recordings" && (
-          <>
-            <Text style={styles.sectionLabel}>Recordings</Text>
-            <Text style={styles.mockNotice}>Sample data - not wired to real recordings yet.</Text>
-            {RECORDINGS.map((recording) => (
-              <RecordingRow key={recording.id} recording={recording} onWatch={() => handleWatch(recording)} />
-            ))}
-          </>
-        )}
+              <View style={styles.scheduleSectionHeader}>
+                <Text style={styles.sectionLabel}>Upcoming scheduled</Text>
+                <TouchableOpacity style={styles.scheduleAddButton} onPress={() => setFormOpen(true)} activeOpacity={0.85}>
+                  <Ionicons name="add" size={16} color="#fff" />
+                  <Text style={styles.scheduleAddButtonText}>Schedule a class</Text>
+                </TouchableOpacity>
+              </View>
+              {status === "success" && scheduledItems.length === 0 ? (
+                <View style={styles.centerState}>
+                  <Ionicons name="time-outline" size={26} color="#B0B7C3" />
+                  <Text style={styles.centerStateText}>Nothing scheduled yet.</Text>
+                </View>
+              ) : (
+                scheduledItems.map((item) => (
+                  <ScheduledCard key={item.id} item={item} onStart={() => handleStartScheduled(item)} />
+                ))
+              )}
+            </ScrollView>
+          ) : (
+            <ScrollView
+              contentContainerStyle={styles.content}
+              showsVerticalScrollIndicator={false}
+              {...scrollMemory.bind("recordings")}
+            >
+              <Text style={styles.sectionLabel}>Recordings</Text>
+              <Text style={styles.mockNotice}>Sample data - not wired to real recordings yet.</Text>
+              {RECORDINGS.map((recording) => (
+                <RecordingRow key={recording.id} recording={recording} onWatch={() => handleWatch(recording)} />
+              ))}
+            </ScrollView>
+          )}
+        </TabTransitionView>
+      ) : (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <Text style={styles.sectionLabel}>Today's sessions</Text>
+          {status === "loading" ? (
+            <SkeletonListRows count={3} />
+          ) : status === "error" ? (
+            <View style={styles.centerState}>
+              <Ionicons name="cloud-offline-outline" size={26} color="#B0B7C3" />
+              <Text style={styles.centerStateText}>Couldn't load today's timetable.</Text>
+              <TouchableOpacity onPress={load} activeOpacity={0.8}>
+                <Text style={styles.retryText}>Tap to retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : sessions.length === 0 ? (
+            <View style={styles.centerState}>
+              <Ionicons name="calendar-outline" size={26} color="#B0B7C3" />
+              <Text style={styles.centerStateText}>No more classes scheduled for today.</Text>
+            </View>
+          ) : (
+            sessions.map((session) => (
+              <SessionCard
+                key={session.id}
+                session={session}
+                isFaculty={isFaculty}
+                onJoin={() => handleJoin(session)}
+                onStart={() => handleStart(session)}
+              />
+            ))
+          )}
 
-        {!isFaculty && (
-          <>
-            <Text style={styles.sectionLabel}>Recordings</Text>
-            {RECORDINGS.map((recording) => (
-              <RecordingRow key={recording.id} recording={recording} onWatch={() => handleWatch(recording)} />
-            ))}
-          </>
-        )}
-      </ScrollView>
+          <Text style={styles.sectionLabel}>Recordings</Text>
+          {RECORDINGS.map((recording) => (
+            <RecordingRow key={recording.id} recording={recording} onWatch={() => handleWatch(recording)} />
+          ))}
+        </ScrollView>
+      )}
 
       {isFaculty && (
         <ScheduleFormModal
@@ -718,7 +757,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -757,6 +795,12 @@ const styles = StyleSheet.create({
   tabButtonActive: {
     backgroundColor: "#2F6FE0",
   },
+  tabIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
+    backgroundColor: "#2F6FE0",
+  },
   tabButtonText: {
     fontSize: 13,
     fontFamily: fonts.semibold,
@@ -769,6 +813,9 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 40,
+  },
+  tabContent: {
+    flex: 1,
   },
   sectionLabel: {
     fontSize: 12,

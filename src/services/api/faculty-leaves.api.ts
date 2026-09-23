@@ -15,6 +15,10 @@ export type MyFacultyLeave = {
   reason: string | null;
   hod_approval_status: FacultyLeaveApprovalStatus;
   hr_approval_status: FacultyLeaveApprovalStatus;
+  // Only non-null for a Principal-authored request (Switch Account-style
+  // independent stage - see faculty-leaves.service.ts's computeOverallStatus).
+  // null for every Faculty/HoD/Secretary/HR Payroll/Warden request.
+  correspondent_approval_status: FacultyLeaveApprovalStatus | null;
   overall_status: FacultyLeaveApprovalStatus;
   created_at: string;
   // Only present on the HoD/HR-facing lists (getHodFacultyLeaves,
@@ -34,7 +38,7 @@ export type MyFacultyLeave = {
    * (Secretary / HR Payroll / warden), because faculty_id is nullable.
    */
   requester?: {
-    kind: "faculty" | "staff" | "unknown";
+    kind: "faculty" | "staff" | "principal" | "unknown";
     name: string;
     designation: string | null;
     department: string | null;
@@ -104,6 +108,30 @@ export async function reviewFacultyLeaveAsHr(
 ): Promise<MyFacultyLeave> {
   const { data } = await apiClient.patch<{ data: MyFacultyLeave }>(`/me/faculty-leaves/${id}`, {
     hr_approval_status: decision,
+  });
+  return data.data;
+}
+
+// Correspondent's "Leave Approval" queue — same GET /me/faculty-leaves
+// endpoint, role-branched server-side to only Principal-authored requests
+// (correspondent_approval_status non-null), see FacultyLeavesService.findAll.
+export async function getCorrespondentLeaveRequests(): Promise<MyFacultyLeave[]> {
+  const { data } = await apiClient.get<{ data: { data: MyFacultyLeave[] } }>("/me/faculty-leaves", {
+    params: { limit: 100 },
+  });
+  return data.data.data;
+}
+
+// PATCH /me/faculty-leaves/:id (Correspondent only sets
+// correspondent_approval_status, on a Principal-authored request only —
+// see FacultyLeavesService.update). Independent of hod/hr — never gated on
+// them, unlike HR's stage above.
+export async function correspondentApproveLeave(
+  id: number,
+  decision: "approved" | "rejected",
+): Promise<MyFacultyLeave> {
+  const { data } = await apiClient.patch<{ data: MyFacultyLeave }>(`/me/faculty-leaves/${id}`, {
+    correspondent_approval_status: decision,
   });
   return data.data;
 }

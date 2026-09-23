@@ -7,15 +7,20 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
 import { formatDate } from "@/utils/calendar";
 import { getStudentOdRequests, facultyApproveOd, type StudentOdRequest } from "@/services/api/student-ods.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
-type StatusFilter = "pending" | "approved" | "rejected" | "all";
-
-const STATUS_FILTERS: StatusFilter[] = ["pending", "approved", "rejected", "all"];
+// "History" covers both approved and rejected together - there's no
+// separate filter for each, just "still needs this mentor's decision"
+// (Approval) vs "already decided" (History), matching the HoD's own
+// equivalent Pending/History screen (see
+// erp/components/ApprovalRequestsScreen.tsx).
+type Tab = "approval" | "history";
 
 function initialsFromName(name: string) {
   return name
@@ -43,7 +48,8 @@ export function StudentOdScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
+  const [tab, setTab] = useState<Tab>("approval");
+  const scrollMemory = useTabScrollMemory();
   const [requests, setRequests] = useState<StudentOdRequest[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [errored, setErrored] = useState(false);
@@ -82,20 +88,18 @@ export function StudentOdScreen() {
     };
   }, [reloadToken]);
 
-  const counts = useMemo(() => {
-    const list = requests ?? [];
-    return {
-      pending: list.filter((r) => r.mentor_approval_status === "pending").length,
-      approved: list.filter((r) => r.mentor_approval_status === "approved").length,
-      rejected: list.filter((r) => r.mentor_approval_status === "rejected").length,
-      all: list.length,
-    };
-  }, [requests]);
-
-  const filteredRequests = useMemo(
-    () => (requests ?? []).filter((r) => statusFilter === "all" || r.mentor_approval_status === statusFilter),
-    [requests, statusFilter],
+  const approvalRequests = useMemo(
+    () => (requests ?? []).filter((r) => r.mentor_approval_status === "pending"),
+    [requests],
   );
+
+  const historyRequests = useMemo(
+    () => (requests ?? []).filter((r) => r.mentor_approval_status !== "pending"),
+    [requests],
+  );
+
+  const totalCount = requests?.length ?? 0;
+  const filteredRequests = tab === "approval" ? approvalRequests : historyRequests;
 
   // The distinct sections this mentor covers - a Class Mentor can mentor
   // more than one class, so this isn't always a single fixed section.
@@ -123,6 +127,7 @@ export function StudentOdScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -142,10 +147,12 @@ export function StudentOdScreen() {
         </View>
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {loading ? (
+      {loading ? (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <SkeletonListRows count={4} />
-        ) : errored ? (
+        </ScrollView>
+      ) : errored ? (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.centerState}>
             <Ionicons name="cloud-offline-outline" size={32} color="#B0B7C3" />
             <Text style={styles.centerStateText}>Couldn't load your review queue.</Text>
@@ -153,56 +160,66 @@ export function StudentOdScreen() {
               <Text style={styles.retryText}>Tap to retry</Text>
             </TouchableOpacity>
           </View>
-        ) : (
-          <>
-            <View style={styles.contextCard}>
-              <View style={styles.contextIconWrap}>
-                <Ionicons name="school-outline" size={16} color="#2F6FE0" />
-              </View>
-              <View style={styles.contextTextWrap}>
-                <Text style={styles.contextTitle}>
-                  {sectionsCovered.length > 0 ? sectionsCovered.join(" · ") : "No mentored class yet"}
-                </Text>
-                <Text style={styles.contextSubtitle}>{counts.all} on-duty requests · Class Mentor</Text>
-              </View>
-              <View style={styles.myClassBadge}>
-                <Text style={styles.myClassBadgeText}>MY CLASS</Text>
-              </View>
-            </View>
+        </ScrollView>
+      ) : (
+        <>
+          <View style={styles.tabSwitchWrap}>
+            <AnimatedTabBar
+              tabs={[
+                { key: "approval" as Tab, label: `Approval ${approvalRequests.length > 0 ? `(${approvalRequests.length})` : ""}`.trimEnd() },
+                { key: "history" as Tab, label: "History" },
+              ]}
+              active={tab}
+              onChange={setTab}
+              containerStyle={styles.tabSwitch}
+              tabStyle={styles.tabSwitchButton}
+              tabTextStyle={styles.tabSwitchText}
+              activeTabTextStyle={styles.tabSwitchTextActive}
+              indicatorStyle={styles.tabSwitchIndicator}
+            />
+          </View>
 
-            <View style={styles.statusRow}>
-              {STATUS_FILTERS.map((status) => (
-                <TouchableOpacity
-                  key={status}
-                  style={[styles.statusPill, statusFilter === status && styles.statusPillActive]}
-                  onPress={() => setStatusFilter(status)}
-                >
-                  <Text style={[styles.statusPillText, statusFilter === status && styles.statusPillTextActive]}>
-                    {status.charAt(0).toUpperCase() + status.slice(1)} ({counts[status]})
+          <TabTransitionView activeKey={tab} order={["approval", "history"]} style={styles.tabContentArea}>
+            <ScrollView
+              contentContainerStyle={styles.content}
+              showsVerticalScrollIndicator={false}
+              {...scrollMemory.bind(tab)}
+            >
+              <View style={styles.contextCard}>
+                <View style={styles.contextIconWrap}>
+                  <Ionicons name="school-outline" size={16} color="#2F6FE0" />
+                </View>
+                <View style={styles.contextTextWrap}>
+                  <Text style={styles.contextTitle}>
+                    {sectionsCovered.length > 0 ? sectionsCovered.join(" · ") : "No mentored class yet"}
                   </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {filteredRequests.map((request) => (
-              <StudentOdCard
-                key={request.id}
-                request={request}
-                deciding={decidingId === request.id}
-                onApprove={() => handleDecision(request.id, "approved")}
-                onReject={() => handleDecision(request.id, "rejected")}
-              />
-            ))}
-
-            {filteredRequests.length === 0 && (
-              <View style={styles.emptyState}>
-                <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
-                <Text style={styles.emptyStateText}>No requests here</Text>
+                  <Text style={styles.contextSubtitle}>{totalCount} on-duty requests · Class Mentor</Text>
+                </View>
+                <View style={styles.myClassBadge}>
+                  <Text style={styles.myClassBadgeText}>MY CLASS</Text>
+                </View>
               </View>
-            )}
-          </>
-        )}
-      </ScrollView>
+
+              {filteredRequests.map((request) => (
+                <StudentOdCard
+                  key={request.id}
+                  request={request}
+                  deciding={decidingId === request.id}
+                  onApprove={() => handleDecision(request.id, "approved")}
+                  onReject={() => handleDecision(request.id, "rejected")}
+                />
+              ))}
+
+              {filteredRequests.length === 0 && (
+                <View style={styles.emptyState}>
+                  <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
+                  <Text style={styles.emptyStateText}>No requests here</Text>
+                </View>
+              )}
+            </ScrollView>
+          </TabTransitionView>
+        </>
+      )}
     </SafeAreaView>
   );
 }
@@ -225,6 +242,17 @@ function StudentOdCard({
 
   return (
     <View style={styles.card}>
+      <View style={[styles.parentAckBadge, request.parent_acknowledged ? styles.parentAckBadgeYes : styles.parentAckBadgeNo]}>
+        <Ionicons
+          name={request.parent_acknowledged ? "checkmark-circle" : "ellipse-outline"}
+          size={10}
+          color={request.parent_acknowledged ? "#16A34A" : "#D97706"}
+        />
+        <Text style={[styles.parentAckBadgeText, { color: request.parent_acknowledged ? "#16A34A" : "#D97706" }]}>
+          {request.parent_acknowledged ? "Parent acknowledged" : "Parent not acknowledged"}
+        </Text>
+      </View>
+
       <View style={styles.cardHeader}>
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>{initialsFromName(creator.name)}</Text>
@@ -319,7 +347,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -333,6 +361,43 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: fonts.medium,
     marginTop: 2,
+  },
+  tabSwitchWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
+  tabContentArea: {
+    flex: 1,
+  },
+  tabSwitch: {
+    flexDirection: "row",
+    backgroundColor: "#E5E7EB",
+    borderRadius: 12,
+    padding: 4,
+    gap: 4,
+    marginBottom: 4,
+  },
+  tabSwitchButton: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 9,
+    paddingVertical: 12,
+  },
+  tabSwitchIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
+    backgroundColor: "#2F6FE0",
+  },
+  tabSwitchText: {
+    fontSize: 13,
+    fontFamily: fonts.semibold,
+    color: "#6B7280",
+  },
+  tabSwitchTextActive: {
+    color: "#fff",
+    fontFamily: fonts.bold,
   },
   content: {
     padding: 16,
@@ -385,34 +450,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     color: "#2F6FE0",
     letterSpacing: 0.5,
-  },
-  statusRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 14,
-  },
-  statusPill: {
-    flexGrow: 1,
-    alignItems: "center",
-    borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  statusPillActive: {
-    borderColor: "#2F6FE0",
-    borderWidth: 1.5,
-  },
-  statusPillText: {
-    fontSize: 11,
-    fontFamily: fonts.semibold,
-    color: "#4B5563",
-  },
-  statusPillTextActive: {
-    color: "#2F6FE0",
   },
   card: {
     backgroundColor: "#fff",
@@ -574,6 +611,28 @@ const styles = StyleSheet.create({
   statusBadgeText: {
     fontSize: 12,
     fontFamily: fonts.semibold,
+  },
+  // Right-aligned as the card's own first row - see StudentLeaveScreen's
+  // identical badge for why this isn't absolutely positioned.
+  parentAckBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    alignSelf: "flex-end",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginBottom: 8,
+  },
+  parentAckBadgeYes: {
+    backgroundColor: "#F0FDF4",
+  },
+  parentAckBadgeNo: {
+    backgroundColor: "#FEF3C7",
+  },
+  parentAckBadgeText: {
+    fontSize: 9.5,
+    fontFamily: fonts.bold,
   },
   centerState: {
     alignItems: "center",

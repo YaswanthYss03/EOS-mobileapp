@@ -1,11 +1,14 @@
 import { apiClient } from "./client";
 
 // Mirrors EOS-backend's library module (see EOS-backend/src/modules/library/*).
-// GET /me/library/borrow-records is student-only and self-scoped; GET
-// /library/books and /library/e-resources are shared catalogue reads (any
-// authenticated user). e_resources has no author/publisher columns at all
-// (it's generic links, not bibliographic ebook records) - only
-// title/url/format/size/license_type.
+// GET /me/library/borrow-records is self-scoped to the caller (whichever of
+// student_id/faculty_id/staff_user_id actually applies - see
+// BorrowRecordsService.findMyBorrowRecords), reachable by every role the
+// mobile app's shared Campus "Library" screen serves, not student-only
+// anymore. GET /library/books and /library/e-resources are shared catalogue
+// reads (any authenticated user). e_resources has no author/publisher
+// columns at all (it's generic links, not bibliographic ebook records) -
+// only title/url/format/size/license_type.
 export type BorrowStatus = "borrowed" | "returned" | "lost" | "damaged";
 
 export type MyBorrowRecord = {

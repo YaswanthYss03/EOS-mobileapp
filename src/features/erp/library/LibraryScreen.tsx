@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, ScrollView, TextInput, TouchableOpacity, Linking, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -7,10 +7,12 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
 import { useRole } from "@/hooks/useRole";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import {
   searchBooks,
   searchEResources,
@@ -19,9 +21,8 @@ import {
   type LibraryBook,
   type EResource,
 } from "@/services/api/library.api";
-import { libraryInfo } from "./data/mockLibrary";
 
-type Tab = "search" | "e-resources" | "borrowed" | "history";
+type Tab = "borrowed" | "e-resources" | "search" | "history";
 type LoadStatus = "loading" | "success" | "error";
 
 // Faculty/HoD's own record shape (faculty_id-scoped, nested `book`) and HR
@@ -38,9 +39,9 @@ type BorrowedItem = {
 };
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: "search", label: "Search" },
-  { id: "e-resources", label: "E-Resources" },
   { id: "borrowed", label: "Borrowed" },
+  { id: "e-resources", label: "E-Resources" },
+  { id: "search", label: "Search" },
   { id: "history", label: "History" },
 ];
 
@@ -48,21 +49,22 @@ function formatShortDate(dateOnly: string): string {
   return new Date(dateOnly).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-// Wired to GET /library/books, GET /library/e-resources and one of two real
-// book_borrow_records-backed endpoints for Borrowed/History, depending on
-// who's asking: Employee/HoD go through GET /library/borrow-records
-// (@Roles(..., 'faculty', 'hod'), self-scoped to the caller's own
-// faculty_id - a HoD account has a real faculty row of its own); HR
-// Payroll/Secretary have no faculty row at all, so they go through GET
-// /me/library/staff-borrow-records instead (self-scoped to staff_user_id -
-// see getMyStaffBorrowRecords). Both responses get normalized into the same
-// local BorrowedItem shape before hitting state, since the two backend
-// shapes don't match (nested `book` vs flat). There is no self-service
-// renew/return action anywhere in the backend for any of these roles (those
-// mutations are library/admin only), so Renew shows an honest notice
-// instead of a fake success. Reachable from the shared Employee-section
-// "Library" item on the Employee/Faculty, HoD, HR Payroll, and Secretary
-// dashboards alike.
+// Same UI/tab structure/card styles as the Student's own StudentLibraryScreen
+// (see that file) - Borrowed/E-Resources/Search/History via AnimatedTabBar,
+// a stats card above the tabs, matching card radii/shadows/colors. Only the
+// data-fetching underneath differs by role: Employee/HoD go through
+// GET /library/borrow-records (@Roles(..., 'faculty', 'hod'), self-scoped to
+// the caller's own faculty_id - a HoD account has a real faculty row of its
+// own); HR Payroll/Secretary have no faculty row at all, so they go through
+// GET /me/library/staff-borrow-records instead (self-scoped to
+// staff_user_id - see getMyStaffBorrowRecords). Both responses get
+// normalized into the same local BorrowedItem shape before hitting state,
+// since the two backend shapes don't match (nested `book` vs flat). There is
+// no self-service renew/return action anywhere in the backend for any of
+// these roles (those mutations are library/admin only), so Renew shows an
+// honest notice instead of a fake success. Reachable from the shared
+// Employee-section "Library" item on the Employee/Faculty, HoD, HR Payroll,
+// and Secretary dashboards alike.
 export function LibraryScreen() {
   const navigation = useNavigation();
   const router = useRouter();
@@ -73,7 +75,8 @@ export function LibraryScreen() {
   // role reaching this screen (Employee/HoD) uses the faculty_id-scoped
   // /library/borrow-records instead.
   const isStaffBorrower = role === "hr-payroll" || role === "secretary";
-  const [tab, setTab] = useState<Tab>("search");
+  const scrollMemory = useTabScrollMemory();
+  const [tab, setTab] = useState<Tab>("borrowed");
   const [search, setSearch] = useState("");
 
   const [catalogueStatus, setCatalogueStatus] = useState<LoadStatus>("loading");
@@ -211,8 +214,41 @@ export function LibraryScreen() {
     toast.info("Renewals must be requested at the library desk");
   }
 
+  const overdueCount = useMemo(() => borrowed.filter((b) => b.is_overdue).length, [borrowed]);
+
+  const nextDueShort = useMemo(() => {
+    const upcoming = borrowed.filter((b) => !b.is_overdue);
+    if (upcoming.length === 0) return "—";
+    const earliest = upcoming.reduce((soonest, book) =>
+      new Date(book.due_date).getTime() < new Date(soonest.due_date).getTime() ? book : soonest,
+    );
+    return formatShortDate(earliest.due_date);
+  }, [borrowed]);
+
+  // Stats card sits directly above the tab switch, same layout/spacing as
+  // the Student's own StudentLibraryScreen.
+  function renderStatsCard() {
+    return (
+      <View style={styles.statsCard}>
+        <View style={styles.statsCol}>
+          <Text style={styles.statsValue}>{borrowedStatus === "success" ? borrowed.length : "—"}</Text>
+          <Text style={styles.statsLabel}>Books issued</Text>
+        </View>
+        <View style={styles.statsCol}>
+          <Text style={styles.statsValue}>{borrowedStatus === "success" ? nextDueShort : "—"}</Text>
+          <Text style={styles.statsLabel}>Next due</Text>
+        </View>
+        <View style={styles.statsCol}>
+          <Text style={styles.statsValue}>{borrowedStatus === "success" ? overdueCount : "—"}</Text>
+          <Text style={styles.statsLabel}>Overdue</Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -226,69 +262,63 @@ export function LibraryScreen() {
         >
           <Ionicons name="arrow-back" size={20} color="#fff" />
         </TouchableOpacity>
-        <View>
-          <Text style={styles.headerTitle}>Library</Text>
-          <Text style={styles.headerSubtitle}>
-            {libraryInfo.name} · {libraryInfo.accountType}
-          </Text>
-        </View>
+        <Text style={styles.headerTitle}>Library</Text>
       </LinearGradient>
 
-      <View style={styles.tabRow}>
-        {TABS.map((item) => (
-          <TouchableOpacity
-            key={item.id}
-            style={[styles.tabButton, tab === item.id && styles.tabButtonActive]}
-            onPress={() => setTab(item.id)}
-          >
-            <Text style={[styles.tabButtonText, tab === item.id && styles.tabButtonTextActive]}>
-              {item.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+      <View style={styles.tabSwitchWrap}>
+        {renderStatsCard()}
+
+        <AnimatedTabBar
+          tabs={TABS.map((t) => ({ key: t.id, label: t.label }))}
+          active={tab}
+          onChange={setTab}
+          containerStyle={styles.tabSwitch}
+          tabStyle={styles.tabButton}
+          tabTextStyle={styles.tabButtonText}
+          activeTabTextStyle={styles.tabButtonTextActive}
+          indicatorStyle={styles.tabSwitchIndicator}
+        />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {tab === "search" && (
-          <>
-            <View style={styles.searchBar}>
-              <Ionicons name="search-outline" size={16} color="#9AA6B2" />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search by book, author or category"
-                placeholderTextColor="#9AA6B2"
-                value={search}
-                onChangeText={setSearch}
-              />
-            </View>
-
-            <Text style={styles.sectionTitle}>Catalogue</Text>
+      <TabTransitionView activeKey={tab} order={TABS.map((t) => t.id)} style={styles.tabContent}>
+        {tab === "borrowed" ? (
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollMemory.bind("borrowed")}>
             <AsyncSection
-              status={catalogueStatus}
-              onRetry={() => searchBooks(search).then(setCatalogue).catch(() => setCatalogueStatus("error"))}
-              emptyText={search ? `No books match "${search}"` : "No books found."}
-              isEmpty={catalogue.length === 0}
+              status={borrowedStatus}
+              onRetry={loadBorrowed}
+              errorText={borrowedError}
+              emptyText="Nothing borrowed right now."
+              isEmpty={borrowed.length === 0}
             >
-              {catalogue.map((book) => (
-                <View key={book.id} style={styles.card}>
-                  <Text style={styles.bookTitle}>{book.title}</Text>
-                  <Text style={styles.bookAuthor}>
-                    {book.author ?? "Unknown author"} · {book.category_name}
-                  </Text>
-                  <Text style={[styles.bookMeta, book.available_copies === 0 && styles.bookMetaOutOfStock]}>
-                    {book.qr_code} · {book.available_copies === 0
-                      ? "out of stock"
-                      : `${book.available_copies} cop${book.available_copies === 1 ? "y" : "ies"} free`}
-                  </Text>
-                </View>
-              ))}
+              {borrowed.map((book) => {
+                const badgeLabel = book.is_overdue
+                  ? "Overdue"
+                  : `Due ${formatShortDate(book.due_date)}`;
+                return (
+                  <View key={book.id} style={styles.card}>
+                    <View style={styles.borrowedHeaderRow}>
+                      <Text style={styles.borrowedTitle}>{book.title}</Text>
+                      <View style={[styles.statusBadge, book.is_overdue && styles.statusBadgeOverdue]}>
+                        <Text style={[styles.statusBadgeText, book.is_overdue && styles.statusBadgeTextOverdue]}>
+                          {badgeLabel}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={styles.borrowedSubtitle}>Borrowed {formatShortDate(book.borrowed_date)}</Text>
+                    <View style={styles.divider} />
+                    <View style={styles.borrowedFooterRow}>
+                      <Text style={styles.borrowedDueDate}>Due {formatShortDate(book.due_date)}</Text>
+                      <TouchableOpacity onPress={handleRenew} hitSlop={8}>
+                        <Text style={styles.renewLink}>Renew</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })}
             </AsyncSection>
-          </>
-        )}
-
-        {tab === "e-resources" && (
-          <>
-            <Text style={styles.sectionTitle}>E-Resources</Text>
+          </ScrollView>
+        ) : tab === "e-resources" ? (
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollMemory.bind("e-resources")}>
             <AsyncSection
               status={eResourcesStatus}
               onRetry={() => searchEResources("").then(setResources).catch(() => setEResourcesStatus("error"))}
@@ -298,87 +328,80 @@ export function LibraryScreen() {
               {resources.map((resource) => (
                 <TouchableOpacity
                   key={resource.id}
-                  style={styles.card}
+                  style={styles.listCard}
                   onPress={() => handleOpenResource(resource.url, resource.title)}
                   activeOpacity={0.8}
                 >
-                  <View style={styles.eResourceRow}>
-                    <View style={styles.eResourceTextWrap}>
-                      <Text style={styles.bookTitle}>{resource.title}</Text>
-                      <Text style={styles.bookAuthor}>{resource.format ?? "Link"}</Text>
-                    </View>
-                    <Ionicons name="open-outline" size={18} color="#2F6FE0" />
+                  <View style={styles.listIconWrap}>
+                    <Ionicons name="book-outline" size={18} color="#2F6FE0" />
                   </View>
+                  <View style={styles.listTextWrap}>
+                    <Text style={styles.listTitle}>{resource.title}</Text>
+                    <Text style={styles.listSubtitle}>{resource.format ?? "E-resource"}</Text>
+                  </View>
+                  <Text style={styles.listAction}>Open</Text>
                 </TouchableOpacity>
               ))}
             </AsyncSection>
-          </>
-        )}
-
-        {tab === "borrowed" && (
-          <>
-            <Text style={styles.sectionTitle}>Borrowed Books</Text>
+          </ScrollView>
+        ) : tab === "search" ? (
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollMemory.bind("search")}>
+            <SearchBar
+              placeholder="Search by book, author or category"
+              value={search}
+              onChangeText={setSearch}
+            />
             <AsyncSection
-              status={borrowedStatus}
-              onRetry={loadBorrowed}
-              errorText={borrowedError}
-              emptyText="Nothing borrowed right now"
-              emptyIcon="library-outline"
-              isEmpty={borrowed.length === 0}
+              status={catalogueStatus}
+              onRetry={() => searchBooks(search).then(setCatalogue).catch(() => setCatalogueStatus("error"))}
+              emptyText={search ? `No books match "${search}"` : "No books found."}
+              isEmpty={catalogue.length === 0}
             >
-              {borrowed.map((book) => (
+              {catalogue.map((book) => (
                 <View key={book.id} style={styles.card}>
-                  <View style={styles.borrowedHeader}>
-                    <Text style={styles.bookTitle}>{book.title}</Text>
-                    <View style={[styles.statusBadge, book.is_overdue && styles.statusBadgeOverdue]}>
-                      <Text
-                        style={[styles.statusBadgeText, book.is_overdue && styles.statusBadgeTextOverdue]}
-                      >
-                        {book.is_overdue ? "Overdue" : "Active"}
-                      </Text>
-                    </View>
-                  </View>
-                  <Text style={styles.bookMeta}>
-                    Borrowed {formatShortDate(book.borrowed_date)} · Due {formatShortDate(book.due_date)}
+                  <Text style={styles.borrowedTitle}>{book.title}</Text>
+                  <Text style={styles.borrowedSubtitle}>
+                    {book.author ?? "Unknown author"} · {book.category_name} · {book.qr_code}
                   </Text>
-                  <TouchableOpacity
-                    style={styles.renewButton}
-                    onPress={handleRenew}
-                    activeOpacity={0.85}
-                  >
-                    <Ionicons name="refresh-outline" size={14} color="#2F6FE0" />
-                    <Text style={styles.renewButtonText}>Renew</Text>
-                  </TouchableOpacity>
+                  <Text style={[styles.availabilityText, book.available_copies === 0 && styles.availabilityTextOutOfStock]}>
+                    {book.available_copies === 0
+                      ? "Out of stock"
+                      : `${book.available_copies} of ${book.total_copies} available`}
+                  </Text>
                 </View>
               ))}
             </AsyncSection>
-          </>
-        )}
-
-        {tab === "history" && (
-          <>
-            <Text style={styles.sectionTitle}>Return History</Text>
+          </ScrollView>
+        ) : (
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollMemory.bind("history")}>
             <AsyncSection
               status={historyStatus}
               onRetry={loadHistory}
               errorText={historyError}
-              emptyText="No history yet"
-              emptyIcon="checkmark-done-outline"
+              emptyText="No return history yet."
               isEmpty={history.length === 0}
             >
               {history.map((entry) => (
-                <View key={entry.id} style={styles.card}>
-                  <Text style={styles.bookTitle}>{entry.title}</Text>
-                  <Text style={styles.bookMeta}>
-                    Borrowed {formatShortDate(entry.borrowed_date)}
-                    {entry.returned_date ? ` · Returned ${formatShortDate(entry.returned_date)}` : ""}
-                  </Text>
+                <View key={entry.id} style={styles.listCard}>
+                  <View style={styles.listIconWrap}>
+                    <Ionicons name="book-outline" size={18} color="#2F6FE0" />
+                  </View>
+                  <View style={styles.listTextWrap}>
+                    <Text style={styles.listTitle}>{entry.title}</Text>
+                    <Text style={styles.listSubtitle}>
+                      Issued {formatShortDate(entry.borrowed_date)}
+                      {entry.returned_date ? ` · returned ${formatShortDate(entry.returned_date)}` : ""}
+                    </Text>
+                  </View>
+                  <View style={styles.statusBadge}>
+                    <Text style={styles.statusBadgeText}>Returned</Text>
+                  </View>
                 </View>
               ))}
             </AsyncSection>
-          </>
+          </ScrollView>
         )}
-      </ScrollView>
+      </TabTransitionView>
     </SafeAreaView>
   );
 }
@@ -388,7 +411,6 @@ function AsyncSection({
   onRetry,
   errorText,
   emptyText,
-  emptyIcon = "search-outline",
   isEmpty,
   children,
 }: {
@@ -396,7 +418,6 @@ function AsyncSection({
   onRetry: () => void;
   errorText?: string | null;
   emptyText: string;
-  emptyIcon?: keyof typeof Ionicons.glyphMap;
   isEmpty: boolean;
   children: React.ReactNode;
 }) {
@@ -415,14 +436,32 @@ function AsyncSection({
     );
   }
   if (isEmpty) {
-    return (
-      <View style={styles.emptyState}>
-        <Ionicons name={emptyIcon} size={32} color="#B0B7C3" />
-        <Text style={styles.emptyStateText}>{emptyText}</Text>
-      </View>
-    );
+    return <Text style={styles.emptyText}>{emptyText}</Text>;
   }
   return <>{children}</>;
+}
+
+function SearchBar({
+  placeholder,
+  value,
+  onChangeText,
+}: {
+  placeholder: string;
+  value: string;
+  onChangeText: (text: string) => void;
+}) {
+  return (
+    <View style={styles.searchBar}>
+      <Ionicons name="search-outline" size={18} color="#9AA6B2" />
+      <TextInput
+        style={styles.searchInput}
+        placeholder={placeholder}
+        placeholderTextColor="#9AA6B2"
+        value={value}
+        onChangeText={onChangeText}
+      />
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -441,174 +480,29 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
   headerTitle: {
     color: "#fff",
-    fontSize: 18,
+    fontSize: 20,
     fontFamily: fonts.bold,
   },
-  headerSubtitle: {
-    color: "#D7E2FA",
-    fontSize: 12,
-    fontFamily: fonts.medium,
-    marginTop: 2,
+  tabContent: {
+    flex: 1,
   },
-  tabRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
+  tabSwitchWrap: {
     paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 4,
-    backgroundColor: "#F7F8FA",
-  },
-  tabButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-  },
-  tabButtonActive: {
-    backgroundColor: "#2F6FE0",
-  },
-  tabButtonText: {
-    fontSize: 13,
-    fontFamily: fonts.semibold,
-    color: "#6B85B8",
-  },
-  tabButtonTextActive: {
-    color: "#fff",
+    paddingTop: 16,
   },
   content: {
-    padding: 16,
+    paddingHorizontal: 16,
     paddingBottom: 32,
-  },
-  searchBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginBottom: 16,
-    elevation: 1,
-    shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 13,
-    fontFamily: fonts.regular,
-    color: "#111827",
-  },
-  sectionTitle: {
-    fontSize: 12,
-    fontFamily: fonts.bold,
-    color: "#8A93A3",
-    letterSpacing: 1,
-    textTransform: "uppercase",
-    marginBottom: 8,
-  },
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 12,
-    elevation: 2,
-    shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-  },
-  bookTitle: {
-    fontSize: 14,
-    fontFamily: fonts.bold,
-    color: "#111827",
-  },
-  bookAuthor: {
-    fontSize: 12,
-    fontFamily: fonts.regular,
-    color: "#6B7280",
-    marginTop: 3,
-  },
-  bookMeta: {
-    fontSize: 12,
-    fontFamily: fonts.semibold,
-    color: "#2F6FE0",
-    marginTop: 6,
-  },
-  bookMetaOutOfStock: {
-    color: "#DC2626",
-  },
-  eResourceRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  eResourceTextWrap: {
-    flex: 1,
-  },
-  borrowedHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 8,
-  },
-  statusBadge: {
-    backgroundColor: "#F0FDF4",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  statusBadgeOverdue: {
-    backgroundColor: "#FEF2F2",
-  },
-  statusBadgeText: {
-    fontSize: 11,
-    fontFamily: fonts.bold,
-    color: "#16A34A",
-  },
-  statusBadgeTextOverdue: {
-    color: "#DC2626",
-  },
-  renewButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    alignSelf: "flex-start",
-    borderWidth: 1,
-    borderColor: "#B7CBE6",
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    marginTop: 10,
-  },
-  renewButtonText: {
-    fontSize: 12,
-    fontFamily: fonts.semibold,
-    color: "#2F6FE0",
-  },
-  emptyState: {
-    alignItems: "center",
-    paddingVertical: 40,
-    gap: 8,
-  },
-  emptyStateText: {
-    fontSize: 13,
-    fontFamily: fonts.medium,
-    color: "#9AA6B2",
   },
   errorNotice: {
     alignItems: "center",
     gap: 8,
-    paddingVertical: 40,
-    paddingHorizontal: 16,
+    paddingVertical: 32,
   },
   errorNoticeText: {
     fontSize: 13,
@@ -627,6 +521,206 @@ const styles = StyleSheet.create({
   },
   retryButtonText: {
     fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+  },
+  emptyText: {
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    color: "#9AA6B2",
+    textAlign: "center",
+    marginTop: 16,
+  },
+  statsCard: {
+    flexDirection: "row",
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    elevation: 2,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+  },
+  statsCol: {
+    flex: 1,
+  },
+  statsValue: {
+    fontSize: 18,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+  },
+  statsLabel: {
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    color: "#9AA6B2",
+    marginTop: 4,
+  },
+  tabSwitch: {
+    flexDirection: "row",
+    backgroundColor: "#E5E7EB",
+    borderRadius: 12,
+    padding: 4,
+    gap: 4,
+    marginBottom: 16,
+  },
+  tabButton: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 9,
+    paddingVertical: 12,
+  },
+  tabSwitchIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
+    backgroundColor: "#2F6FE0",
+  },
+  tabButtonText: {
+    fontSize: 13,
+    fontFamily: fonts.semibold,
+    color: "#6B7280",
+  },
+  tabButtonTextActive: {
+    color: "#fff",
+    fontFamily: fonts.bold,
+  },
+  searchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 16,
+    elevation: 1,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: fonts.regular,
+    color: "#111827",
+  },
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+  },
+  borrowedHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10,
+    marginBottom: 6,
+  },
+  borrowedTitle: {
+    flex: 1,
+    fontSize: 16,
+    fontFamily: fonts.bold,
+    color: "#111827",
+  },
+  borrowedSubtitle: {
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    color: "#9AA6B2",
+    marginBottom: 10,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: "#F1F3F6",
+    marginBottom: 10,
+  },
+  borrowedFooterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  borrowedDueDate: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#374151",
+  },
+  renewLink: {
+    fontSize: 13,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+  },
+  statusBadge: {
+    backgroundColor: "#EAF0FD",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  statusBadgeText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+  },
+  statusBadgeOverdue: {
+    backgroundColor: "#FEF2F2",
+  },
+  statusBadgeTextOverdue: {
+    color: "#DC2626",
+  },
+  availabilityText: {
+    fontSize: 13,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
+  },
+  availabilityTextOutOfStock: {
+    color: "#DC2626",
+  },
+  listCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+  },
+  listIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: "#EAF0FD",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  listTextWrap: {
+    flex: 1,
+  },
+  listTitle: {
+    fontSize: 15,
+    fontFamily: fonts.bold,
+    color: "#111827",
+  },
+  listSubtitle: {
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    color: "#9AA6B2",
+    marginTop: 3,
+  },
+  listAction: {
+    fontSize: 13,
     fontFamily: fonts.bold,
     color: "#2F6FE0",
   },

@@ -13,12 +13,14 @@ import { getMyTeachingSubjects, type LmsTeachingSubject } from "@/services/api/l
 import { SegmentedTabs } from "./SegmentedTabs";
 import { StudentTaskTab } from "./student/StudentTaskTab";
 import { StudentLessonsTab } from "./student/StudentLessonsTab";
+import { StudentOnlineClassTab } from "./student/StudentOnlineClassTab";
 import { FacultyMaterialTab } from "./faculty/FacultyMaterialTab";
 import { FacultyTaskTab } from "./faculty/FacultyTaskTab";
 import { FacultyLessonPlanTab } from "./faculty/FacultyLessonPlanTab";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 type FacultyTabKey = "material" | "task" | "lesson-plan";
-type StudentTabKey = "task" | "lessons";
+type StudentTabKey = "task" | "lessons" | "online-class";
 type TabKey = FacultyTabKey | StudentTabKey;
 
 const FACULTY_TABS: { key: FacultyTabKey; label: string }[] = [
@@ -28,12 +30,14 @@ const FACULTY_TABS: { key: FacultyTabKey; label: string }[] = [
 ];
 
 // Student's own "Lesson plan" and "Material" tabs are merged into one
-// "Lessons" tab (each syllabus session expands to show its own matched
-// material) - see StudentLessonsTab. Faculty/HoD keep all 3 tabs above,
-// unchanged - they still manage folders and the lesson plan separately.
+// (each syllabus session expands to show its own matched material) - see
+// StudentLessonsTab. Faculty/HoD keep all 3 tabs above, unchanged - they
+// still manage folders and the lesson plan separately. "Online class" shows
+// today's session for this subject, if any (see StudentOnlineClassTab).
 const STUDENT_TABS: { key: StudentTabKey; label: string }[] = [
   { key: "task", label: "Task" },
-  { key: "lessons", label: "Lessons" },
+  { key: "lessons", label: "Lesson plan" },
+  { key: "online-class", label: "Online class" },
 ];
 
 function subjectInitials(name?: string) {
@@ -51,16 +55,29 @@ export function LmsSubjectScreen({
   subjectId,
   subjectName,
   subjectCode,
+  initialTab,
 }: {
   subjectId: number;
   subjectName?: string;
   subjectCode?: string;
+  // Lets a caller land directly on a specific tab - e.g. Daily Task's
+  // "Online Class"/"Assignment" today-cards, which open straight to the
+  // relevant tab instead of always defaulting to Task (see
+  // DailyTaskScreen.tsx). Only ever a student-facing tab key in practice
+  // (Daily Task is student-only), but typed as the full TabKey since this
+  // prop doesn't itself know which tab set will end up active.
+  initialTab?: TabKey;
 }) {
   const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const role = useRole();
   const isTeaching = role === "employee" || role === "hod";
+  // See FacultyMaterialTab/FacultyTaskTab's own basePath prop comment - this
+  // screen itself is reachable from either tab (erp/lms/[subjectId] for
+  // Employee/HoD, academics/lms/[subjectId] for a student), and the two
+  // sub-tabs' own folder/task drill-down must stay in whichever one it was.
+  const lmsBasePath = isTeaching ? "/(tabs)/erp/lms" : "/(tabs)/academics/lms";
 
   // This screen renders its own full header above, so hide the shared
   // CollegeHeader (mounted at the Tabs level) while focused, restoring it
@@ -81,7 +98,7 @@ export function LmsSubjectScreen({
     }, [navigation]),
   );
 
-  const [tab, setTab] = useState<TabKey>(isTeaching ? "material" : "task");
+  const [tab, setTab] = useState<TabKey>(initialTab ?? (isTeaching ? "material" : "task"));
   const [classes, setClasses] = useState<{ class_id: number; label: string }[]>([]);
   const [classId, setClassId] = useState<number | null>(null);
   const [classesStatus, setClassesStatus] = useState<"loading" | "success" | "error">(
@@ -102,6 +119,7 @@ export function LmsSubjectScreen({
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -175,23 +193,37 @@ export function LmsSubjectScreen({
               </View>
             </View>
           )}
-          {tab === "material" && <FacultyMaterialTab subjectId={subjectId} classId={classId} />}
-          {tab === "task" && <FacultyTaskTab subjectId={subjectId} classId={classId} />}
-          {tab === "lesson-plan" && <FacultyLessonPlanTab subjectId={subjectId} classId={classId} />}
+          <View style={styles.tabContentArea}>
+            {tab === "material" ? (
+              <FacultyMaterialTab subjectId={subjectId} classId={classId} basePath={lmsBasePath} />
+            ) : tab === "task" ? (
+              <FacultyTaskTab subjectId={subjectId} classId={classId} />
+            ) : (
+              <FacultyLessonPlanTab subjectId={subjectId} classId={classId} />
+            )}
+          </View>
         </>
       )}
 
       {!isTeaching && (
-        <>
-          {tab === "task" && <StudentTaskTab subjectId={subjectId} />}
-          {tab === "lessons" && <StudentLessonsTab subjectId={subjectId} />}
-        </>
+        <View style={styles.tabContentArea}>
+          {tab === "task" ? (
+            <StudentTaskTab subjectId={subjectId} />
+          ) : tab === "lessons" ? (
+            <StudentLessonsTab subjectId={subjectId} />
+          ) : (
+            <StudentOnlineClassTab subjectId={subjectId} subjectName={subjectName} />
+          )}
+        </View>
       )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  tabContentArea: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     backgroundColor: "#F7F8FA",
@@ -207,7 +239,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },

@@ -4,7 +4,6 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
-import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { Ionicons } from "@expo/vector-icons";
 import { SkeletonDetailBlock, SkeletonListRows, SkeletonStatCards } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
@@ -12,6 +11,7 @@ import { getChildTimetable } from "@/services/api/parents.api";
 import type { MyTimetableDay, MyTimetableSlot } from "@/services/api/current-semester.api";
 import { useParentChildren } from "./useParentChildren";
 import { ChildSelector } from "./ChildSelector";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 const DAY_SHORT = ["", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const DAY_FULL = ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -159,9 +159,9 @@ export function ParentTimetableScreen() {
           />
         ),
       });
-      return () => {
-        navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
-      };
+      // No cleanup - see ParentDashboard.tsx's identical comment (this
+      // screen is pushed on top of it and races this cleanup the same way).
+      return undefined;
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [navigation, router, selectedIndex, weekDates]),
   );
@@ -179,6 +179,7 @@ export function ParentTimetableScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {childrenStatus === "loading" && <SkeletonDetailBlock />}
 
@@ -330,7 +331,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },

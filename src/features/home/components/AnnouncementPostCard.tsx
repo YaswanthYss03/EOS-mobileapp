@@ -1,26 +1,11 @@
 import { useState } from "react";
-import {
-  View,
-  Text,
-  Image,
-  ActivityIndicator,
-  TouchableOpacity,
-  TextInput,
-  Linking,
-  StyleSheet,
-} from "react-native";
+import { View, Text, Image, TouchableOpacity, Linking, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
-import { getApiErrorMessage } from "@/services/api/client";
 import { formatRelativeTime } from "@/utils/calendar";
 import { PostMediaCarousel } from "./PostMediaCarousel";
-import {
-  getAnnouncementComments,
-  addAnnouncementComment,
-  type Announcement,
-  type AnnouncementComment,
-} from "@/services/api/announcements.api";
+import { type Announcement } from "@/services/api/announcements.api";
 
 const logoSource = require("../../../../assets/logo.png");
 
@@ -85,14 +70,16 @@ function clamp(value: number, min: number, max: number) {
  * one; anything else is offered as an "Open attachment" link instead of a
  * broken image box.
  */
-export function AnnouncementPostCard({ post }: { post: Announcement }) {
+export function AnnouncementPostCard({
+  post,
+  commentCount,
+  onOpenComments,
+}: {
+  post: Announcement;
+  commentCount: number | null;
+  onOpenComments: () => void;
+}) {
   const [aspectRatio, setAspectRatio] = useState(DEFAULT_IMAGE_ASPECT_RATIO);
-  const [commentsOpen, setCommentsOpen] = useState(false);
-  const [comments, setComments] = useState<AnnouncementComment[] | null>(null);
-  const [loadingComments, setLoadingComments] = useState(false);
-  const [showAllComments, setShowAllComments] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [posting, setPosting] = useState(false);
 
   const author = post.posted_by;
   // A Media Room post is published in the college's own name, not an
@@ -113,43 +100,6 @@ export function AnnouncementPostCard({ post }: { post: Announcement }) {
   const attachment = post.file_url;
   const looksLikeImage =
     attachment != null && /\.(png|jpe?g|gif|webp|bmp|heic)(\?|$)/i.test(attachment);
-
-  async function toggleComments() {
-    const opening = !commentsOpen;
-    setCommentsOpen(opening);
-    if (!opening || comments !== null) return;
-
-    setLoadingComments(true);
-    try {
-      setComments(await getAnnouncementComments(post.id));
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Couldn't load comments."));
-      setCommentsOpen(false);
-    } finally {
-      setLoadingComments(false);
-    }
-  }
-
-  async function submitComment() {
-    const text = draft.trim();
-    if (!text) return;
-    setPosting(true);
-    try {
-      const created = await addAnnouncementComment(post.id, text);
-      // Appended locally rather than refetching the whole thread - the server
-      // returned the created row, so a round trip would tell us nothing new.
-      setComments((current) => [...(current ?? []), created]);
-      // A comment just added lands at the end of the (oldest-first) list -
-      // without this, posting a 3rd+ comment would hide it behind "View all"
-      // immediately, which reads as if it silently failed.
-      setShowAllComments(true);
-      setDraft("");
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Couldn't post your comment."));
-    } finally {
-      setPosting(false);
-    }
-  }
 
   async function openLink() {
     if (!linkUrl) return;
@@ -241,14 +191,10 @@ export function AnnouncementPostCard({ post }: { post: Announcement }) {
 
       <View style={styles.actionRow}>
         {allowComments ? (
-          <TouchableOpacity style={styles.actionButton} onPress={() => void toggleComments()}>
-            <Ionicons
-              name={commentsOpen ? "chatbubble" : "chatbubble-outline"}
-              size={17}
-              color="#4B5563"
-            />
+          <TouchableOpacity style={styles.actionButton} onPress={onOpenComments}>
+            <Ionicons name="chatbubble-outline" size={17} color="#4B5563" />
             <Text style={styles.actionText}>
-              {comments ? `${comments.length} ${comments.length === 1 ? "comment" : "comments"}` : "Comments"}
+              {commentCount !== null ? `${commentCount} ${commentCount === 1 ? "comment" : "comments"}` : "Comments"}
             </Text>
           </TouchableOpacity>
         ) : (
@@ -258,53 +204,6 @@ export function AnnouncementPostCard({ post }: { post: Announcement }) {
           </View>
         )}
       </View>
-
-      {commentsOpen && allowComments && (
-        <View style={styles.commentsBlock}>
-          {loadingComments ? (
-            <ActivityIndicator size="small" color="#2F6FE0" style={styles.commentsSpinner} />
-          ) : (
-            <>
-              {(comments ?? []).length === 0 && (
-                <Text style={styles.noComments}>No comments yet. Be the first.</Text>
-              )}
-              {(showAllComments ? comments ?? [] : (comments ?? []).slice(0, 2)).map((comment) => (
-                <View key={comment.id} style={styles.commentRow}>
-                  <Text style={styles.commentAuthor}>{comment.commenter_name ?? "Someone"}</Text>
-                  <Text style={styles.commentText}>{comment.comment_text}</Text>
-                  <Text style={styles.commentTime}>{formatRelativeTime(comment.created_at)}</Text>
-                </View>
-              ))}
-              {!showAllComments && (comments ?? []).length > 2 && (
-                <TouchableOpacity onPress={() => setShowAllComments(true)}>
-                  <Text style={styles.viewAllComments}>
-                    View all {comments!.length} comments
-                  </Text>
-                </TouchableOpacity>
-              )}
-
-              <View style={styles.composerRow}>
-                <TextInput
-                  style={styles.composerInput}
-                  placeholder="Write a comment…"
-                  placeholderTextColor="#B0B7C3"
-                  value={draft}
-                  onChangeText={setDraft}
-                  maxLength={1000}
-                  multiline
-                />
-                <TouchableOpacity
-                  style={[styles.sendButton, (!draft.trim() || posting) && styles.sendButtonDisabled]}
-                  onPress={() => void submitComment()}
-                  disabled={!draft.trim() || posting}
-                >
-                  <Ionicons name="send" size={15} color="#fff" />
-                </TouchableOpacity>
-              </View>
-            </>
-          )}
-        </View>
-      )}
     </View>
   );
 }
@@ -473,76 +372,5 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     fontFamily: fonts.medium,
     color: "#9AA1AD",
-  },
-  commentsBlock: {
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: "#F1F5F9",
-  },
-  commentsSpinner: {
-    paddingVertical: 8,
-  },
-  noComments: {
-    fontSize: 12.5,
-    fontFamily: fonts.medium,
-    color: "#8A93A3",
-    paddingBottom: 8,
-  },
-  commentRow: {
-    marginBottom: 10,
-  },
-  commentAuthor: {
-    fontSize: 12.5,
-    fontFamily: fonts.bold,
-    color: "#111827",
-  },
-  commentText: {
-    fontSize: 13,
-    fontFamily: fonts.regular,
-    color: "#374151",
-    marginTop: 2,
-  },
-  commentTime: {
-    fontSize: 10.5,
-    fontFamily: fonts.medium,
-    color: "#9AA1AD",
-    marginTop: 2,
-  },
-  viewAllComments: {
-    fontSize: 12.5,
-    fontFamily: fonts.semibold,
-    color: "#2F6FE0",
-    marginBottom: 10,
-  },
-  composerRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 8,
-    marginTop: 4,
-  },
-  composerInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    backgroundColor: "#F9FAFB",
-    borderRadius: 11,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    fontSize: 13,
-    fontFamily: fonts.regular,
-    color: "#111827",
-    maxHeight: 90,
-  },
-  sendButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "#2F6FE0",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sendButtonDisabled: {
-    opacity: 0.45,
   },
 });

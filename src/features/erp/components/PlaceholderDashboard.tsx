@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import { fonts } from "@/theme";
 import { DashboardHeader } from "./DashboardHeader";
 
@@ -28,6 +29,7 @@ export function PlaceholderDashboard({ subtitle, label }: { subtitle: string; la
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <View style={styles.content}>
         <Text style={styles.text}>{label}</Text>
       </View>

@@ -5,13 +5,13 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonDetailBlock, SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { getChildAcademicCalendar } from "@/services/api/parents.api";
 import type { CalendarEventType, MyAcademicCalendar, MyCalendarEvent } from "@/services/api/academic-calendar.api";
 import { useParentChildren } from "./useParentChildren";
 import { ChildSelector } from "./ChildSelector";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -124,9 +124,9 @@ export function ParentCalendarScreen() {
           <AcademicCalendarHeader onBack={() => router.replace("/(tabs)/erp")} calendar={calendar} />
         ),
       });
-      return () => {
-        navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
-      };
+      // No cleanup - see ParentDashboard.tsx's identical comment (this
+      // screen is pushed on top of it and races this cleanup the same way).
+      return undefined;
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [navigation, router, calendar]),
   );
@@ -164,6 +164,7 @@ export function ParentCalendarScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {childrenStatus === "loading" && <SkeletonDetailBlock />}
 
@@ -300,7 +301,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },

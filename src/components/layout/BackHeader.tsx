@@ -27,8 +27,10 @@ export function BackHeader({ title, onBack }: { title: string; onBack: () => voi
       >
         <Ionicons name="arrow-back" size={20} color="#fff" />
       </TouchableOpacity>
-      <View>
-        <Text style={styles.title}>{title}</Text>
+      <View style={styles.titleWrap}>
+        <Text style={styles.title} numberOfLines={2}>
+          {title}
+        </Text>
       </View>
     </LinearGradient>
   );
@@ -46,13 +48,15 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
+  titleWrap: {
+    flex: 1,
+  },
   title: {
     color: "#fff",
-    fontSize: 18,
+    fontSize: 16,
     fontFamily: fonts.bold,
   },
 });

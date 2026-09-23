@@ -35,6 +35,10 @@ export type StudentOdRequest = {
   // Always null for the mentor's own queue (getStudentOdRequests).
   hod_approval_status: OdApprovalStatus | null;
   created_at: string;
+  // True once any linked parent of any team member has acknowledged this
+  // OD request on their own Progress tab's Acknowledge page - see
+  // parents.api.ts. Not the Advisor's own decision, purely informational.
+  parent_acknowledged: boolean;
 };
 
 // Fetched once, unfiltered (limit generous enough for a single mentor's

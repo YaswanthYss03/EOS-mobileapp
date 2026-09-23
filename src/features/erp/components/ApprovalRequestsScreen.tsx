@@ -7,6 +7,9 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
+import { useRole } from "@/hooks/useRole";
+import { useSkipSharedHeaderToggle } from "@/hooks/useSkipSharedHeaderToggle";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -19,6 +22,7 @@ import { getHodStudentOdRequests, hodApproveOd, type StudentOdRequest } from "@/
 import { getHodFacultyLeaves, hodApproveFacultyLeave, type MyFacultyLeave } from "@/services/api/faculty-leaves.api";
 import { getHodFacultyOds, hodApproveFacultyOd, type MyFacultyOd } from "@/services/api/faculty-od.api";
 import type { ApprovalRequest, ApprovalStatus } from "../types";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 type Tab = "student" | "faculty";
 // "History" covers both approved and rejected together - there's no
@@ -139,9 +143,17 @@ export function ApprovalRequestsScreen({ kind, title, studentHeaderSubtitle, fac
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const role = useRole();
   const { tab: initialTab } = useLocalSearchParams<{ tab?: string }>();
 
-  const [tab, setTab] = useState<Tab>(initialTab === "faculty" ? "faculty" : "student");
+  // HOD is this screen's only caller now (see HodAcademicsScreen.tsx's
+  // ?tab=student and HodFacultyScreen.tsx's ?tab=faculty tiles - each
+  // reaches this screen wanting ONLY that one side, never both), so the
+  // Student/Faculty toggle below is hidden entirely for that role - `tab`
+  // just stays whatever the URL asked for, never user-changeable.
+  const isHod = role === "hod";
+  const skipHeaderToggle = useSkipSharedHeaderToggle();
+  const [tab] = useState<Tab>(initialTab === "faculty" ? "faculty" : "student");
   const [subTab, setSubTab] = useState<SubTab>("pending");
 
   const [studentStatus, setStudentStatus] = useState<LoadStatus>("loading");
@@ -153,6 +165,7 @@ export function ApprovalRequestsScreen({ kind, title, studentHeaderSubtitle, fac
   const [facultyRequests, setFacultyRequests] = useState<ApprovalRequest[]>([]);
 
   const [actingId, setActingId] = useState<string | null>(null);
+  const scrollMemory = useTabScrollMemory();
 
   const loadStudent = useCallback(() => {
     setStudentStatus("loading");
@@ -202,14 +215,21 @@ export function ApprovalRequestsScreen({ kind, title, studentHeaderSubtitle, fac
 
   // This screen renders its own full header below, so hide the shared
   // CollegeHeader while it's focused - same pattern as the ERP employee/hod
-  // dashboards and the attendance screen.
+  // dashboards and the attendance screen. Skipped for HOD - that role's
+  // Class tab now keeps the shared header statically off the whole time
+  // (see app/(tabs)/_layout.tsx's isHodActingAsHod), and this screen's own
+  // cleanup resetting headerShown back to true on blur was leaking through
+  // to whichever screen the HOD navigated back to (HodAcademicsScreen/
+  // HodFacultyScreen, neither of which toggles it themselves), showing that
+  // screen's own inline header AND the shared CollegeHeader at once.
   useFocusEffect(
     useCallback(() => {
+      if (skipHeaderToggle) return undefined;
       navigation.getParent()?.setOptions({ headerShown: false });
       return () => {
         navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
       };
-    }, [navigation]),
+    }, [navigation, skipHeaderToggle]),
   );
 
   const requests = tab === "student" ? studentRequests : facultyRequests;
@@ -250,13 +270,61 @@ export function ApprovalRequestsScreen({ kind, title, studentHeaderSubtitle, fac
       .finally(() => setActingId(null));
   }
 
-  function switchTab(nextTab: Tab) {
-    setTab(nextTab);
-    setSubTab("pending");
+  // Only relevant for the faculty tab, and not subTab-dependent - kept as a
+  // closure helper (like StudentHostelScreen's renderRoomCard) since it
+  // needs to render identically inside both the pending and history
+  // ScrollViews below now that those are split apart for the subTab
+  // transition, reproducing the original "scrolls away with the list"
+  // behavior instead of duplicating the JSX by hand.
+  function renderContextCard() {
+    if (tab !== "faculty") return null;
+    return (
+      <View style={styles.contextCard}>
+        <View style={styles.contextIconWrap}>
+          <Ionicons name="business-outline" size={16} color="#2F6FE0" />
+        </View>
+        <View style={styles.contextTextWrap}>
+          <Text style={styles.contextTitle}>Head of Department</Text>
+          <Text style={styles.contextSubtitle}>Faculty {title.toLowerCase()} requests</Text>
+        </View>
+        <View style={styles.myDeptBadge}>
+          <Text style={styles.myDeptBadgeText}>MY DEPT</Text>
+        </View>
+      </View>
+    );
+  }
+
+  function renderRequestList() {
+    return (
+      <>
+        {loadStatus === "loading" && <SkeletonListRows count={4} />}
+
+        {loadStatus === "error" && <ErrorNotice message={loadError ?? "Something went wrong."} onRetry={reload} />}
+
+        {loadStatus === "success" &&
+          filteredRequests.map((request) => (
+            <ApprovalRequestCard
+              key={request.id}
+              request={request}
+              acting={actingId === request.id}
+              onApprove={() => handleDecision(request.id, "approved")}
+              onReject={() => handleDecision(request.id, "rejected")}
+            />
+          ))}
+
+        {loadStatus === "success" && filteredRequests.length === 0 && (
+          <View style={styles.emptyState}>
+            <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
+            <Text style={styles.emptyStateText}>No requests here</Text>
+          </View>
+        )}
+      </>
+    );
   }
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -278,76 +346,40 @@ export function ApprovalRequestsScreen({ kind, title, studentHeaderSubtitle, fac
         </View>
       </LinearGradient>
 
-      <View style={styles.tabSwitch}>
-        <TouchableOpacity
-          style={[styles.tabSwitchButton, tab === "student" && styles.tabSwitchButtonActive]}
-          onPress={() => switchTab("student")}
-        >
-          <Text style={[styles.tabSwitchText, tab === "student" && styles.tabSwitchTextActive]}>Student</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tabSwitchButton, tab === "faculty" && styles.tabSwitchButtonActive]}
-          onPress={() => switchTab("faculty")}
-        >
-          <Text style={[styles.tabSwitchText, tab === "faculty" && styles.tabSwitchTextActive]}>Faculty</Text>
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {tab === "faculty" && (
-          <View style={styles.contextCard}>
-            <View style={styles.contextIconWrap}>
-              <Ionicons name="business-outline" size={16} color="#2F6FE0" />
-            </View>
-            <View style={styles.contextTextWrap}>
-              <Text style={styles.contextTitle}>Head of Department</Text>
-              <Text style={styles.contextSubtitle}>Faculty {title.toLowerCase()} requests</Text>
-            </View>
-            <View style={styles.myDeptBadge}>
-              <Text style={styles.myDeptBadgeText}>MY DEPT</Text>
-            </View>
-          </View>
-        )}
-
-        <View style={styles.subTabSwitch}>
-          <TouchableOpacity
-            style={[styles.subTabButton, subTab === "pending" && styles.subTabButtonActive]}
-            onPress={() => setSubTab("pending")}
-          >
-            <Text style={[styles.subTabText, subTab === "pending" && styles.subTabTextActive]}>Pending</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.subTabButton, subTab === "history" && styles.subTabButtonActive]}
-            onPress={() => setSubTab("history")}
-          >
-            <Text style={[styles.subTabText, subTab === "history" && styles.subTabTextActive]}>History</Text>
-          </TouchableOpacity>
-        </View>
-
-        {loadStatus === "loading" && <SkeletonListRows count={4} />}
-
-        {loadStatus === "error" && (
-          <ErrorNotice message={loadError ?? "Something went wrong."} onRetry={reload} />
-        )}
-
-        {loadStatus === "success" &&
-          filteredRequests.map((request) => (
-            <ApprovalRequestCard
-              key={request.id}
-              request={request}
-              acting={actingId === request.id}
-              onApprove={() => handleDecision(request.id, "approved")}
-              onReject={() => handleDecision(request.id, "rejected")}
+      <TabTransitionView activeKey={tab} order={["student", "faculty"]} style={styles.tabContentArea}>
+        <View style={styles.tabContentArea}>
+          {/* Same AnimatedTabBar pill/sliding-indicator design and
+              TabTransitionView slide/fade content animation as the
+              Student/Faculty tab above - not a separate bordered-pill
+              toggle anymore. */}
+          <View style={styles.subTabSwitchWrap}>
+            <AnimatedTabBar
+              tabs={[
+                { key: "pending" as SubTab, label: "Pending" },
+                { key: "history" as SubTab, label: "History" },
+              ]}
+              active={subTab}
+              onChange={setSubTab}
+              containerStyle={styles.subTabSwitch}
+              tabStyle={styles.subTabButton}
+              tabTextStyle={styles.subTabText}
+              activeTabTextStyle={styles.subTabTextActive}
+              indicatorStyle={styles.subTabIndicator}
             />
-          ))}
-
-        {loadStatus === "success" && filteredRequests.length === 0 && (
-          <View style={styles.emptyState}>
-            <Ionicons name="checkmark-done-outline" size={32} color="#B0B7C3" />
-            <Text style={styles.emptyStateText}>No requests here</Text>
           </View>
-        )}
-      </ScrollView>
+
+          <TabTransitionView activeKey={subTab} order={["pending", "history"]} style={styles.tabContentArea}>
+            <ScrollView
+              contentContainerStyle={styles.content}
+              showsVerticalScrollIndicator={false}
+              {...scrollMemory.bind(`${tab}-${subTab}`)}
+            >
+              {renderContextCard()}
+              {renderRequestList()}
+            </ScrollView>
+          </TabTransitionView>
+        </View>
+      </TabTransitionView>
     </SafeAreaView>
   );
 }
@@ -470,7 +502,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -485,40 +516,18 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     marginTop: 2,
   },
-  tabSwitch: {
-    flexDirection: "row",
-    backgroundColor: "#fff",
-    marginHorizontal: 16,
-    marginTop: 14,
-    borderRadius: 12,
-    padding: 4,
-    gap: 4,
-    elevation: 2,
-    shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-  },
-  tabSwitchButton: {
+  tabContentArea: {
     flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 9,
-    paddingVertical: 10,
   },
-  tabSwitchButtonActive: {
-    backgroundColor: "#2F6FE0",
-  },
-  tabSwitchText: {
-    fontSize: 13,
-    fontFamily: fonts.semibold,
-    color: "#4B5563",
-  },
-  tabSwitchTextActive: {
-    color: "#fff",
+  // Top inset moved here from `content` (subTab bar is hoisted above the
+  // scrolling list, pinned) so total spacing matches the original instead
+  // of doubling up.
+  subTabSwitchWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
   },
   content: {
-    padding: 16,
+    paddingHorizontal: 16,
     paddingBottom: 32,
   },
   contextCard: {
@@ -569,31 +578,42 @@ const styles = StyleSheet.create({
     color: "#2F6FE0",
     letterSpacing: 0.5,
   },
+  // Same white pill-track + sliding-indicator design as tabSwitch above
+  // (the Student/Faculty tab) - no marginHorizontal here since
+  // subTabSwitchWrap already supplies the matching 16px side padding.
   subTabSwitch: {
     flexDirection: "row",
-    gap: 8,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 4,
+    gap: 4,
     marginBottom: 14,
+    elevation: 2,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
   },
   subTabButton: {
     flex: 1,
     alignItems: "center",
-    borderRadius: 999,
-    paddingVertical: 9,
-    backgroundColor: "#fff",
-    borderWidth: 1.5,
-    borderColor: "#E5E7EB",
+    justifyContent: "center",
+    borderRadius: 9,
+    paddingVertical: 10,
   },
-  subTabButtonActive: {
-    backgroundColor: "#EAF0FD",
-    borderColor: "#2F6FE0",
+  subTabIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
+    backgroundColor: "#2F6FE0",
   },
   subTabText: {
-    fontSize: 12.5,
+    fontSize: 13,
     fontFamily: fonts.semibold,
-    color: "#6B7280",
+    color: "#4B5563",
   },
   subTabTextActive: {
-    color: "#2F6FE0",
+    color: "#fff",
     fontFamily: fonts.bold,
   },
   errorNotice: {

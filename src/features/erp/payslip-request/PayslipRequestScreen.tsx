@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Linking, View, Text, ScrollView, TextInput, TouchableOpacity, Modal, StyleSheet } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Linking, View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -7,6 +7,8 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnchoredDropdown } from "@/components/ui/dropdown";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { formatDate } from "@/utils/calendar";
@@ -17,6 +19,7 @@ import {
   type MyPayslipRequest,
 } from "@/services/api/payslip-requests.api";
 import { months, years } from "./data/mockPayslipRequest";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 type Tab = "apply" | "history";
 type PickerField = "month" | "year" | null;
@@ -56,6 +59,11 @@ export function PayslipRequestScreen() {
   const [pickerFor, setPickerFor] = useState<PickerField>(null);
   const [purpose, setPurpose] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // One <AnchoredDropdown> is shared by both fields below - it needs to
+  // measure whichever field's own trigger was actually tapped, so each
+  // field keeps its own node here rather than fighting over a single ref.
+  const fieldAnchors = useRef<Partial<Record<Exclude<PickerField, null>, View | null>>>({});
+  const scrollMemory = useTabScrollMemory();
 
   const [historyStatus, setHistoryStatus] = useState<LoadStatus>("loading");
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -129,6 +137,7 @@ export function PayslipRequestScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -148,53 +157,72 @@ export function PayslipRequestScreen() {
         </View>
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.tabSwitch}>
-          <TouchableOpacity
-            style={[styles.tabSwitchButton, tab === "apply" && styles.tabSwitchButtonActive]}
-            onPress={() => setTab("apply")}
-          >
-            <Text style={[styles.tabSwitchText, tab === "apply" && styles.tabSwitchTextActive]}>Apply</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabSwitchButton, tab === "history" && styles.tabSwitchButtonActive]}
-            onPress={() => setTab("history")}
-          >
-            <Text style={[styles.tabSwitchText, tab === "history" && styles.tabSwitchTextActive]}>History</Text>
-          </TouchableOpacity>
-        </View>
+      <View style={styles.tabSwitchWrap}>
+        <AnimatedTabBar
+          tabs={[
+            { key: "apply", label: "Apply" },
+            { key: "history", label: "History" },
+          ]}
+          active={tab}
+          onChange={setTab}
+          containerStyle={styles.tabSwitch}
+          tabStyle={styles.tabSwitchButton}
+          tabTextStyle={styles.tabSwitchText}
+          activeTabTextStyle={styles.tabSwitchTextActive}
+          indicatorStyle={styles.tabSwitchIndicator}
+        />
+      </View>
 
+      <TabTransitionView activeKey={tab} order={["apply", "history"]} style={styles.tabContent}>
         {tab === "apply" ? (
-          <>
+          <ScrollView
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            {...scrollMemory.bind("apply")}
+          >
             <Text style={styles.sectionTitle}>Request Payslip</Text>
             <View style={styles.card}>
               <View style={styles.rowFields}>
                 <View style={styles.rowField}>
                   <Text style={styles.fieldLabel}>Month</Text>
-                  <TouchableOpacity
-                    style={styles.selectRow}
-                    onPress={() => setPickerFor("month")}
-                    activeOpacity={0.8}
+                  <View
+                    ref={(node) => {
+                      fieldAnchors.current.month = node;
+                    }}
+                    collapsable={false}
                   >
-                    <Text
-                      style={[styles.selectValue, !month && styles.selectValuePlaceholder]}
-                      numberOfLines={1}
+                    <TouchableOpacity
+                      style={styles.selectRow}
+                      onPress={() => setPickerFor("month")}
+                      activeOpacity={0.8}
                     >
-                      {month ?? "Select month"}
-                    </Text>
-                    <Ionicons name="chevron-down" size={16} color="#B0B7C3" />
-                  </TouchableOpacity>
+                      <Text
+                        style={[styles.selectValue, !month && styles.selectValuePlaceholder]}
+                        numberOfLines={1}
+                      >
+                        {month ?? "Select month"}
+                      </Text>
+                      <Ionicons name="chevron-down" size={16} color="#B0B7C3" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
                 <View style={styles.rowField}>
                   <Text style={styles.fieldLabel}>Year</Text>
-                  <TouchableOpacity
-                    style={styles.selectRow}
-                    onPress={() => setPickerFor("year")}
-                    activeOpacity={0.8}
+                  <View
+                    ref={(node) => {
+                      fieldAnchors.current.year = node;
+                    }}
+                    collapsable={false}
                   >
-                    <Text style={styles.selectValue}>{year}</Text>
-                    <Ionicons name="chevron-down" size={16} color="#B0B7C3" />
-                  </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.selectRow}
+                      onPress={() => setPickerFor("year")}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.selectValue}>{year}</Text>
+                      <Ionicons name="chevron-down" size={16} color="#B0B7C3" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
 
@@ -221,9 +249,13 @@ export function PayslipRequestScreen() {
                 )}
               </TouchableOpacity>
             </View>
-          </>
+          </ScrollView>
         ) : (
-          <>
+          <ScrollView
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            {...scrollMemory.bind("history")}
+          >
             <Text style={styles.sectionTitle}>Request History</Text>
             {historyStatus === "loading" ? (
               <SkeletonListRows count={4} />
@@ -245,42 +277,38 @@ export function PayslipRequestScreen() {
                 <HistoryCard key={item.id} item={item} onDownload={() => handleDownload(item)} />
               ))
             )}
-          </>
+          </ScrollView>
         )}
-      </ScrollView>
+      </TabTransitionView>
 
-      <Modal
+      <AnchoredDropdown
+        anchorRef={{ current: pickerFor ? fieldAnchors.current[pickerFor] ?? null : null }}
         visible={pickerFor !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setPickerFor(null)}
+        onClose={() => setPickerFor(null)}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
       >
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setPickerFor(null)}>
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>{pickerFor === "month" ? "Select Month" : "Select Year"}</Text>
-            <ScrollView style={styles.modalList}>
-              {(pickerFor === "month" ? months : years).map((option) => {
-                const selected = pickerFor === "month" ? month === option : year === option;
-                return (
-                  <TouchableOpacity
-                    key={option}
-                    style={styles.modalOptionRow}
-                    onPress={() => {
-                      if (pickerFor === "month") setMonth(option);
-                      else setYear(option);
-                      setPickerFor(null);
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.modalOptionName}>{option}</Text>
-                    {selected && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+        <Text style={styles.modalTitle}>{pickerFor === "month" ? "Select Month" : "Select Year"}</Text>
+        <ScrollView style={styles.modalList}>
+          {(pickerFor === "month" ? months : years).map((option) => {
+            const selected = pickerFor === "month" ? month === option : year === option;
+            return (
+              <TouchableOpacity
+                key={option}
+                style={styles.modalOptionRow}
+                onPress={() => {
+                  if (pickerFor === "month") setMonth(option);
+                  else setYear(option);
+                  setPickerFor(null);
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalOptionName}>{option}</Text>
+                {selected && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </AnchoredDropdown>
     </SafeAreaView>
   );
 }
@@ -336,7 +364,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -352,8 +380,15 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   content: {
-    padding: 16,
+    paddingHorizontal: 16,
     paddingBottom: 32,
+  },
+  tabContent: {
+    flex: 1,
+  },
+  tabSwitchWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
   },
   tabSwitch: {
     flexDirection: "row",
@@ -375,7 +410,10 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     paddingVertical: 10,
   },
-  tabSwitchButtonActive: {
+  tabSwitchIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
     backgroundColor: "#2F6FE0",
   },
   tabSwitchText: {
@@ -567,17 +605,19 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     color: "#9AA6B2",
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.5)",
-    justifyContent: "center",
-    padding: 20,
-  },
   modalCard: {
     backgroundColor: "#fff",
     borderRadius: 18,
     padding: 18,
-    maxHeight: "70%",
+  },
+  anchoredCard: {
+    width: 260,
+    maxHeight: 320,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   modalTitle: {
     fontSize: 15,

@@ -1,18 +1,18 @@
 import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
-import * as DocumentPicker from "expo-document-picker";
 import * as Linking from "expo-linking";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
-import { getApiErrorMessage } from "@/services/api/client";
-import { getMyLmsSubjects, getStudentTasks, submitLmsTask, type LmsStudentTask } from "@/services/api/lms.api";
+import { getMyLmsSubjects, getStudentTasks, type LmsStudentTask } from "@/services/api/lms.api";
+import { getTodayOnlineClasses, type OnlineClass } from "@/services/api/online-class.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 // Wired to EOS-backend's real LMS tasks (see @/services/api/lms.api.ts) -
 // there's no single "all my tasks" endpoint, so this fans out over the
@@ -25,6 +25,7 @@ import { getMyLmsSubjects, getStudentTasks, submitLmsTask, type LmsStudentTask }
 type TaskStatus = "pending" | "submitted" | "late";
 
 type DailyTask = LmsStudentTask & {
+  subjectId: number;
   subjectName: string;
   teacherName: string | null;
 };
@@ -97,10 +98,7 @@ function DailyTaskHeader({ onBack }: { onBack: () => void }) {
       <TouchableOpacity onPress={onBack} style={styles.backButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
         <Ionicons name="arrow-back" size={20} color="#fff" />
       </TouchableOpacity>
-      <View>
-        <Text style={styles.headerTitle}>Daily Task</Text>
-        <Text style={styles.headerSubtitle}>Homework and submissions from your subjects</Text>
-      </View>
+      <Text style={styles.headerTitle}>Daily Task</Text>
     </LinearGradient>
   );
 }
@@ -111,21 +109,25 @@ export function DailyTaskScreen() {
 
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [tasks, setTasks] = useState<DailyTask[]>([]);
+  const [subjectsById, setSubjectsById] = useState<Map<number, string>>(new Map());
+  const [todayOnlineClasses, setTodayOnlineClasses] = useState<OnlineClass[]>([]);
   const [selectedDateIso, setSelectedDateIso] = useState<string | null>(null);
-  const [submittingId, setSubmittingId] = useState<number | null>(null);
 
   const weekStrip = useMemo(() => buildWeekStrip(), []);
+  const todayIso = useMemo(() => dateIso(new Date()), []);
 
   const load = useCallback(() => {
     setStatus("loading");
     getMyLmsSubjects()
       .then(async (subjects) => {
+        setSubjectsById(new Map(subjects.map((s) => [s.subject_id, s.subject_name])));
         const perSubject = await Promise.all(
           subjects.map((subject) =>
             getStudentTasks(subject.subject_id)
               .then((subjectTasks) =>
                 subjectTasks.map((task) => ({
                   ...task,
+                  subjectId: subject.subject_id,
                   subjectName: subject.subject_name,
                   teacherName: subject.faculty_name,
                 })),
@@ -145,7 +147,22 @@ export function DailyTaskScreen() {
         setStatus("success");
       })
       .catch(() => setStatus("error"));
+    // Independent of the task load above (and allowed to fail silently -
+    // it's a "today" convenience banner, not this screen's core content) -
+    // GET /online-classes/today, same data OnlineClassScreen/
+    // StudentOnlineClassTab already use.
+    getTodayOnlineClasses()
+      .then((classes) => setTodayOnlineClasses(classes.filter((c) => c.status !== "completed")))
+      .catch(() => setTodayOnlineClasses([]));
   }, []);
+
+  // Today's pending assignments (due today, not yet submitted) - a quick
+  // "upload" shortcut into the LMS Task tab, separate from the day-filtered
+  // full task list below (which still shows every task, any status, any day).
+  const todaysPendingTasks = useMemo(
+    () => tasks.filter((t) => t.due_date?.slice(0, 10) === todayIso && !t.is_submitted),
+    [tasks, todayIso],
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -161,27 +178,31 @@ export function DailyTaskScreen() {
     (t) => !selectedDateIso || (t.due_date && t.due_date.slice(0, 10) === selectedDateIso),
   );
 
-  function handleSubmit(task: DailyTask) {
-    DocumentPicker.getDocumentAsync({ type: "*/*" }).then((result) => {
-      if (result.canceled || !result.assets?.[0]) return;
-      const asset = result.assets[0];
-      setSubmittingId(task.id);
-      submitLmsTask(task.id, { uri: asset.uri, name: asset.name, mimeType: asset.mimeType ?? "application/octet-stream" })
-        .then(() => {
-          toast.success("Task submitted");
-          load();
-        })
-        .catch((err) => toast.error(getApiErrorMessage(err, "Couldn't submit the task.")))
-        .finally(() => setSubmittingId(null));
-    });
-  }
-
   function openAttachment(url: string) {
     Linking.openURL(url).catch(() => toast.error("Couldn't open the file"));
   }
 
+  function goToTaskTab(task: DailyTask) {
+    router.push({
+      pathname: "/(tabs)/academics/lms/[subjectId]",
+      params: { subjectId: String(task.subjectId), subjectName: task.subjectName, tab: "task" },
+    } as never);
+  }
+
+  function goToOnlineClassTab(oc: OnlineClass) {
+    router.push({
+      pathname: "/(tabs)/academics/lms/[subjectId]",
+      params: {
+        subjectId: String(oc.subject_id),
+        subjectName: subjectsById.get(oc.subject_id) ?? "",
+        tab: "online-class",
+      },
+    } as never);
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       {/* Daily Task is student-only (see the doc comment at the top of this
           file), reached from the Campus tab's own Academics screen - a plain
           back pops within that same stack, back to Academics. */}
@@ -205,6 +226,50 @@ export function DailyTaskScreen() {
             );
           })}
         </View>
+
+        {todaysPendingTasks.length > 0 && (
+          <View style={styles.todaySection}>
+            <Text style={styles.sectionLabel}>Assignment</Text>
+            {todaysPendingTasks.map((task) => (
+              <View key={task.id} style={styles.todayCard}>
+                <View style={styles.subjectAvatar}>
+                  <Text style={styles.subjectAvatarText}>{subjectInitials(task.subjectName)}</Text>
+                </View>
+                <View style={styles.todayCardTextWrap}>
+                  <Text style={styles.todayCardTitle}>{task.subjectName}</Text>
+                  <Text style={styles.todayCardMeta}>{task.title ?? "Assignment due today"}</Text>
+                </View>
+                <TouchableOpacity style={styles.todayCardButton} onPress={() => goToTaskTab(task)} activeOpacity={0.85}>
+                  <Text style={styles.todayCardButtonText}>Upload</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {todayOnlineClasses.length > 0 && (
+          <View style={styles.todaySection}>
+            <Text style={styles.sectionLabel}>Online Class</Text>
+            {todayOnlineClasses.map((oc) => (
+              <View key={oc.id} style={styles.todayCard}>
+                <View style={styles.subjectAvatar}>
+                  <Ionicons name="videocam-outline" size={18} color="#2F6FE0" />
+                </View>
+                <View style={styles.todayCardTextWrap}>
+                  <Text style={styles.todayCardTitle}>{subjectsById.get(oc.subject_id) ?? "Online class"}</Text>
+                  <Text style={styles.todayCardMeta}>{oc.status === "live" ? "Live now" : "Scheduled today"}</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.todayCardButton}
+                  onPress={() => goToOnlineClassTab(oc)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.todayCardButtonText}>Join</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
 
         <Text style={styles.sectionLabel}>
           {selectedDateIso
@@ -234,8 +299,7 @@ export function DailyTaskScreen() {
             <TaskCard
               key={task.id}
               task={task}
-              submitting={submittingId === task.id}
-              onSubmit={() => handleSubmit(task)}
+              onOpenInLms={() => goToTaskTab(task)}
               onOpenAttachment={openAttachment}
             />
           ))
@@ -247,13 +311,14 @@ export function DailyTaskScreen() {
 
 function TaskCard({
   task,
-  submitting,
-  onSubmit,
+  onOpenInLms,
   onOpenAttachment,
 }: {
   task: DailyTask;
-  submitting: boolean;
-  onSubmit: () => void;
+  // Submission itself only ever happens inside the LMS Task tab now (see
+  // goToTaskTab) - this screen is a read-only summary/shortcut, not a
+  // second place to actually upload a file.
+  onOpenInLms: () => void;
   onOpenAttachment: (url: string) => void;
 }) {
   const taskStatus = deriveStatus(task);
@@ -311,12 +376,8 @@ function TaskCard({
       <View style={styles.taskBottomRow}>
         <Text style={styles.dueText}>{formatDueDate(task.due_date)}</Text>
         {canSubmit ? (
-          <TouchableOpacity style={styles.completeButton} onPress={onSubmit} activeOpacity={0.85} disabled={submitting}>
-            {submitting ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={styles.completeButtonText}>{task.is_submitted ? "Resubmit" : "Submit"}</Text>
-            )}
+          <TouchableOpacity style={styles.completeButton} onPress={onOpenInLms} activeOpacity={0.85}>
+            <Text style={styles.completeButtonText}>{task.is_submitted ? "Resubmit" : "Upload"}</Text>
           </TouchableOpacity>
         ) : (
           <View style={styles.completedChip}>
@@ -345,7 +406,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -415,6 +475,45 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textTransform: "uppercase",
     marginBottom: 10,
+  },
+  todaySection: {
+    marginBottom: 14,
+  },
+  todayCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#EEF0F4",
+    padding: 12,
+    marginBottom: 8,
+  },
+  todayCardTextWrap: {
+    flex: 1,
+  },
+  todayCardTitle: {
+    fontSize: 13.5,
+    fontFamily: fonts.bold,
+    color: "#111827",
+  },
+  todayCardMeta: {
+    fontSize: 11.5,
+    fontFamily: fonts.regular,
+    color: "#9AA6B2",
+    marginTop: 2,
+  },
+  todayCardButton: {
+    borderRadius: 10,
+    backgroundColor: "#2F6FE0",
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  todayCardButtonText: {
+    fontSize: 12.5,
+    fontFamily: fonts.bold,
+    color: "#fff",
   },
   taskCard: {
     backgroundColor: "#fff",

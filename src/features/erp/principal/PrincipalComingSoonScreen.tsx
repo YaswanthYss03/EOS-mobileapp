@@ -5,8 +5,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 // Shared stub shell for Principal ERP dashboard tiles that have no backend
 // module yet (Students, Faculty & Staff, Department & HoD, Exams & Results,
@@ -33,14 +33,14 @@ export function PrincipalComingSoonScreen({
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({ headerShown: false });
-      return () => {
-        navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
-      };
+      // No cleanup - see PrincipalStudentsScreen.tsx's comment.
+      return undefined;
     }, [navigation]),
   );
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}

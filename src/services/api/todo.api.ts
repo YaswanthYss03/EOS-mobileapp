@@ -9,6 +9,8 @@ export type MyTodo = {
   title: string;
   description: string | null;
   deadline: string | null;
+  pdf_url: string | null;
+  link_url: string | null;
   is_completed: boolean;
   completed_at: string | null;
 };
@@ -29,6 +31,8 @@ export type PlacementTodo = {
   title: string;
   description: string | null;
   deadline: string | null;
+  pdf_url: string | null;
+  link_url: string | null;
   is_active: boolean;
   created_at: string;
   completed_count: number;

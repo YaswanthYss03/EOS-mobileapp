@@ -9,6 +9,7 @@ import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonDetailBlock, SkeletonStatCards } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES } from "@/utils/calendar";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import {
   getStaffAttendanceForFaculty,
   type FacultyAttendanceDetail,
@@ -113,6 +114,7 @@ export function FacultyAttendanceDetailScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -246,7 +248,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },

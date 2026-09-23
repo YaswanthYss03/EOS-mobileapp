@@ -5,14 +5,15 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonDetailBlock, SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { formatDate } from "@/utils/calendar";
 import { getChildUpcomingDrives, getChildPlacementHistory } from "@/services/api/parents.api";
 import type { UpcomingDrive, DriveHistoryItem, ApplicationStatus } from "@/services/api/placements.api";
 import { useParentChildren } from "./useParentChildren";
 import { ChildSelector } from "./ChildSelector";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 type PlacementTab = "upcoming" | "history";
 type LoadStatus = "loading" | "success" | "error";
@@ -65,6 +66,7 @@ export function ParentPlacementsScreen() {
     useParentChildren();
 
   const [tab, setTab] = useState<PlacementTab>("upcoming");
+  const scrollMemory = useTabScrollMemory();
 
   const [upcoming, setUpcoming] = useState<UpcomingDrive[] | null>(null);
   const [upcomingStatus, setUpcomingStatus] = useState<LoadStatus>("loading");
@@ -109,14 +111,15 @@ export function ParentPlacementsScreen() {
         // PlacementsOverviewScreen's identical comment.
         header: () => <PlacementsHeader onBack={() => router.replace("/(tabs)/erp")} />,
       });
-      return () => {
-        navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
-      };
+      // No cleanup - see ParentDashboard.tsx's identical comment (this
+      // screen is pushed on top of it and races this cleanup the same way).
+      return undefined;
     }, [navigation, router]),
   );
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <View style={styles.content}>
         {childrenStatus === "loading" && <SkeletonDetailBlock />}
 
@@ -135,29 +138,57 @@ export function ParentPlacementsScreen() {
           <>
             <ChildSelector children={children} selected={selectedChild} onSelect={(c) => setSelectedChildId(c.id)} />
 
-            <TabSwitch tab={tab} setTab={setTab} />
+            <View style={styles.tabSwitchWrap}>
+              <AnimatedTabBar
+                tabs={[
+                  { key: "upcoming", label: "Upcoming drives" },
+                  { key: "history", label: "History" },
+                ]}
+                active={tab}
+                onChange={setTab}
+                containerStyle={styles.tabSwitch}
+                tabStyle={styles.tabSwitchButton}
+                tabTextStyle={styles.tabSwitchText}
+                activeTabTextStyle={styles.tabSwitchTextActive}
+                indicatorStyle={styles.tabSwitchIndicator}
+              />
+            </View>
 
-            <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+            <TabTransitionView activeKey={tab} order={["upcoming", "history"]} style={styles.tabContent}>
               {tab === "upcoming" ? (
-                upcomingStatus === "loading" ? (
-                  <LoadingState />
-                ) : upcomingStatus === "error" ? (
-                  <ErrorState onRetry={() => loadUpcoming(selectedChild.id)} />
-                ) : upcoming && upcoming.length > 0 ? (
-                  upcoming.map((drive) => <UpcomingCard key={drive.drive_id} drive={drive} />)
-                ) : (
-                  <EmptyState icon="briefcase-outline" text="No drives coming up right now." />
-                )
-              ) : historyStatus === "loading" ? (
-                <LoadingState />
-              ) : historyStatus === "error" ? (
-                <ErrorState onRetry={() => loadHistory(selectedChild.id)} />
-              ) : history && history.length > 0 ? (
-                history.map((item) => <HistoryCard key={item.drive_id} item={item} />)
+                <ScrollView
+                  contentContainerStyle={styles.list}
+                  showsVerticalScrollIndicator={false}
+                  {...scrollMemory.bind("upcoming")}
+                >
+                  {upcomingStatus === "loading" ? (
+                    <LoadingState />
+                  ) : upcomingStatus === "error" ? (
+                    <ErrorState onRetry={() => loadUpcoming(selectedChild.id)} />
+                  ) : upcoming && upcoming.length > 0 ? (
+                    upcoming.map((drive) => <UpcomingCard key={drive.drive_id} drive={drive} />)
+                  ) : (
+                    <EmptyState icon="briefcase-outline" text="No drives coming up right now." />
+                  )}
+                </ScrollView>
               ) : (
-                <EmptyState icon="document-text-outline" text="No placement history yet." />
+                <ScrollView
+                  contentContainerStyle={styles.list}
+                  showsVerticalScrollIndicator={false}
+                  {...scrollMemory.bind("history")}
+                >
+                  {historyStatus === "loading" ? (
+                    <LoadingState />
+                  ) : historyStatus === "error" ? (
+                    <ErrorState onRetry={() => loadHistory(selectedChild.id)} />
+                  ) : history && history.length > 0 ? (
+                    history.map((item) => <HistoryCard key={item.drive_id} item={item} />)
+                  ) : (
+                    <EmptyState icon="document-text-outline" text="No placement history yet." />
+                  )}
+                </ScrollView>
               )}
-            </ScrollView>
+            </TabTransitionView>
           </>
         )}
       </View>
@@ -231,25 +262,6 @@ function HistoryCard({ item }: { item: DriveHistoryItem }) {
   );
 }
 
-function TabSwitch({ tab, setTab }: { tab: PlacementTab; setTab: (tab: PlacementTab) => void }) {
-  return (
-    <View style={styles.tabSwitch}>
-      <TouchableOpacity
-        style={[styles.tabSwitchButton, tab === "upcoming" && styles.tabSwitchButtonActive]}
-        onPress={() => setTab("upcoming")}
-      >
-        <Text style={[styles.tabSwitchText, tab === "upcoming" && styles.tabSwitchTextActive]}>Upcoming drives</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.tabSwitchButton, tab === "history" && styles.tabSwitchButtonActive]}
-        onPress={() => setTab("history")}
-      >
-        <Text style={[styles.tabSwitchText, tab === "history" && styles.tabSwitchTextActive]}>History</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-
 function ErrorNotice({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <View style={styles.errorNotice}>
@@ -303,7 +315,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -341,13 +352,18 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     color: "#2F6FE0",
   },
+  tabSwitchWrap: {
+    marginBottom: 16,
+  },
+  tabContent: {
+    flex: 1,
+  },
   tabSwitch: {
     flexDirection: "row",
     backgroundColor: "#fff",
     borderRadius: 12,
     padding: 4,
     gap: 4,
-    marginBottom: 16,
     elevation: 2,
     shadowColor: "#0F172A",
     shadowOffset: { width: 0, height: 2 },
@@ -361,7 +377,10 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     paddingVertical: 12,
   },
-  tabSwitchButtonActive: {
+  tabSwitchIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
     backgroundColor: "#2F6FE0",
   },
   tabSwitchText: {

@@ -7,12 +7,14 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
 import { createFacultyOd, listFacultyOd, type MyFacultyOd } from "@/services/api/faculty-od.api";
 import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, formatDate } from "@/utils/calendar";
 import { odBalance } from "./data/mockOdRequest";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 type Tab = "apply" | "history";
 type DateField = "start" | "end" | null;
@@ -52,6 +54,7 @@ export function OdRequestScreen() {
   const [datePickerFor, setDatePickerFor] = useState<DateField>(null);
   const [pickerYear, setPickerYear] = useState(today.getFullYear());
   const [pickerMonth, setPickerMonth] = useState(today.getMonth());
+  const scrollMemory = useTabScrollMemory();
 
   const [historyStatus, setHistoryStatus] = useState<LoadStatus>("loading");
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -88,6 +91,25 @@ export function OdRequestScreen() {
   );
 
   const pickerWeeks = useMemo(() => getCalendarWeeks(pickerYear, pickerMonth), [pickerYear, pickerMonth]);
+
+  // Tab-invariant (not tab-specific) - kept as a closure helper and called
+  // once inside each per-tab ScrollView below, exactly like
+  // StudentHostelScreen's renderRoomCard(), so it keeps scrolling away with
+  // the rest of the content instead of being pinned in a fixed position.
+  function renderBalanceRow() {
+    return (
+      <View style={styles.balanceRow}>
+        <View style={styles.balanceCardAvailed}>
+          <Text style={styles.balanceLabelAvailed}>OD Availed</Text>
+          <Text style={styles.balanceValueAvailed}>{odBalance.availed} days</Text>
+        </View>
+        <View style={styles.balanceCardRemaining}>
+          <Text style={styles.balanceLabelRemaining}>Remaining</Text>
+          <Text style={styles.balanceValueRemaining}>{odBalance.remaining} days</Text>
+        </View>
+      </View>
+    );
+  }
 
   const days = useMemo(() => {
     if (!startDate || !endDate) return 0;
@@ -176,6 +198,7 @@ export function OdRequestScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -195,35 +218,26 @@ export function OdRequestScreen() {
         </View>
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.balanceRow}>
-          <View style={styles.balanceCardAvailed}>
-            <Text style={styles.balanceLabelAvailed}>OD Availed</Text>
-            <Text style={styles.balanceValueAvailed}>{odBalance.availed} days</Text>
-          </View>
-          <View style={styles.balanceCardRemaining}>
-            <Text style={styles.balanceLabelRemaining}>Remaining</Text>
-            <Text style={styles.balanceValueRemaining}>{odBalance.remaining} days</Text>
-          </View>
-        </View>
+      <View style={styles.tabSwitchWrap}>
+        <AnimatedTabBar
+          tabs={[
+            { key: "apply", label: "Apply" },
+            { key: "history", label: "History" },
+          ]}
+          active={tab}
+          onChange={setTab}
+          containerStyle={styles.tabSwitch}
+          tabStyle={styles.tabSwitchButton}
+          tabTextStyle={styles.tabSwitchText}
+          activeTabTextStyle={styles.tabSwitchTextActive}
+          indicatorStyle={styles.tabSwitchIndicator}
+        />
+      </View>
 
-        <View style={styles.tabSwitch}>
-          <TouchableOpacity
-            style={[styles.tabSwitchButton, tab === "apply" && styles.tabSwitchButtonActive]}
-            onPress={() => setTab("apply")}
-          >
-            <Text style={[styles.tabSwitchText, tab === "apply" && styles.tabSwitchTextActive]}>Apply</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabSwitchButton, tab === "history" && styles.tabSwitchButtonActive]}
-            onPress={() => setTab("history")}
-          >
-            <Text style={[styles.tabSwitchText, tab === "history" && styles.tabSwitchTextActive]}>History</Text>
-          </TouchableOpacity>
-        </View>
-
+      <TabTransitionView activeKey={tab} order={["apply", "history"]} style={styles.tabContent}>
         {tab === "apply" ? (
-          <>
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} {...scrollMemory.bind("apply")}>
+            {renderBalanceRow()}
             <Text style={styles.sectionTitle}>Apply On Duty</Text>
             <View style={styles.card}>
               <Text style={styles.fieldLabel}>Place / Organisation</Text>
@@ -300,26 +314,35 @@ export function OdRequestScreen() {
                 )}
               </TouchableOpacity>
             </View>
-          </>
-        ) : historyStatus === "loading" ? (
-          <SkeletonListRows count={4} />
-        ) : historyStatus === "error" ? (
-          <View style={styles.errorNotice}>
-            <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
-            <Text style={styles.errorNoticeText}>{historyError ?? "Something went wrong."}</Text>
-            <TouchableOpacity onPress={loadHistory} style={styles.retryButton} activeOpacity={0.8}>
-              <Text style={styles.retryButtonText}>Retry</Text>
-            </TouchableOpacity>
-          </View>
-        ) : history.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
-            <Text style={styles.emptyStateText}>No on-duty history yet</Text>
-          </View>
+          </ScrollView>
         ) : (
-          history.map((item) => <HistoryCard key={item.id} item={item} />)
+          <ScrollView
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            {...scrollMemory.bind("history")}
+          >
+            {renderBalanceRow()}
+            {historyStatus === "loading" ? (
+              <SkeletonListRows count={4} />
+            ) : historyStatus === "error" ? (
+              <View style={styles.errorNotice}>
+                <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+                <Text style={styles.errorNoticeText}>{historyError ?? "Something went wrong."}</Text>
+                <TouchableOpacity onPress={loadHistory} style={styles.retryButton} activeOpacity={0.8}>
+                  <Text style={styles.retryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : history.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
+                <Text style={styles.emptyStateText}>No on-duty history yet</Text>
+              </View>
+            ) : (
+              history.map((item) => <HistoryCard key={item.id} item={item} />)
+            )}
+          </ScrollView>
         )}
-      </ScrollView>
+      </TabTransitionView>
 
       <Modal
         visible={datePickerFor !== null}
@@ -426,7 +449,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -441,9 +464,21 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     marginTop: 2,
   },
+  // Split from one shared value into two: the tab bar was hoisted out of the
+  // scrolling content (so it stays fixed while content transitions - see
+  // tabSwitchWrap), so `content`'s own top inset moved to tabSwitchWrap's
+  // paddingTop, keeping the same total header->tabs->content spacing as
+  // before instead of doubling up.
   content: {
-    padding: 16,
+    paddingHorizontal: 16,
     paddingBottom: 32,
+  },
+  tabContent: {
+    flex: 1,
+  },
+  tabSwitchWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
   },
   balanceRow: {
     flexDirection: "row",
@@ -509,7 +544,10 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     paddingVertical: 10,
   },
-  tabSwitchButtonActive: {
+  tabSwitchIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
     backgroundColor: "#2F6FE0",
   },
   tabSwitchText: {

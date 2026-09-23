@@ -18,6 +18,7 @@ import { useRouter } from "expo-router";
 import { fonts } from "@/theme";
 import { useAuth } from "@/context/AuthContext";
 import { getApiErrorMessage } from "@/services/api/client";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 const logoSource = require("../../../assets/logo.png");
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
@@ -124,6 +125,7 @@ export function LoginScreen() {
       <Animated.View
         style={[styles.formSection, { opacity: formOpacity, transform: [{ translateY: formTranslateY }] }]}
       >
+        <WatermarkBackground />
         <Text style={styles.welcomeText}>Welcome back</Text>
         <Text style={styles.welcomeSubtext}>Login to continue</Text>
 

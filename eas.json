@@ -14,14 +14,14 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://eosbackend1.onrender.com/api/v1",
+        "EXPO_PUBLIC_API_URL": "https://eosbackend1-weop.onrender.com/api/v1",
         "EXPO_PUBLIC_API_BASE_URL": "https://restaurent-app-9lnh.onrender.com/api"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://eosbackend1.onrender.com/api/v1",
+        "EXPO_PUBLIC_API_URL": "https://eosbackend1-weop.onrender.com/api/v1",
         "EXPO_PUBLIC_API_BASE_URL": "https://restaurent-app-9lnh.onrender.com/api"
       }
     }

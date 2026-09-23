@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import {
   View,
   Text,
+  Image,
   ScrollView,
   TextInput,
   Pressable,
   TouchableOpacity,
   ActivityIndicator,
-  Modal,
   StyleSheet,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,11 +15,12 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnchoredDropdown, useDropdown } from "@/components/ui/dropdown";
 import { fonts } from "@/theme";
 import { getApiErrorMessage } from "@/services/api/client";
 import { listDepartments, type Department } from "@/services/api/departments.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import {
   searchPrincipalStudents,
   getPrincipalStudentsRollCount,
@@ -42,9 +43,14 @@ export function PrincipalStudentsScreen() {
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({ headerShown: false });
-      return () => {
-        navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
-      };
+      // No cleanup - PrincipalStudentDetailScreen.tsx is pushed on top of
+      // this screen and races this blur cleanup against its own focus
+      // effect (undefined blur/focus ordering between siblings in the same
+      // Stack), intermittently leaving both headers visible. Going back to
+      // Dashboard is safe without a reset here too - PrincipalDashboard.tsx
+      // now defensively re-asserts headerShown:true on its own focus
+      // instead of depending on this screen's cleanup.
+      return undefined;
     }, [navigation]),
   );
 
@@ -53,8 +59,8 @@ export function PrincipalStudentsScreen() {
   const [overviewError, setOverviewError] = useState<string | null>(null);
 
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [departmentPickerOpen, setDepartmentPickerOpen] = useState(false);
-  const [yearPickerOpen, setYearPickerOpen] = useState(false);
+  const departmentPicker = useDropdown();
+  const yearPicker = useDropdown();
 
   const [searchText, setSearchText] = useState("");
   const [department, setDepartment] = useState<Department | null>(null);
@@ -68,7 +74,6 @@ export function PrincipalStudentsScreen() {
   const [searchError, setSearchError] = useState<string | null>(null);
 
   const [recentLookups, setRecentLookups] = useState<PrincipalStudentRow[]>([]);
-  const [selectedStudent, setSelectedStudent] = useState<PrincipalStudentRow | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -131,8 +136,11 @@ export function PrincipalStudentsScreen() {
   }, [searchText, department, year, below75, feesPending]);
 
   function openStudent(student: PrincipalStudentRow) {
-    setSelectedStudent(student);
     setRecentLookups((prev) => [student, ...prev.filter((s) => s.id !== student.id)].slice(0, 10));
+    router.push({
+      pathname: "/(tabs)/erp/principal/students/[id]",
+      params: { id: String(student.id), name: student.name },
+    } as never);
   }
 
   function clearFilters() {
@@ -148,6 +156,7 @@ export function PrincipalStudentsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -185,19 +194,22 @@ export function PrincipalStudentsScreen() {
           )}
         </View>
 
-        {/* Filter pills */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillsRow}>
+        {/* Filter pills - plain wrapping row, not a horizontal ScrollView,
+            see HigherEducationScreen.tsx's identical comment for why. */}
+        <View style={styles.pillsRow}>
           <FilterPill
             label={department ? department.code : "Department"}
             active={!!department}
-            onPress={() => setDepartmentPickerOpen(true)}
+            onPress={departmentPicker.toggle}
             iconRight="chevron-down"
+            anchorRef={departmentPicker.anchorRef}
           />
           <FilterPill
             label={year ? `Year ${year}` : "Year"}
             active={!!year}
-            onPress={() => setYearPickerOpen(true)}
+            onPress={yearPicker.toggle}
             iconRight="chevron-down"
+            anchorRef={yearPicker.anchorRef}
           />
           <FilterPill label="Attendance < 75%" active={below75} onPress={() => setBelow75((v) => !v)} />
           <FilterPill label="Fees pending" active={feesPending} onPress={() => setFeesPending((v) => !v)} />
@@ -206,7 +218,7 @@ export function PrincipalStudentsScreen() {
               <Text style={styles.clearPillText}>Clear</Text>
             </TouchableOpacity>
           )}
-        </ScrollView>
+        </View>
 
         {/* Attendance overview: 4 stat cards */}
         {overviewError ? (
@@ -291,140 +303,99 @@ export function PrincipalStudentsScreen() {
       </ScrollView>
 
       {/* Department picker */}
-      <Modal visible={departmentPickerOpen} transparent animationType="fade" onRequestClose={() => setDepartmentPickerOpen(false)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setDepartmentPickerOpen(false)}>
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>Select a department</Text>
-            <ScrollView style={styles.modalList} showsVerticalScrollIndicator={false}>
-              <TouchableOpacity
-                style={styles.modalOptionRow}
-                onPress={() => {
-                  setDepartment(null);
-                  setDepartmentPickerOpen(false);
-                }}
-              >
-                <Text style={styles.modalOptionName}>All departments</Text>
-                {!department && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
-              </TouchableOpacity>
-              {departments.map((dept) => (
-                <TouchableOpacity
-                  key={dept.id}
-                  style={styles.modalOptionRow}
-                  onPress={() => {
-                    setDepartment(dept);
-                    setDepartmentPickerOpen(false);
-                  }}
-                >
-                  <Text style={styles.modalOptionName}>{dept.name}</Text>
-                  {department?.id === dept.id && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+      <AnchoredDropdown
+        anchorRef={departmentPicker.anchorRef}
+        visible={departmentPicker.visible}
+        onClose={departmentPicker.close}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
+      >
+        <Text style={styles.modalTitle}>Select a department</Text>
+        <ScrollView style={styles.modalList} showsVerticalScrollIndicator={false}>
+          <TouchableOpacity
+            style={styles.modalOptionRow}
+            onPress={() => {
+              setDepartment(null);
+              departmentPicker.close();
+            }}
+          >
+            <Text style={styles.modalOptionName}>All departments</Text>
+            {!department && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
           </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+          {departments.map((dept) => (
+            <TouchableOpacity
+              key={dept.id}
+              style={styles.modalOptionRow}
+              onPress={() => {
+                setDepartment(dept);
+                departmentPicker.close();
+              }}
+            >
+              <Text style={styles.modalOptionName}>{dept.name}</Text>
+              {department?.id === dept.id && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </AnchoredDropdown>
 
       {/* Year picker */}
-      <Modal visible={yearPickerOpen} transparent animationType="fade" onRequestClose={() => setYearPickerOpen(false)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setYearPickerOpen(false)}>
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>Select a year</Text>
-            <ScrollView style={styles.modalList} showsVerticalScrollIndicator={false}>
-              <TouchableOpacity
-                style={styles.modalOptionRow}
-                onPress={() => {
-                  setYear(null);
-                  setYearPickerOpen(false);
-                }}
-              >
-                <Text style={styles.modalOptionName}>All years</Text>
-                {!year && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
-              </TouchableOpacity>
-              {YEARS.map((y) => (
-                <TouchableOpacity
-                  key={y}
-                  style={styles.modalOptionRow}
-                  onPress={() => {
-                    setYear(y);
-                    setYearPickerOpen(false);
-                  }}
-                >
-                  <Text style={styles.modalOptionName}>Year {y}</Text>
-                  {year === y && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+      <AnchoredDropdown
+        anchorRef={yearPicker.anchorRef}
+        visible={yearPicker.visible}
+        onClose={yearPicker.close}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
+      >
+        <Text style={styles.modalTitle}>Select a year</Text>
+        <ScrollView style={styles.modalList} showsVerticalScrollIndicator={false}>
+          <TouchableOpacity
+            style={styles.modalOptionRow}
+            onPress={() => {
+              setYear(null);
+              yearPicker.close();
+            }}
+          >
+            <Text style={styles.modalOptionName}>All years</Text>
+            {!year && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
           </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* Student detail modal */}
-      <Modal visible={!!selectedStudent} transparent animationType="fade" onRequestClose={() => setSelectedStudent(null)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setSelectedStudent(null)}>
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            {selectedStudent && (
-              <>
-                <Text style={styles.modalTitle}>{selectedStudent.name}</Text>
-                <DetailLine label="Student ID" value={selectedStudent.student_id_no} />
-                <DetailLine label="Register no" value={selectedStudent.register_no ?? "—"} />
-                <DetailLine
-                  label="Dept · Sem"
-                  value={
-                    selectedStudent.department_code
-                      ? `${selectedStudent.department_code} · ${selectedStudent.semester ?? "Unassigned"}`
-                      : "Unassigned"
-                  }
-                />
-                <DetailLine
-                  label="Attendance"
-                  value={selectedStudent.attendance_pct !== null ? `${selectedStudent.attendance_pct}%` : "No records yet"}
-                />
-                <DetailLine label="CGPA" value={selectedStudent.cgpa !== null ? selectedStudent.cgpa.toFixed(2) : "No results yet"} />
-                <DetailLine label="Fees" value={feeStatusLabel(selectedStudent)} />
-                <TouchableOpacity style={styles.closeModalButton} onPress={() => setSelectedStudent(null)}>
-                  <Text style={styles.closeModalButtonText}>Close</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+          {YEARS.map((y) => (
+            <TouchableOpacity
+              key={y}
+              style={styles.modalOptionRow}
+              onPress={() => {
+                setYear(y);
+                yearPicker.close();
+              }}
+            >
+              <Text style={styles.modalOptionName}>Year {y}</Text>
+              {year === y && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </AnchoredDropdown>
     </SafeAreaView>
   );
 }
 
-function feeStatusLabel(student: PrincipalStudentRow): string {
-  if (student.fee_status === "scholarship") return "Scholarship";
-  if (student.fee_status === "paid") return "Paid";
-  if (student.fee_status === "due") return `₹${student.fee_outstanding.toLocaleString()} due`;
-  return "No demand raised";
-}
-
-function DetailLine({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.detailLine}>
-      <Text style={styles.detailLabel}>{label}</Text>
-      <Text style={styles.detailValue}>{value}</Text>
-    </View>
-  );
-}
 
 function FilterPill({
   label,
   active,
   onPress,
   iconRight,
+  anchorRef,
 }: {
   label: string;
   active: boolean;
   onPress: () => void;
   iconRight?: keyof typeof Ionicons.glyphMap;
+  anchorRef?: RefObject<View | null>;
 }) {
   return (
-    <TouchableOpacity style={[styles.pill, active && styles.pillActive]} onPress={onPress} activeOpacity={0.8}>
-      <Text style={[styles.pillText, active && styles.pillTextActive]}>{label}</Text>
-      {iconRight && <Ionicons name={iconRight} size={14} color={active ? "#fff" : "#8A93A3"} />}
-    </TouchableOpacity>
+    <View ref={anchorRef} collapsable={false}>
+      <TouchableOpacity style={[styles.pill, active && styles.pillActive]} onPress={onPress} activeOpacity={0.8}>
+        <Text style={[styles.pillText, active && styles.pillTextActive]}>{label}</Text>
+        {iconRight && <Ionicons name={iconRight} size={14} color={active ? "#fff" : "#8A93A3"} />}
+      </TouchableOpacity>
+    </View>
   );
 }
 
@@ -448,35 +419,48 @@ function StatCard({
   );
 }
 
+// Same avatar/name/meta/chevron row style as FacultyStaffScreen.tsx's own
+// FacultyRow - kept visually identical across both directories per explicit
+// request. Attendance/CGPA/fee status (still real, still fetched) moved
+// off this row entirely - now only shown on the full profile detail screen
+// this row navigates to, same as Faculty's own row doesn't show
+// load/duties/mentees inline either.
 function StudentRow({ student, onPress }: { student: PrincipalStudentRow; onPress: () => void }) {
-  const feeTone = student.fee_status === "due" ? "#E0724F" : student.fee_status === "scholarship" ? "#2F6FE0" : "#3FA66B";
   return (
     <TouchableOpacity style={styles.studentRow} onPress={onPress} activeOpacity={0.8}>
-      <View style={styles.studentRowTop}>
+      <View style={styles.studentAvatar}>
+        {student.photo_url ? (
+          <Image source={{ uri: student.photo_url }} style={styles.studentAvatarImage} />
+        ) : (
+          <Text style={styles.studentAvatarText}>{initialsFromName(student.name)}</Text>
+        )}
+      </View>
+      <View style={styles.studentRowTextWrap}>
         <Text style={styles.studentName} numberOfLines={1}>
           {student.name}
         </Text>
-        <Text style={styles.studentRegNo}>{student.register_no ?? student.student_id_no}</Text>
+        <Text style={styles.studentMeta} numberOfLines={1}>
+          {student.register_no ?? student.student_id_no}
+          {" · "}
+          {student.department_code ?? "Unassigned"}
+          {student.batch_name ? ` · ${student.batch_name}` : ""}
+          {student.section ? ` · Sec ${student.section}` : ""}
+        </Text>
       </View>
-      <Text style={styles.studentMeta}>
-        {student.department_code ?? "Unassigned"} · Sem {student.semester ?? "—"}
-      </Text>
-      <View style={styles.studentChipsRow}>
-        <Chip label={student.attendance_pct !== null ? `${student.attendance_pct}% att` : "No attendance"} />
-        <Chip label={student.cgpa !== null ? `CGPA ${student.cgpa.toFixed(2)}` : "No CGPA"} />
-        <Chip label={feeStatusLabel(student)} color={feeTone} />
-      </View>
+      <Ionicons name="chevron-forward" size={18} color="#B0B7C3" />
     </TouchableOpacity>
   );
 }
 
-function Chip({ label, color }: { label: string; color?: string }) {
-  return (
-    <View style={[styles.chip, color ? { borderColor: color } : null]}>
-      <Text style={[styles.chipText, color ? { color } : null]}>{label}</Text>
-    </View>
-  );
+function initialsFromName(name: string | null | undefined) {
+  if (!name) return "?";
+  const parts = name.trim().split(/\s+/);
+  return parts
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("");
 }
+
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F7F8FA" },
@@ -503,7 +487,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   searchInput: { flex: 1, fontSize: 14, fontFamily: fonts.regular, color: "#111827", padding: 0 },
-  pillsRow: { gap: 8, paddingVertical: 12 },
+  // Plain wrapping row, not a horizontal ScrollView - see
+  // HigherEducationScreen.tsx's identical comment for why.
+  pillsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingVertical: 12 },
   pill: {
     flexDirection: "row",
     alignItems: "center",
@@ -551,32 +537,48 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 14, fontFamily: fonts.bold, color: "#111827", marginBottom: 10 },
   centerState: { alignItems: "center", paddingVertical: 40, gap: 8 },
   centerStateText: { fontSize: 13, fontFamily: fonts.medium, color: "#9AA6B2", textAlign: "center", paddingHorizontal: 20 },
+  // Same avatar/name/meta/chevron row style as FacultyStaffScreen.tsx's own
+  // facultyRow/facultyAvatar/... tokens - kept visually identical across
+  // both directories per explicit request.
   studentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
     backgroundColor: "#fff",
     borderRadius: 14,
     borderWidth: 1,
     borderColor: "#EEF0F4",
-    padding: 14,
+    padding: 12,
     marginBottom: 10,
-    gap: 6,
   },
-  studentRowTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
-  studentName: { flex: 1, fontSize: 14, fontFamily: fonts.bold, color: "#111827" },
-  studentRegNo: { fontSize: 11, fontFamily: fonts.medium, color: "#9AA6B2" },
+  studentAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#E4EBFB",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  studentAvatarImage: { width: 44, height: 44, borderRadius: 22 },
+  studentAvatarText: { fontSize: 15, fontFamily: fonts.bold, color: "#2F6FE0" },
+  studentRowTextWrap: { flex: 1, gap: 2 },
+  studentName: { fontSize: 14, fontFamily: fonts.bold, color: "#111827" },
   studentMeta: { fontSize: 11, fontFamily: fonts.regular, color: "#8A93A3" },
-  studentChipsRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 2 },
-  chip: {
-    borderWidth: 1,
-    borderColor: "#EEF0F4",
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  chipText: { fontSize: 10, fontFamily: fonts.semibold, color: "#4B5563" },
   loadMoreButton: { alignItems: "center", paddingVertical: 14 },
   loadMoreText: { fontSize: 13, fontFamily: fonts.bold, color: "#2F6FE0" },
-  modalOverlay: { flex: 1, backgroundColor: "rgba(15,23,42,0.5)", justifyContent: "center", padding: 20 },
   modalCard: { backgroundColor: "#fff", borderRadius: 18, padding: 18, maxHeight: "70%" },
+  // Anchored dropdowns have no full-screen flex parent to resolve modalCard's
+  // percentage maxHeight against, so pin a concrete size for those two
+  // (department/year).
+  anchoredCard: {
+    width: 240,
+    maxHeight: 320,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+  },
   modalTitle: { fontSize: 15, fontFamily: fonts.bold, color: "#111827", marginBottom: 10 },
   modalList: { marginBottom: 4 },
   modalOptionRow: {
@@ -588,15 +590,4 @@ const styles = StyleSheet.create({
     borderBottomColor: "#F1F3F6",
   },
   modalOptionName: { fontSize: 14, fontFamily: fonts.semibold, color: "#111827" },
-  detailLine: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F1F3F6",
-  },
-  detailLabel: { fontSize: 12, fontFamily: fonts.medium, color: "#9AA6B2" },
-  detailValue: { fontSize: 13, fontFamily: fonts.semibold, color: "#111827" },
-  closeModalButton: { alignItems: "center", paddingVertical: 12, marginTop: 8 },
-  closeModalButtonText: { fontSize: 13, fontFamily: fonts.bold, color: "#2F6FE0" },
 });

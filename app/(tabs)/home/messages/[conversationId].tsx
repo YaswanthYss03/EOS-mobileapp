@@ -6,6 +6,7 @@ import {
   FlatList,
   TouchableOpacity,
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Keyboard,
   Platform,
@@ -20,13 +21,16 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "@/theme";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
 import {
   listMessages,
   editMessage,
   deleteMessage,
+  getGroupDetails,
   type ChatMessage,
+  type GroupMember,
 } from "@/services/api/messaging.api";
 import { useMessaging } from "@/context/MessagingContext";
 import { useAuth } from "@/context/AuthContext";
@@ -68,11 +72,17 @@ function newClientId(): string {
 function ChatHeader({
   name,
   roleLabel,
+  imageUrl,
+  isGroup,
   onBack,
+  onPressInfo,
 }: {
   name: string;
   roleLabel: string;
+  imageUrl?: string | null;
+  isGroup?: boolean;
   onBack: () => void;
+  onPressInfo?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   return (
@@ -85,17 +95,35 @@ function ChatHeader({
       <TouchableOpacity onPress={onBack} style={styles.backButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
         <Ionicons name="chevron-back" size={20} color="#fff" />
       </TouchableOpacity>
-      <View style={styles.headerAvatar}>
-        <Text style={styles.headerAvatarText}>{initialsFromName(name)}</Text>
-      </View>
-      <View style={styles.headerTextWrap}>
-        <Text style={styles.headerName} numberOfLines={1}>
-          {name}
-        </Text>
-        <Text style={styles.headerSubtitle} numberOfLines={1}>
-          {roleLabel}
-        </Text>
-      </View>
+      <TouchableOpacity
+        style={styles.headerCenterRow}
+        activeOpacity={onPressInfo ? 0.7 : 1}
+        onPress={onPressInfo}
+        disabled={!onPressInfo}
+      >
+        <View style={styles.headerAvatar}>
+          {imageUrl ? (
+            <Image source={{ uri: imageUrl }} style={styles.headerAvatarImage} />
+          ) : isGroup ? (
+            <Ionicons name="people" size={16} color="#fff" />
+          ) : (
+            <Text style={styles.headerAvatarText}>{initialsFromName(name)}</Text>
+          )}
+        </View>
+        <View style={styles.headerTextWrap}>
+          <Text style={styles.headerName} numberOfLines={1}>
+            {name}
+          </Text>
+          <Text style={styles.headerSubtitle} numberOfLines={1}>
+            {roleLabel}
+          </Text>
+        </View>
+      </TouchableOpacity>
+      {isGroup && (
+        <TouchableOpacity onPress={onPressInfo} style={styles.backButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <Ionicons name="information-circle-outline" size={20} color="#fff" />
+        </TouchableOpacity>
+      )}
     </LinearGradient>
   );
 }
@@ -105,19 +133,65 @@ export function ConversationScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+
+  // The input row's own bottom padding is the phone's safe-area inset (home
+  // indicator/nav bar clearance) - only relevant while the keyboard is
+  // closed. Left applied unconditionally, that same padding stacks on top
+  // of the space KeyboardAvoidingView already added for the keyboard,
+  // leaving the input floating with a gap above the keyboard instead of
+  // sitting flush against it (the "no large blank gap" requirement).
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
   const { socket, refreshUnreadCount } = useMessaging();
   const params = useLocalSearchParams<{
     conversationId: string;
     name?: string;
     roleLabel?: string;
     otherUserId?: string;
+    photoUrl?: string;
+    isGroup?: string;
   }>();
 
   const conversationId = Number(params.conversationId);
   const otherUserId = params.otherUserId ? Number(params.otherUserId) : null;
-  const name = params.name ?? "Conversation";
-  const roleLabel = params.roleLabel ?? "";
+  const isGroup = params.isGroup === "true";
   const myUserId = user?.id ?? null;
+
+  // A DM trusts the route params (name/roleLabel/otherUserId) passed from
+  // the list screen, same as before this feature - a group instead fetches
+  // its own title/image/member list on mount, since the list row alone
+  // doesn't carry enough to resolve a per-sender avatar for every bubble.
+  const [groupMembers, setGroupMembers] = useState<Map<number, GroupMember>>(new Map());
+  const [groupTitle, setGroupTitle] = useState<string | null>(null);
+  const [groupImageUrl, setGroupImageUrl] = useState<string | null>(null);
+  const [groupMemberCount, setGroupMemberCount] = useState(0);
+
+  useEffect(() => {
+    if (!isGroup) return;
+    getGroupDetails(conversationId)
+      .then((details) => {
+        setGroupTitle(details.title);
+        setGroupImageUrl(details.imageUrl);
+        setGroupMemberCount(details.memberCount);
+        setGroupMembers(new Map(details.members.map((m) => [m.userId, m])));
+      })
+      .catch(() => {
+        toast.error("Couldn't load this group's details.");
+      });
+  }, [isGroup, conversationId]);
+
+  const name = isGroup ? (groupTitle ?? "Group") : (params.name ?? "Conversation");
+  const roleLabel = isGroup ? `${groupMemberCount} member${groupMemberCount === 1 ? "" : "s"}` : (params.roleLabel ?? "");
+  const headerImageUrl = isGroup ? groupImageUrl : (params.photoUrl ?? null);
 
   // Same pattern as OnlineClassScreen/FacultyAttendanceScreen: hide the
   // shared header immediately on focus (no setTimeout - a deferred hide can
@@ -146,6 +220,7 @@ export function ConversationScreen() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const listRef = useRef<FlatList>(null);
+  const inputRef = useRef<TextInput>(null);
 
   // Long-pressing one of MY OWN bubbles opens a small Edit/Delete menu for
   // it; picking Edit switches the composer into edit mode (editingMessage)
@@ -384,9 +459,12 @@ export function ConversationScreen() {
       keyboardVerticalOffset={0}
     >
       <SafeAreaView style={styles.container} edges={[]}>
+        <WatermarkBackground />
         <ChatHeader
           name={name}
           roleLabel={roleLabel}
+          imageUrl={headerImageUrl}
+          isGroup={isGroup}
           onBack={() => {
             // Dismiss first, then navigate - leaving while the keyboard is
             // still open/animating is what left this screen's own
@@ -396,6 +474,15 @@ export function ConversationScreen() {
             Keyboard.dismiss();
             router.back();
           }}
+          onPressInfo={
+            isGroup
+              ? () =>
+                  router.push({
+                    pathname: "/(tabs)/home/messages/group-details",
+                    params: { conversationId: String(conversationId) },
+                  } as never)
+              : undefined
+          }
         />
 
         {status === "loading" ? (
@@ -428,21 +515,22 @@ export function ConversationScreen() {
               const message = row.item;
               const mine = message.senderUserId === myUserId;
               const editable = mine && !message.pending && !message.failed && !message.isDeleted;
+              // A DM has exactly one "theirs" avatar (the header's own name/
+              // photo); a group looks up the actual sender per-message,
+              // since "theirs" can be any of several members.
+              const sender = isGroup ? groupMembers.get(message.senderUserId) : null;
+              const senderName = isGroup ? (sender?.name ?? "Member") : name;
+              const senderPhotoUrl = isGroup ? (sender?.photoUrl ?? null) : headerImageUrl;
               return (
                 <View style={[styles.bubbleRow, mine ? styles.bubbleRowMine : styles.bubbleRowTheirs]}>
                   {!mine && (
                     <View style={styles.miniAvatar}>
-                      <Text style={styles.miniAvatarText}>{initialsFromName(name)}</Text>
+                      {senderPhotoUrl ? (
+                        <Image source={{ uri: senderPhotoUrl }} style={styles.miniAvatarImage} />
+                      ) : (
+                        <Text style={styles.miniAvatarText}>{initialsFromName(senderName)}</Text>
+                      )}
                     </View>
-                  )}
-                  {editable && (
-                    <TouchableOpacity
-                      style={styles.bubbleMenuButton}
-                      hitSlop={8}
-                      onPress={() => openMessageMenu(message)}
-                    >
-                      <Ionicons name="ellipsis-vertical" size={14} color="#9AA6B2" />
-                    </TouchableOpacity>
                   )}
                   <View style={styles.bubbleWrap}>
                     <TouchableOpacity
@@ -471,7 +559,7 @@ export function ConversationScreen() {
                                 ? `${clockTime(message.createdAt)} · Edited`
                                 : clockTime(message.createdAt)}
                       </Text>
-                      {mine && message.id === lastMineId && message.status === "read" && (
+                      {!isGroup && mine && message.id === lastMineId && message.status === "read" && (
                         <Text style={styles.seenText}> · Seen</Text>
                       )}
                     </View>
@@ -494,8 +582,9 @@ export function ConversationScreen() {
           </View>
         )}
 
-        <View style={[styles.inputRow, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        <View style={[styles.inputRow, { paddingBottom: keyboardVisible ? 10 : Math.max(insets.bottom, 12) }]}>
           <TextInput
+            ref={inputRef}
             style={styles.input}
             placeholder="Write a message"
             placeholderTextColor="#9AA6B2"
@@ -561,6 +650,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  headerCenterRow: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
   headerAvatar: {
     width: 36,
     height: 36,
@@ -568,6 +663,11 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
+  },
+  headerAvatarImage: {
+    width: "100%",
+    height: "100%",
   },
   headerAvatarText: {
     fontSize: 13,
@@ -642,19 +742,16 @@ const styles = StyleSheet.create({
     backgroundColor: "#EAF0FD",
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
+  },
+  miniAvatarImage: {
+    width: "100%",
+    height: "100%",
   },
   miniAvatarText: {
     fontSize: 10,
     fontFamily: fonts.bold,
     color: "#2F6FE0",
-  },
-  bubbleMenuButton: {
-    width: 22,
-    height: 22,
-    alignItems: "center",
-    justifyContent: "center",
-    alignSelf: "flex-end",
-    marginBottom: 14,
   },
   bubbleWrap: {
     maxWidth: "75%",

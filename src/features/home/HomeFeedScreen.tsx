@@ -4,7 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
-import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { SkeletonFeedCards } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { getApiErrorMessage } from "@/services/api/client";
 import { TopBar } from "./components/TopBar";
@@ -12,8 +12,10 @@ import { HomeHeader } from "./components/HomeHeader";
 import { AnnouncementsSection } from "./components/AnnouncementsSection";
 import { PostCard } from "./components/PostCard";
 import { AnnouncementPostCard } from "./components/AnnouncementPostCard";
+import { CommentsSheet, type CommentsSource } from "./components/CommentsSheet";
 import { getAchievements, type AchievementListItem } from "@/services/api/achievements.api";
 import { getAnnouncements, type Announcement } from "@/services/api/announcements.api";
+import { useRole } from "@/hooks/useRole";
 
 type LoadStatus = "loading" | "success" | "error";
 
@@ -68,15 +70,35 @@ function feedKey(item: FeedItem): string {
 }
 
 // Achievement posts (photo/video + caption) from the Media Room - see
-// EOSbackend1's src/modules/achievements module. Comment posting/loading
-// is handled per-card inside PostCard itself; this screen only owns the
-// feed list.
+// EOSbackend1's src/modules/achievements module. Comment viewing/posting
+// happens in the one shared CommentsSheet modal mounted below (Instagram-
+// style bottom sheet) - this screen owns which post it's open for and the
+// per-post comment-count overrides that feed back into each card.
 export function HomeFeedScreen() {
   const navigation = useNavigation();
+  const role = useRole();
+  // Alumni's Home tab is the same merged achievements+announcements post
+  // feed every other role sees - the only difference is the plain-notices
+  // carousel (AnnouncementsSection) above the feed, which doesn't apply
+  // once graduated (those are current-student/staff notices).
+  const isAlumni = role === "alumni";
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [error, setError] = useState<string | null>(null);
   const [posts, setPosts] = useState<FeedItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Comments live in one shared bottom-sheet modal (see CommentsSheet),
+  // opened for whichever post's "Comments" was tapped - not per-card
+  // inline state anymore. commentCountOverrides holds the up-to-date count
+  // for whichever posts the sheet has actually loaded/posted to this
+  // session, so a card's displayed number updates immediately without
+  // reloading the whole feed.
+  const [activeComments, setActiveComments] = useState<CommentsSource | null>(null);
+  const [commentCountOverrides, setCommentCountOverrides] = useState<Record<string, number>>({});
+
+  function commentKey(source: CommentsSource): string {
+    return `${source.kind}-${source.id}`;
+  }
 
   const load = useCallback((isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -147,23 +169,42 @@ export function HomeFeedScreen() {
         <FlatList
           data={posts}
           keyExtractor={feedKey}
-          renderItem={({ item }) =>
-            item.kind === "achievement" ? (
-              <PostCard post={item.achievement} />
-            ) : (
-              <AnnouncementPostCard post={item.announcement} />
-            )
-          }
+          renderItem={({ item }) => {
+            if (item.kind === "achievement") {
+              const source: CommentsSource = { kind: "achievement", id: item.achievement.id };
+              return (
+                <PostCard
+                  post={item.achievement}
+                  commentCount={
+                    commentCountOverrides[commentKey(source)] ?? item.achievement._count.achievement_comments
+                  }
+                  onOpenComments={() => setActiveComments(source)}
+                />
+              );
+            }
+            const source: CommentsSource = {
+              kind: "announcement",
+              id: item.announcement.id,
+              allowComments: item.announcement.social?.allow_comments,
+            };
+            return (
+              <AnnouncementPostCard
+                post={item.announcement}
+                commentCount={commentCountOverrides[commentKey(source)] ?? null}
+                onOpenComments={() => setActiveComments(source)}
+              />
+            );
+          }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor="#2F6FE0" />}
           ListHeaderComponent={
             <>
               <TopBar />
-              <AnnouncementsSection />
+              {!isAlumni && <AnnouncementsSection />}
             </>
           }
           ListEmptyComponent={
             status === "loading" ? (
-              <SkeletonListRows count={4} style={styles.loadingList} />
+              <SkeletonFeedCards count={3} />
             ) : (
               <View style={styles.centerState}>
                 <Ionicons name="images-outline" size={32} color="#B0B7C3" />
@@ -174,6 +215,16 @@ export function HomeFeedScreen() {
           contentContainerStyle={styles.list}
         />
       )}
+
+      <CommentsSheet
+        visible={activeComments !== null}
+        source={activeComments}
+        onClose={() => setActiveComments(null)}
+        onCountChange={(count) => {
+          if (!activeComments) return;
+          setCommentCountOverrides((prev) => ({ ...prev, [commentKey(activeComments)]: count }));
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -185,9 +236,6 @@ const styles = StyleSheet.create({
   },
   list: {
     paddingBottom: 8,
-  },
-  loadingList: {
-    paddingHorizontal: 16,
   },
   centerFill: {
     flex: 1,

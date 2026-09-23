@@ -6,6 +6,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { useSkipSharedHeaderToggle } from "@/hooks/useSkipSharedHeaderToggle";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
@@ -19,6 +20,7 @@ import {
   type PurchaseRequest,
   type PurchaseRequestStatus,
 } from "@/services/api/purchase-requests.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import {
   listServiceRequestsForHodReview,
   hodReviewServiceRequest,
@@ -156,13 +158,16 @@ export function PopSopScreen() {
   // This screen renders its own full header below, so hide the shared
   // CollegeHeader while it's focused - same pattern as the other ERP
   // sub-screens.
+  const skipHeaderToggle = useSkipSharedHeaderToggle();
+
   useFocusEffect(
     useCallback(() => {
+      if (skipHeaderToggle) return undefined;
       navigation.getParent()?.setOptions({ headerShown: false });
       return () => {
         navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
       };
-    }, [navigation]),
+    }, [navigation, skipHeaderToggle]),
   );
 
   const ordersOfType = useMemo<DisplayOrder[]>(
@@ -239,6 +244,7 @@ export function PopSopScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -501,7 +507,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },

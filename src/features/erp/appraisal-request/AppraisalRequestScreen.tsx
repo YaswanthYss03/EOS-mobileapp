@@ -8,11 +8,13 @@ import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { useRole } from "@/hooks/useRole";
 import { toast } from "@/utils/toast";
 import { formatDate } from "@/utils/calendar";
 import { getApiErrorMessage } from "@/services/api/client";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import {
   getAppraisalCriteria,
   createAppraisalRequest,
@@ -62,6 +64,7 @@ export function AppraisalRequestScreen() {
   const [descriptions, setDescriptions] = useState<Record<number, string>>({});
   const [stagedFiles, setStagedFiles] = useState<Record<number, PickedAppraisalFile[]>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const scrollMemory = useTabScrollMemory();
 
   const [criteriaStatus, setCriteriaStatus] = useState<LoadStatus>("loading");
   const [criteriaError, setCriteriaError] = useState<string | null>(null);
@@ -202,6 +205,7 @@ export function AppraisalRequestScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -223,89 +227,104 @@ export function AppraisalRequestScreen() {
         </View>
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {canApply && (
-          <View style={styles.tabSwitch}>
-            <TouchableOpacity
-              style={[styles.tabSwitchButton, tab === "apply" && styles.tabSwitchButtonActive]}
-              onPress={() => setTab("apply")}
-            >
-              <Text style={[styles.tabSwitchText, tab === "apply" && styles.tabSwitchTextActive]}>Apply</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tabSwitchButton, tab === "history" && styles.tabSwitchButtonActive]}
-              onPress={() => setTab("history")}
-            >
-              <Text style={[styles.tabSwitchText, tab === "history" && styles.tabSwitchTextActive]}>History</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+      {canApply && (
+        <View style={styles.tabSwitchWrap}>
+          <AnimatedTabBar
+            tabs={[
+              { key: "apply", label: "Apply" },
+              { key: "history", label: "History" },
+            ]}
+            active={tab}
+            onChange={setTab}
+            containerStyle={styles.tabSwitch}
+            tabStyle={styles.tabSwitchButton}
+            tabTextStyle={styles.tabSwitchText}
+            activeTabTextStyle={styles.tabSwitchTextActive}
+            indicatorStyle={styles.tabSwitchIndicator}
+          />
+        </View>
+      )}
 
+      <TabTransitionView activeKey={tab} order={["apply", "history"]} style={styles.tabContent}>
         {tab === "apply" ? (
-          criteriaStatus === "loading" ? (
-            <SkeletonListRows count={3} />
-          ) : criteriaStatus === "error" ? (
-            <View style={styles.errorNotice}>
-              <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
-              <Text style={styles.errorNoticeText}>{criteriaError ?? "Something went wrong."}</Text>
-              <TouchableOpacity onPress={loadCriteria} style={styles.retryButton} activeOpacity={0.8}>
-                <Text style={styles.retryButtonText}>Retry</Text>
-              </TouchableOpacity>
-            </View>
-          ) : divisions.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
-              <Text style={styles.emptyStateText}>No appraisal cycle is open right now</Text>
-            </View>
-          ) : (
-            <>
-              {divisions.map((division) => (
-                <AppraisalCategoryCard
-                  key={division.id}
-                  division={division}
-                  descriptions={descriptions}
-                  stagedFiles={stagedFiles[division.id] ?? []}
-                  expanded={expandedId === division.id}
-                  onToggleExpand={() => toggleExpanded(division.id)}
-                  onUpdateDescription={updateDescription}
-                  onPickFiles={() => handlePickFiles(division.id)}
-                  onRemoveStagedFile={(index) => removeStagedFile(division.id, index)}
-                />
-              ))}
+          <ScrollView
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            {...scrollMemory.bind("apply")}
+          >
+            {criteriaStatus === "loading" ? (
+              <SkeletonListRows count={3} />
+            ) : criteriaStatus === "error" ? (
+              <View style={styles.errorNotice}>
+                <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+                <Text style={styles.errorNoticeText}>{criteriaError ?? "Something went wrong."}</Text>
+                <TouchableOpacity onPress={loadCriteria} style={styles.retryButton} activeOpacity={0.8}>
+                  <Text style={styles.retryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : divisions.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
+                <Text style={styles.emptyStateText}>No appraisal cycle is open right now</Text>
+              </View>
+            ) : (
+              <>
+                {divisions.map((division) => (
+                  <AppraisalCategoryCard
+                    key={division.id}
+                    division={division}
+                    descriptions={descriptions}
+                    stagedFiles={stagedFiles[division.id] ?? []}
+                    expanded={expandedId === division.id}
+                    onToggleExpand={() => toggleExpanded(division.id)}
+                    onUpdateDescription={updateDescription}
+                    onPickFiles={() => handlePickFiles(division.id)}
+                    onRemoveStagedFile={(index) => removeStagedFile(division.id, index)}
+                  />
+                ))}
 
-              <TouchableOpacity
-                style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
-                onPress={handleSubmit}
-                activeOpacity={0.85}
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.submitButtonText}>Submit Appraisal Request</Text>
-                )}
-              </TouchableOpacity>
-            </>
-          )
-        ) : historyStatus === "loading" ? (
-          <SkeletonListRows count={4} />
-        ) : historyStatus === "error" ? (
-          <View style={styles.errorNotice}>
-            <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
-            <Text style={styles.errorNoticeText}>{historyError ?? "Something went wrong."}</Text>
-            <TouchableOpacity onPress={loadHistory} style={styles.retryButton} activeOpacity={0.8}>
-              <Text style={styles.retryButtonText}>Retry</Text>
-            </TouchableOpacity>
-          </View>
-        ) : history.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
-            <Text style={styles.emptyStateText}>No appraisal history yet</Text>
-          </View>
+                <TouchableOpacity
+                  style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
+                  onPress={handleSubmit}
+                  activeOpacity={0.85}
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.submitButtonText}>Submit Appraisal Request</Text>
+                  )}
+                </TouchableOpacity>
+              </>
+            )}
+          </ScrollView>
         ) : (
-          history.map((item) => <HistoryCard key={item.id} item={item} showFaculty={!canApply} />)
+          <ScrollView
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            {...scrollMemory.bind("history")}
+          >
+            {historyStatus === "loading" ? (
+              <SkeletonListRows count={4} />
+            ) : historyStatus === "error" ? (
+              <View style={styles.errorNotice}>
+                <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+                <Text style={styles.errorNoticeText}>{historyError ?? "Something went wrong."}</Text>
+                <TouchableOpacity onPress={loadHistory} style={styles.retryButton} activeOpacity={0.8}>
+                  <Text style={styles.retryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : history.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
+                <Text style={styles.emptyStateText}>No appraisal history yet</Text>
+              </View>
+            ) : (
+              history.map((item) => <HistoryCard key={item.id} item={item} showFaculty={!canApply} />)
+            )}
+          </ScrollView>
         )}
-      </ScrollView>
+      </TabTransitionView>
     </SafeAreaView>
   );
 }
@@ -471,7 +490,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -487,8 +506,15 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   content: {
-    padding: 16,
+    paddingHorizontal: 16,
     paddingBottom: 32,
+  },
+  tabContent: {
+    flex: 1,
+  },
+  tabSwitchWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
   },
   tabSwitch: {
     flexDirection: "row",
@@ -510,7 +536,10 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     paddingVertical: 10,
   },
-  tabSwitchButtonActive: {
+  tabSwitchIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
     backgroundColor: "#2F6FE0",
   },
   tabSwitchText: {

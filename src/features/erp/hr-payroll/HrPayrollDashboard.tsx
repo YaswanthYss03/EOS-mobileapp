@@ -1,14 +1,22 @@
 import { useCallback } from "react";
-import { View, Text, ScrollView, StyleSheet } from "react-native";
+import { View, ScrollView, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
-import { fonts } from "@/theme";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import { QuickAccessGrid } from "../components/QuickAccessGrid";
 import { DashboardHeader } from "../components/DashboardHeader";
-import { hrSectionItems, employeeSectionItems } from "./data/mockDashboard";
+import { hrSectionItems } from "./data/mockDashboard";
 
+// HR & Payroll's "Services" tab root (see app/(tabs)/_layout.tsx's
+// isHrPayroll - now a full bottom-nav tab of its own, the erp tab
+// relabeled, alongside Progress (academics tab, see
+// HrPayrollProgressScreen.tsx) and Campus (amenity tab, see
+// AmenityHomeScreen.tsx) - HR's own Class-tab dashboard used to bundle all
+// three into one screen with section headings; each now lives on its own
+// tab instead, so this is just hrSectionItems' single grid, no heading.
+//
 // TODO: hr-payroll RBAC - view-only pages for this role go here as siblings/subfolders.
 // Anything with complex operations (bulk edits, approvals, config) stays on the web app.
 export function HrPayrollDashboard() {
@@ -22,9 +30,7 @@ export function HrPayrollDashboard() {
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({
-        header: () => (
-          <DashboardHeader subtitle="HR & Payroll services" onBack={() => router.replace("/(tabs)/home")} />
-        ),
+        header: () => <DashboardHeader subtitle="Services" onBack={() => router.replace("/(tabs)/home")} />,
       });
       return () => {
         navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
@@ -34,15 +40,10 @@ export function HrPayrollDashboard() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>HR</Text>
-          <QuickAccessGrid items={hrSectionItems} />
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Employee</Text>
-          <QuickAccessGrid items={employeeSectionItems} />
+          <QuickAccessGrid items={hrSectionItems} size="campus" gap={12} />
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -59,13 +60,5 @@ const styles = StyleSheet.create({
   },
   section: {
     marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 12,
-    fontFamily: fonts.bold,
-    color: "#8A93A3",
-    letterSpacing: 1,
-    textTransform: "uppercase",
-    marginBottom: 4,
   },
 });

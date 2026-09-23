@@ -17,6 +17,7 @@ import { Ionicons } from "@expo/vector-icons";
 import QRCode from "react-native-qrcode-svg";
 import RazorpayCheckout from "react-native-razorpay";
 import { SkeletonStatCards, SkeletonListRows } from "@/components/ui/Skeleton";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { formatDate } from "@/utils/calendar";
@@ -183,6 +184,7 @@ export function WalletScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <WalletHeader onBack={() => router.back()} />
       <ScrollView
         contentContainerStyle={styles.content}
@@ -355,7 +357,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },

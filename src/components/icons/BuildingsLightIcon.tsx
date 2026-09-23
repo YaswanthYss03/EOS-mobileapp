@@ -1,17 +1,18 @@
 import Svg, { Path } from "react-native-svg";
 
-// Exact glyph from Phosphor Icons' "Buildings" (light weight) - see
-// https://raw.githubusercontent.com/phosphor-icons/core/main/assets/light/buildings-light.svg.
-// react-icons (the web package the design referenced, react-icons/pi's
-// PiBuildingsLight) is a web-only/react-dom library and can't run in React
-// Native, but it's just a thin wrapper around this same Phosphor SVG path -
-// rendering that path directly via react-native-svg (already a dependency
-// here) reproduces the identical icon on-device instead of substituting a
-// different icon set's lookalike.
+// Phosphor Icons' "Buildings" glyph, FILL weight (solid/bold, not the thin
+// "light" stroke version this component started as) - see
+// https://raw.githubusercontent.com/phosphor-icons/core/main/assets/fill/buildings-fill.svg.
+// react-icons (the web package the design originally referenced, react-icons/
+// pi's PiBuildingsLight) is a web-only/react-dom library and can't run in
+// React Native, but it's just a thin wrapper around this same Phosphor SVG
+// path - rendering that path directly via react-native-svg (already a
+// dependency here) reproduces the identical icon on-device instead of
+// substituting a different icon set's lookalike.
 export function BuildingsLightIcon({ size = 24, color = "#000" }: { size?: number; color?: string }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 256 256" fill={color}>
-      <Path d="M240,210H222V96a14,14,0,0,0-14-14H142V32a14,14,0,0,0-21.77-11.64l-80,53.33A14,14,0,0,0,34,85.34V210H16a6,6,0,0,0,0,12H240a6,6,0,0,0,0-12ZM208,94a2,2,0,0,1,2,2V210H142V94ZM46,85.34a2,2,0,0,1,.89-1.66l80-53.34A2,2,0,0,1,130,32V210H46ZM110,112v16a6,6,0,0,1-12,0V112a6,6,0,0,1,12,0Zm-32,0v16a6,6,0,0,1-12,0V112a6,6,0,0,1,12,0Zm0,56v16a6,6,0,0,1-12,0V168a6,6,0,0,1,12,0Zm32,0v16a6,6,0,0,1-12,0V168a6,6,0,0,1,12,0Z" />
+      <Path d="M239.73,208H224V96a16,16,0,0,0-16-16H164a4,4,0,0,0-4,4V208H144V32.41a16.43,16.43,0,0,0-6.16-13,16,16,0,0,0-18.72-.69L39.12,72A16,16,0,0,0,32,85.34V208H16.27A8.18,8.18,0,0,0,8,215.47,8,8,0,0,0,16,224H240a8,8,0,0,0,8-8.53A8.18,8.18,0,0,0,239.73,208ZM76,184a8,8,0,0,1-8.53,8A8.18,8.18,0,0,1,60,183.72V168.27A8.19,8.19,0,0,1,67.47,160,8,8,0,0,1,76,168Zm0-56a8,8,0,0,1-8.53,8A8.19,8.19,0,0,1,60,127.72V112.27A8.19,8.19,0,0,1,67.47,104,8,8,0,0,1,76,112Zm40,56a8,8,0,0,1-8.53,8,8.18,8.18,0,0,1-7.47-8.26V168.27a8.19,8.19,0,0,1,7.47-8.26,8,8,0,0,1,8.53,8Zm0-56a8,8,0,0,1-8.53,8,8.19,8.19,0,0,1-7.47-8.26V112.27a8.19,8.19,0,0,1,7.47-8.26,8,8,0,0,1,8.53,8Z" />
     </Svg>
   );
 }

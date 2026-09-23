@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, ActivityIndicator } from "react-native";
+import { useCallback, useMemo, useRef, useState, type RefObject } from "react";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -7,6 +7,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnchoredDropdown } from "@/components/ui/dropdown";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -21,6 +22,7 @@ import {
   type RosterStudent,
 } from "@/services/api/attendance-cv.api";
 import { FaceCaptureCamera } from "./FaceCaptureCamera";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 // Mobile-side status label - "onduty" (no underscore) is kept distinct from
 // the backend's own attendance_status_enum spelling ("on_duty") purely so
@@ -117,6 +119,7 @@ export function StudentAttendanceScreen() {
     }, [navigation]),
   );
 
+  const classPickerAnchorRef = useRef<View>(null);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [pickerLoading, setPickerLoading] = useState(false);
   const [pickerLoaded, setPickerLoaded] = useState(false);
@@ -284,6 +287,7 @@ export function StudentAttendanceScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -305,26 +309,28 @@ export function StudentAttendanceScreen() {
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Class picker */}
-        <TouchableOpacity style={styles.card} activeOpacity={0.8} onPress={openPicker}>
-          <View style={styles.calendarRow}>
-            <View style={styles.calendarIconWrap}>
-              <Ionicons name="book-outline" size={18} color="#2F6FE0" />
+        <View ref={classPickerAnchorRef} collapsable={false}>
+          <TouchableOpacity style={styles.card} activeOpacity={0.8} onPress={openPicker}>
+            <View style={styles.calendarRow}>
+              <View style={styles.calendarIconWrap}>
+                <Ionicons name="book-outline" size={18} color="#2F6FE0" />
+              </View>
+              <View style={styles.calendarTextWrap}>
+                <Text style={styles.calendarTitle}>
+                  {selectedClass
+                    ? `${selectedClass.department_name} · ${selectedClass.class_section}`
+                    : "Select a class"}
+                </Text>
+                <Text style={styles.calendarSubtitle}>
+                  {selectedClass
+                    ? `${selectedClass.subject_name} · ${selectedClass.label}`
+                    : "Choose the class you're taking attendance for"}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#B0B7C3" />
             </View>
-            <View style={styles.calendarTextWrap}>
-              <Text style={styles.calendarTitle}>
-                {selectedClass
-                  ? `${selectedClass.department_name} · ${selectedClass.class_section}`
-                  : "Select a class"}
-              </Text>
-              <Text style={styles.calendarSubtitle}>
-                {selectedClass
-                  ? `${selectedClass.subject_name} · ${selectedClass.label}`
-                  : "Choose the class you're taking attendance for"}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color="#B0B7C3" />
-          </View>
-        </TouchableOpacity>
+          </TouchableOpacity>
+        </View>
 
         {/* Only class advisors can actually use this - a non-advisor just
             gets an empty state on the other end, same self-gating pattern
@@ -465,6 +471,7 @@ export function StudentAttendanceScreen() {
       </ScrollView>
 
       <ClassPickerModal
+        anchorRef={classPickerAnchorRef}
         visible={pickerVisible}
         loading={pickerLoading}
         todayOptions={todayOptions}
@@ -477,6 +484,7 @@ export function StudentAttendanceScreen() {
 }
 
 function ClassPickerModal({
+  anchorRef,
   visible,
   loading,
   todayOptions,
@@ -484,6 +492,7 @@ function ClassPickerModal({
   onSelect,
   onClose,
 }: {
+  anchorRef: RefObject<View | null>;
   visible: boolean;
   loading: boolean;
   todayOptions: ClassOption[];
@@ -503,44 +512,45 @@ function ClassPickerModal({
   );
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity style={styles.modalSheet} activeOpacity={1}>
-          <View style={styles.modalHandleRow}>
-            <Text style={styles.modalTitle}>Choose a class</Text>
-            <TouchableOpacity onPress={onClose} hitSlop={8}>
-              <Ionicons name="close" size={22} color="#6B7280" />
-            </TouchableOpacity>
-          </View>
-
-          {loading ? (
-            <View style={styles.modalList}>
-              <SkeletonListRows count={4} />
-            </View>
-          ) : (
-            <ScrollView contentContainerStyle={styles.modalList}>
-              <Text style={styles.modalSectionLabel}>TODAY'S TIMETABLE</Text>
-              {todayOptions.length === 0 ? (
-                <Text style={styles.modalEmptyText}>No periods scheduled for you today</Text>
-              ) : (
-                todayOptions.map((option, index) => (
-                  <ClassOptionRow key={`today-${index}`} option={option} onPress={() => onSelect(option)} />
-                ))
-              )}
-
-              <Text style={[styles.modalSectionLabel, { marginTop: 18 }]}>ALL MY CLASSES</Text>
-              {otherOptions.length === 0 ? (
-                <Text style={styles.modalEmptyText}>Nothing else to show</Text>
-              ) : (
-                otherOptions.map((option, index) => (
-                  <ClassOptionRow key={`handled-${index}`} option={option} onPress={() => onSelect(option)} />
-                ))
-              )}
-            </ScrollView>
-          )}
+    <AnchoredDropdown
+      anchorRef={anchorRef}
+      visible={visible}
+      onClose={onClose}
+      contentStyle={[styles.modalSheet, styles.anchoredCard]}
+    >
+      <View style={styles.modalHandleRow}>
+        <Text style={styles.modalTitle}>Choose a class</Text>
+        <TouchableOpacity onPress={onClose} hitSlop={8}>
+          <Ionicons name="close" size={22} color="#6B7280" />
         </TouchableOpacity>
-      </TouchableOpacity>
-    </Modal>
+      </View>
+
+      {loading ? (
+        <View style={styles.modalList}>
+          <SkeletonListRows count={4} />
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.modalList}>
+          <Text style={styles.modalSectionLabel}>TODAY'S TIMETABLE</Text>
+          {todayOptions.length === 0 ? (
+            <Text style={styles.modalEmptyText}>No periods scheduled for you today</Text>
+          ) : (
+            todayOptions.map((option, index) => (
+              <ClassOptionRow key={`today-${index}`} option={option} onPress={() => onSelect(option)} />
+            ))
+          )}
+
+          <Text style={[styles.modalSectionLabel, { marginTop: 18 }]}>ALL MY CLASSES</Text>
+          {otherOptions.length === 0 ? (
+            <Text style={styles.modalEmptyText}>Nothing else to show</Text>
+          ) : (
+            otherOptions.map((option, index) => (
+              <ClassOptionRow key={`handled-${index}`} option={option} onPress={() => onSelect(option)} />
+            ))
+          )}
+        </ScrollView>
+      )}
+    </AnchoredDropdown>
   );
 }
 
@@ -623,7 +633,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -987,17 +997,23 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     color: "#fff",
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.5)",
-    justifyContent: "center",
-    padding: 20,
-  },
   modalSheet: {
     backgroundColor: "#fff",
     borderRadius: 20,
     maxHeight: "75%",
     paddingTop: 16,
+  },
+  // Anchored dropdowns have no full-screen flex parent to resolve
+  // modalSheet's percentage maxHeight (or the old overlay's implicit width)
+  // against, so pin a concrete size here instead.
+  anchoredCard: {
+    width: 320,
+    maxHeight: 420,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   modalHandleRow: {
     flexDirection: "row",

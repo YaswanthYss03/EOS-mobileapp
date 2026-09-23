@@ -15,6 +15,7 @@ import {
   type StaffAttendanceDayStatus,
 } from "@/services/api/staff-attendance.api";
 import { getMyProfile } from "@/services/api/profile.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 type LoadStatus = "loading" | "success" | "error";
 
@@ -109,6 +110,7 @@ export function MyAttendanceScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -241,7 +243,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },

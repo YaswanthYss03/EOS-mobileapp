@@ -11,6 +11,7 @@ import { fonts } from "@/theme";
 import { getApiErrorMessage } from "@/services/api/client";
 import { getMyAttendance, type MyAttendanceRecord, type MyAttendanceResponse } from "@/services/api/attendance.api";
 import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES } from "@/utils/calendar";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 const ELIGIBILITY_THRESHOLD_PERCENT = 75;
 const OVERALL_WINDOW_DAYS = 180;
@@ -140,6 +141,7 @@ export function StudentAttendanceOverviewScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -325,7 +327,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },

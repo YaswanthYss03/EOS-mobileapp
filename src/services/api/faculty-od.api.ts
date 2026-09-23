@@ -17,6 +17,12 @@ export type MyFacultyOd = {
   purpose: string | null;
   hod_approval_status: FacultyOdApprovalStatus;
   hr_approval_status: FacultyOdApprovalStatus;
+  // Only non-null for a Principal-authored request (independent Correspondent
+  // stage - see faculty-od.service.ts's computeOverallStatus). null for every
+  // Faculty/HoD/Secretary/HR Payroll/Warden request.
+  correspondent_approval_status: FacultyOdApprovalStatus | null;
+  correspondent_remarks: string | null;
+  correspondent_decided_at: string | null;
   overall_status: FacultyOdApprovalStatus;
   created_at: string;
   // Only present on the HoD/HR-facing lists (getHodFacultyOds,
@@ -33,10 +39,11 @@ export type MyFacultyOd = {
    * Resolved server-side from whichever register holds the requester
    * (faculty -> non_teaching_staff -> email). ALWAYS read this for display:
    * `faculty` is genuinely null on a request raised by non-teaching staff
-   * (Secretary / HR Payroll / warden), because faculty_id is nullable.
+   * (Secretary / HR Payroll / warden / Principal), because faculty_id is
+   * nullable.
    */
   requester?: {
-    kind: "faculty" | "staff" | "unknown";
+    kind: "faculty" | "staff" | "principal" | "unknown";
     name: string;
     designation: string | null;
     department: string | null;
@@ -106,6 +113,30 @@ export async function reviewFacultyOdAsHr(
 ): Promise<MyFacultyOd> {
   const { data } = await apiClient.patch<{ data: MyFacultyOd }>(`/me/faculty-od/${id}`, {
     hr_approval_status: decision,
+  });
+  return data.data;
+}
+
+// Correspondent's "OD Approval" queue — same GET /me/faculty-od endpoint,
+// role-branched server-side to only Principal-authored requests
+// (correspondent_approval_status non-null), see FacultyOdService.findAll.
+export async function getCorrespondentOdRequests(): Promise<MyFacultyOd[]> {
+  const { data } = await apiClient.get<{ data: { data: MyFacultyOd[] } }>("/me/faculty-od", {
+    params: { limit: 100 },
+  });
+  return data.data.data;
+}
+
+// PATCH /me/faculty-od/:id (Correspondent only sets
+// correspondent_approval_status, on a Principal-authored request only - see
+// FacultyOdService.update). Independent of hod/hr - never gated on them,
+// unlike HR's stage above.
+export async function correspondentApproveOd(
+  id: number,
+  decision: "approved" | "rejected",
+): Promise<MyFacultyOd> {
+  const { data } = await apiClient.patch<{ data: MyFacultyOd }>(`/me/faculty-od/${id}`, {
+    correspondent_approval_status: decision,
   });
   return data.data;
 }

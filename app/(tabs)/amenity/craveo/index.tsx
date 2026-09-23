@@ -1,5 +1,5 @@
-import { CraveoScreen } from "@/features/amenity/craveo/CraveoScreen";
+import { CraveoHomeScreen } from "@/features/amenity/craveo/CraveoHomeScreen";
 
 export default function CraveoRoute() {
-  return <CraveoScreen />;
+  return <CraveoHomeScreen />;
 }

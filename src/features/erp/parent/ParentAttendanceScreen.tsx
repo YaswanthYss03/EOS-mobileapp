@@ -5,7 +5,6 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonDetailBlock } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -14,6 +13,7 @@ import type { MyAttendanceRecord, MyAttendanceResponse } from "@/services/api/at
 import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES } from "@/utils/calendar";
 import { useParentChildren } from "./useParentChildren";
 import { ChildSelector } from "./ChildSelector";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 const ELIGIBILITY_THRESHOLD_PERCENT = 75;
 const OVERALL_WINDOW_DAYS = 180;
@@ -104,9 +104,8 @@ export function ParentAttendanceScreen() {
   useFocusEffect(
     useCallback(() => {
       navigation.getParent()?.setOptions({ headerShown: false });
-      return () => {
-        navigation.getParent()?.setOptions({ headerShown: true, header: () => <CollegeHeader /> });
-      };
+      // No cleanup - see ParentDashboard.tsx's identical comment.
+      return undefined;
     }, [navigation]),
   );
 
@@ -149,6 +148,7 @@ export function ParentAttendanceScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -359,7 +359,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },

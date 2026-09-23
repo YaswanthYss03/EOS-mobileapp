@@ -6,9 +6,11 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, formatDate } from "@/utils/calendar";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import {
   publishTypes,
   mediaCategories,
@@ -41,6 +43,7 @@ export function RequestMediaScreen() {
   const [pickerYear, setPickerYear] = useState(2026);
   const [pickerMonth, setPickerMonth] = useState(7); // August (0-indexed)
   const [history, setHistory] = useState(mockMediaHistory);
+  const scrollMemory = useTabScrollMemory();
 
   // This screen renders its own full header below, so hide the shared
   // CollegeHeader while it's focused - same pattern as the other ERP
@@ -136,6 +139,7 @@ export function RequestMediaScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -155,26 +159,29 @@ export function RequestMediaScreen() {
         </View>
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.tabSwitch}>
-          <TouchableOpacity
-            style={[styles.tabSwitchButton, tab === "new" && styles.tabSwitchButtonActive]}
-            onPress={() => setTab("new")}
-          >
-            <Text style={[styles.tabSwitchText, tab === "new" && styles.tabSwitchTextActive]}>New request</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabSwitchButton, tab === "history" && styles.tabSwitchButtonActive]}
-            onPress={() => setTab("history")}
-          >
-            <Text style={[styles.tabSwitchText, tab === "history" && styles.tabSwitchTextActive]}>
-              History ({history.length})
-            </Text>
-          </TouchableOpacity>
-        </View>
+      <View style={styles.tabSwitchWrap}>
+        <AnimatedTabBar
+          tabs={[
+            { key: "new", label: "New request" },
+            { key: "history", label: `History (${history.length})` },
+          ]}
+          active={tab}
+          onChange={setTab}
+          containerStyle={styles.tabSwitch}
+          tabStyle={styles.tabSwitchButton}
+          tabTextStyle={styles.tabSwitchText}
+          activeTabTextStyle={styles.tabSwitchTextActive}
+          indicatorStyle={styles.tabSwitchIndicator}
+        />
+      </View>
 
+      <TabTransitionView activeKey={tab} order={["new", "history"]} style={styles.tabContent}>
         {tab === "new" ? (
-          <>
+          <ScrollView
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            {...scrollMemory.bind("new")}
+          >
             <Text style={styles.sectionTitle}>New Media Request</Text>
             <View style={styles.card}>
               <Text style={styles.fieldLabel}>What to Publish</Text>
@@ -294,16 +301,24 @@ export function RequestMediaScreen() {
                 <Text style={styles.submitButtonText}>Send to Media Team</Text>
               </TouchableOpacity>
             </View>
-          </>
-        ) : history.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
-            <Text style={styles.emptyStateText}>No requests raised yet</Text>
-          </View>
+          </ScrollView>
         ) : (
-          history.map((item) => <HistoryCard key={item.id} item={item} />)
+          <ScrollView
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            {...scrollMemory.bind("history")}
+          >
+            {history.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
+                <Text style={styles.emptyStateText}>No requests raised yet</Text>
+              </View>
+            ) : (
+              history.map((item) => <HistoryCard key={item.id} item={item} />)
+            )}
+          </ScrollView>
         )}
-      </ScrollView>
+      </TabTransitionView>
 
       <Modal
         visible={datePickerFor !== null}
@@ -407,7 +422,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -423,8 +438,15 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   content: {
-    padding: 16,
+    paddingHorizontal: 16,
     paddingBottom: 32,
+  },
+  tabContent: {
+    flex: 1,
+  },
+  tabSwitchWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
   },
   tabSwitch: {
     flexDirection: "row",
@@ -446,7 +468,10 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     paddingVertical: 10,
   },
-  tabSwitchButtonActive: {
+  tabSwitchIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
     backgroundColor: "#2F6FE0",
   },
   tabSwitchText: {

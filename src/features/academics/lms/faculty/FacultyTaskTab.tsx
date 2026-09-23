@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   StyleSheet,
 } from "react-native";
-import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
@@ -26,9 +25,15 @@ import {
   type LmsTaskType,
   type LmsTeachingSubject,
 } from "@/services/api/lms.api";
+import { TaskSubmissionsScreen } from "./TaskSubmissionsScreen";
 
-export function FacultyTaskTab({ subjectId, classId }: { subjectId: number; classId: number }) {
-  const router = useRouter();
+export function FacultyTaskTab({
+  subjectId,
+  classId,
+}: {
+  subjectId: number;
+  classId: number;
+}) {
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [tasks, setTasks] = useState<LmsFacultyTask[]>([]);
   const [allClasses, setAllClasses] = useState<{ class_id: number; label: string }[]>([]);
@@ -40,6 +45,11 @@ export function FacultyTaskTab({ subjectId, classId }: { subjectId: number; clas
   const [taskType, setTaskType] = useState<LmsTaskType>("assignment");
   const [selectedClassIds, setSelectedClassIds] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
+  // Tapping a task opens its submission status inline (a full-screen modal
+  // over this tab), instead of navigating to a separate routed page - same
+  // TaskSubmissionsScreen component, just embedded (see its own onClose
+  // prop comment).
+  const [viewingTask, setViewingTask] = useState<LmsFacultyTask | null>(null);
 
   const load = useCallback(() => {
     setStatus("loading");
@@ -173,9 +183,7 @@ export function FacultyTaskTab({ subjectId, classId }: { subjectId: number; clas
           <TouchableOpacity
             style={styles.row}
             activeOpacity={0.85}
-            onPress={() =>
-              router.push({ pathname: "/(tabs)/academics/lms/task/[taskId]", params: { taskId: String(item.id), title: item.title ?? "Task" } })
-            }
+            onPress={() => setViewingTask(item)}
           >
             <View style={styles.iconWrap}>
               <Ionicons name={item.task_type === "quiz" ? "ribbon-outline" : "clipboard-outline"} size={20} color="#2F6FE0" />
@@ -260,6 +268,20 @@ export function FacultyTaskTab({ subjectId, classId }: { subjectId: number; clas
             </View>
           </TouchableOpacity>
         </TouchableOpacity>
+      </Modal>
+
+      <Modal
+        visible={viewingTask !== null}
+        animationType="slide"
+        onRequestClose={() => setViewingTask(null)}
+      >
+        {viewingTask && (
+          <TaskSubmissionsScreen
+            taskId={viewingTask.id}
+            title={viewingTask.title ?? undefined}
+            onClose={() => setViewingTask(null)}
+          />
+        )}
       </Modal>
     </>
   );

@@ -9,6 +9,7 @@ import * as Linking from "expo-linking";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -20,6 +21,7 @@ import {
   type MyLeave,
 } from "@/services/api/leaves.api";
 import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, formatDate } from "@/utils/calendar";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 type Tab = "apply" | "history";
 type DateField = "start" | "end" | null;
@@ -31,6 +33,7 @@ const STATUS_LABEL: Record<LeaveStatus, string> = {
   pending: "Pending",
   faculty_approved: "Faculty approved",
   hod_approved: "HOD approved",
+  warden_approved: "Warden approved",
   rejected: "Rejected",
 };
 
@@ -38,6 +41,7 @@ const STATUS_STYLE: Record<LeaveStatus, { bg: string; text: string }> = {
   pending: { bg: "#EAF0FD", text: "#2F6FE0" },
   faculty_approved: { bg: "#EAF0FD", text: "#2F6FE0" },
   hod_approved: { bg: "#F0FDF4", text: "#16A34A" },
+  warden_approved: { bg: "#F0FDF4", text: "#16A34A" },
   rejected: { bg: "#FEF2F2", text: "#DC2626" },
 };
 
@@ -70,6 +74,7 @@ export function StudentLeaveApplyScreen() {
   }, []);
 
   const [tab, setTab] = useState<Tab>("apply");
+  const scrollMemory = useTabScrollMemory();
   const [startDateObj, setStartDateObj] = useState<Date | null>(null);
   const [endDateObj, setEndDateObj] = useState<Date | null>(null);
   const [reason, setReason] = useState("");
@@ -213,6 +218,7 @@ export function StudentLeaveApplyScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -229,23 +235,29 @@ export function StudentLeaveApplyScreen() {
         <Text style={styles.headerTitle}>Leave</Text>
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.tabSwitch}>
-          <TouchableOpacity
-            style={[styles.tabButton, tab === "apply" && styles.tabButtonActive]}
-            onPress={() => setTab("apply")}
-          >
-            <Text style={[styles.tabButtonText, tab === "apply" && styles.tabButtonTextActive]}>Apply</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabButton, tab === "history" && styles.tabButtonActive]}
-            onPress={() => setTab("history")}
-          >
-            <Text style={[styles.tabButtonText, tab === "history" && styles.tabButtonTextActive]}>History</Text>
-          </TouchableOpacity>
-        </View>
+      <View style={styles.tabSwitchWrap}>
+        <AnimatedTabBar
+          tabs={[
+            { key: "apply", label: "Apply" },
+            { key: "history", label: "History" },
+          ]}
+          active={tab}
+          onChange={setTab}
+          containerStyle={styles.tabSwitch}
+          tabStyle={styles.tabButton}
+          tabTextStyle={styles.tabButtonText}
+          activeTabTextStyle={styles.tabButtonTextActive}
+          indicatorStyle={styles.tabIndicator}
+        />
+      </View>
 
+      <TabTransitionView activeKey={tab} order={["apply", "history"]} style={styles.tabContent}>
         {tab === "apply" ? (
+          <ScrollView
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            {...scrollMemory.bind("apply")}
+          >
           <View style={styles.card}>
             <View style={styles.rowFields}>
               <View style={styles.rowField}>
@@ -338,29 +350,38 @@ export function StudentLeaveApplyScreen() {
               )}
             </TouchableOpacity>
           </View>
-        ) : historyStatus === "loading" ? (
-          <SkeletonListRows count={4} />
-        ) : historyStatus === "error" ? (
-          <View style={styles.errorNotice}>
-            <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
-            <Text style={styles.errorNoticeText}>{historyError ?? "Something went wrong."}</Text>
-            <TouchableOpacity onPress={loadHistory} style={styles.retryButton} activeOpacity={0.8}>
-              <Text style={styles.retryButtonText}>Retry</Text>
-            </TouchableOpacity>
-          </View>
-        ) : history.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
-            <Text style={styles.emptyStateText}>No leave history yet</Text>
-          </View>
+          </ScrollView>
         ) : (
-          <View style={styles.historyListCard}>
-            {history.map((item, index) => (
-              <HistoryRow key={item.id} item={item} isLast={index === history.length - 1} />
-            ))}
-          </View>
+          <ScrollView
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            {...scrollMemory.bind("history")}
+          >
+            {historyStatus === "loading" ? (
+              <SkeletonListRows count={4} />
+            ) : historyStatus === "error" ? (
+              <View style={styles.errorNotice}>
+                <Ionicons name="alert-circle-outline" size={22} color="#DC2626" />
+                <Text style={styles.errorNoticeText}>{historyError ?? "Something went wrong."}</Text>
+                <TouchableOpacity onPress={loadHistory} style={styles.retryButton} activeOpacity={0.8}>
+                  <Text style={styles.retryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : history.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
+                <Text style={styles.emptyStateText}>No leave history yet</Text>
+              </View>
+            ) : (
+              <View style={styles.historyListCard}>
+                {history.map((item, index) => (
+                  <HistoryRow key={item.id} item={item} isLast={index === history.length - 1} />
+                ))}
+              </View>
+            )}
+          </ScrollView>
         )}
-      </ScrollView>
+      </TabTransitionView>
 
       <Modal
         visible={datePickerFor !== null}
@@ -478,7 +499,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -488,8 +508,15 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
   },
   content: {
-    padding: 16,
+    paddingHorizontal: 16,
     paddingBottom: 32,
+  },
+  tabContent: {
+    flex: 1,
+  },
+  tabSwitchWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
   },
   errorNotice: {
     alignItems: "center",
@@ -537,7 +564,10 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     paddingVertical: 12,
   },
-  tabButtonActive: {
+  tabIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
     backgroundColor: "#2F6FE0",
   },
   tabButtonText: {

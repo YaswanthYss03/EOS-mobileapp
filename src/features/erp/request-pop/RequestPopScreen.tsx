@@ -16,6 +16,8 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnchoredDropdown, useDropdown } from "@/components/ui/dropdown";
+import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, formatDate, toIsoDate } from "@/utils/calendar";
@@ -26,6 +28,7 @@ import {
   type PurchaseRequest,
 } from "@/services/api/purchase-requests.api";
 import { listDepartments, type Department } from "@/services/api/departments.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 type Tab = "new" | "history";
 
@@ -44,11 +47,12 @@ export function RequestPopScreen() {
   const [neededBy, setNeededBy] = useState<Date | null>(null);
   const [department, setDepartment] = useState<Department | null>(null);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [deptPickerOpen, setDeptPickerOpen] = useState(false);
+  const deptPicker = useDropdown();
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [pickerYear, setPickerYear] = useState(2026);
   const [pickerMonth, setPickerMonth] = useState(7); // August (0-indexed)
   const [submitting, setSubmitting] = useState(false);
+  const scrollMemory = useTabScrollMemory();
 
   const [history, setHistory] = useState<PurchaseRequest[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -160,6 +164,7 @@ export function RequestPopScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -179,35 +184,40 @@ export function RequestPopScreen() {
         </View>
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.tabSwitch}>
-          <TouchableOpacity
-            style={[styles.tabSwitchButton, tab === "new" && styles.tabSwitchButtonActive]}
-            onPress={() => setTab("new")}
-          >
-            <Text style={[styles.tabSwitchText, tab === "new" && styles.tabSwitchTextActive]}>New request</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabSwitchButton, tab === "history" && styles.tabSwitchButtonActive]}
-            onPress={() => setTab("history")}
-          >
-            <Text style={[styles.tabSwitchText, tab === "history" && styles.tabSwitchTextActive]}>
-              History ({history.length})
-            </Text>
-          </TouchableOpacity>
-        </View>
+      <View style={styles.tabSwitchWrap}>
+        <AnimatedTabBar
+          tabs={[
+            { key: "new", label: "New request" },
+            { key: "history", label: `History (${history.length})` },
+          ]}
+          active={tab}
+          onChange={setTab}
+          containerStyle={styles.tabSwitch}
+          tabStyle={styles.tabSwitchButton}
+          tabTextStyle={styles.tabSwitchText}
+          activeTabTextStyle={styles.tabSwitchTextActive}
+          indicatorStyle={styles.tabSwitchIndicator}
+        />
+      </View>
 
+      <TabTransitionView activeKey={tab} order={["new", "history"]} style={styles.tabContent}>
         {tab === "new" ? (
-          <>
+          <ScrollView
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            {...scrollMemory.bind("new")}
+          >
             <Text style={styles.sectionTitle}>New Purchase Request</Text>
             <View style={styles.card}>
               <Text style={styles.fieldLabel}>Department</Text>
-              <TouchableOpacity style={styles.dateButtonFull} onPress={() => setDeptPickerOpen(true)} activeOpacity={0.8}>
-                <Ionicons name="business-outline" size={14} color="#2F6FE0" />
-                <Text style={[styles.dateButtonText, !department && styles.dateButtonPlaceholder]}>
-                  {department ? department.name : "Select department"}
-                </Text>
-              </TouchableOpacity>
+              <View ref={deptPicker.anchorRef} collapsable={false}>
+                <TouchableOpacity style={styles.dateButtonFull} onPress={deptPicker.toggle} activeOpacity={0.8}>
+                  <Ionicons name="business-outline" size={14} color="#2F6FE0" />
+                  <Text style={[styles.dateButtonText, !department && styles.dateButtonPlaceholder]}>
+                    {department ? department.name : "Select department"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
 
               <Text style={styles.fieldLabel}>Item Required</Text>
               <TextInput
@@ -273,46 +283,50 @@ export function RequestPopScreen() {
                 )}
               </TouchableOpacity>
             </View>
-          </>
-        ) : historyLoading ? (
-          <SkeletonListRows count={4} />
-        ) : history.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
-            <Text style={styles.emptyStateText}>No requests raised yet</Text>
-          </View>
+          </ScrollView>
         ) : (
-          history.map((item) => <HistoryCard key={item.id} item={item} />)
+          <ScrollView
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            {...scrollMemory.bind("history")}
+          >
+            {historyLoading ? (
+              <SkeletonListRows count={4} />
+            ) : history.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="document-text-outline" size={32} color="#B0B7C3" />
+                <Text style={styles.emptyStateText}>No requests raised yet</Text>
+              </View>
+            ) : (
+              history.map((item) => <HistoryCard key={item.id} item={item} />)
+            )}
+          </ScrollView>
         )}
-      </ScrollView>
+      </TabTransitionView>
 
-      <Modal
-        visible={deptPickerOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setDeptPickerOpen(false)}
+      <AnchoredDropdown
+        anchorRef={deptPicker.anchorRef}
+        visible={deptPicker.visible}
+        onClose={deptPicker.close}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
       >
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setDeptPickerOpen(false)}>
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>Select department</Text>
-            <ScrollView style={styles.deptList} showsVerticalScrollIndicator={false}>
-              {departments.map((dept) => (
-                <TouchableOpacity
-                  key={dept.id}
-                  style={styles.deptRow}
-                  onPress={() => {
-                    setDepartment(dept);
-                    setDeptPickerOpen(false);
-                  }}
-                >
-                  <Text style={styles.deptRowText}>{dept.name}</Text>
-                  {department?.id === dept.id && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+        <Text style={styles.modalTitle}>Select department</Text>
+        <ScrollView style={styles.deptList} showsVerticalScrollIndicator={false}>
+          {departments.map((dept) => (
+            <TouchableOpacity
+              key={dept.id}
+              style={styles.deptRow}
+              onPress={() => {
+                setDepartment(dept);
+                deptPicker.close();
+              }}
+            >
+              <Text style={styles.deptRowText}>{dept.name}</Text>
+              {department?.id === dept.id && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </AnchoredDropdown>
 
       <Modal
         visible={datePickerOpen}
@@ -421,7 +435,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -437,8 +451,15 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   content: {
-    padding: 16,
+    paddingHorizontal: 16,
     paddingBottom: 32,
+  },
+  tabContent: {
+    flex: 1,
+  },
+  tabSwitchWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
   },
   tabSwitch: {
     flexDirection: "row",
@@ -460,7 +481,10 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     paddingVertical: 10,
   },
-  tabSwitchButtonActive: {
+  tabSwitchIndicator: {
+    top: 0,
+    bottom: 0,
+    borderRadius: 9,
     backgroundColor: "#2F6FE0",
   },
   tabSwitchText: {
@@ -678,6 +702,18 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 18,
     padding: 18,
+  },
+  // Anchored dropdown (department) has no full-screen flex parent to size
+  // against, unlike the still-centered date-picker Modal below which keeps
+  // modalCard/modalOverlay as-is.
+  anchoredCard: {
+    width: 260,
+    maxHeight: 340,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   modalTitle: {
     fontSize: 14,

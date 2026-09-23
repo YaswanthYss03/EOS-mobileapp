@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Modal, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -7,9 +7,12 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnchoredDropdown, useDropdown } from "@/components/ui/dropdown";
 import { fonts } from "@/theme";
 import { getApiErrorMessage } from "@/services/api/client";
 import { getMyExamSchedule, type MyExamScheduleRow } from "@/services/api/exam-schedule.api";
+import { useRole } from "@/hooks/useRole";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 type LoadStatus = "loading" | "success" | "error";
 
@@ -56,13 +59,19 @@ export function StudentExamScheduleScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const role = useRole();
+  // Alumni has no internal assessments to filter by - just the one
+  // "Semester" exam-type bucket (see bucketForExamType) - so the
+  // Internal 1/Internal 2/Semester picker collapses to just the Semester
+  // dropdown for them, examType permanently pinned to "semester".
+  const isAlumni = role === "alumni";
 
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<MyExamScheduleRow[]>([]);
-  const [examType, setExamType] = useState<ExamTypeFilter>("internal1");
+  const [examType, setExamType] = useState<ExamTypeFilter>(isAlumni ? "semester" : "internal1");
   const [semester, setSemester] = useState(5);
-  const [semesterPickerOpen, setSemesterPickerOpen] = useState(false);
+  const semesterPicker = useDropdown();
 
   const load = useCallback(() => {
     setStatus("loading");
@@ -103,11 +112,12 @@ export function StudentExamScheduleScreen() {
 
   function selectSemester(value: number) {
     setSemester(value);
-    setSemesterPickerOpen(false);
+    semesterPicker.close();
   }
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -115,7 +125,15 @@ export function StudentExamScheduleScreen() {
         style={[styles.header, { paddingTop: insets.top + 10 }]}
       >
         <TouchableOpacity
-          onPress={() => router.back()}
+          // A student reaches this cross-tab, from the Academics tab's
+          // Current Semester page (see AcademicsOverviewScreen.tsx) - a
+          // plain router.back() pops within THIS (erp) tab's own stack, not
+          // back to the tab that actually pushed it, landing on the wrong
+          // screen. Alumni still reaches this from their own Campus tab
+          // (AcademicsChooserScreen), where a plain back is correct.
+          onPress={() =>
+            role === "student" ? router.replace("/(tabs)/academics/overview") : router.back()
+          }
           style={styles.backButton}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
@@ -140,28 +158,32 @@ export function StudentExamScheduleScreen() {
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.card}>
             <Text style={styles.fieldLabel}>Semester</Text>
-            <TouchableOpacity
-              style={styles.selectRow}
-              onPress={() => setSemesterPickerOpen(true)}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.selectValue}>Semester {semester}</Text>
-              <Ionicons name="chevron-down" size={18} color="#B0B7C3" />
-            </TouchableOpacity>
-
-            <View style={styles.examTypeRow}>
-              {EXAM_TYPE_FILTERS.map((type) => (
-                <TouchableOpacity
-                  key={type.id}
-                  style={[styles.examTypePill, examType === type.id && styles.examTypePillActive]}
-                  onPress={() => setExamType(type.id)}
-                >
-                  <Text style={[styles.examTypePillText, examType === type.id && styles.examTypePillTextActive]}>
-                    {type.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+            <View ref={semesterPicker.anchorRef} collapsable={false}>
+              <TouchableOpacity
+                style={styles.selectRow}
+                onPress={semesterPicker.open}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.selectValue}>Semester {semester}</Text>
+                <Ionicons name="chevron-down" size={18} color="#B0B7C3" />
+              </TouchableOpacity>
             </View>
+
+            {!isAlumni && (
+              <View style={styles.examTypeRow}>
+                {EXAM_TYPE_FILTERS.map((type) => (
+                  <TouchableOpacity
+                    key={type.id}
+                    style={[styles.examTypePill, examType === type.id && styles.examTypePillActive]}
+                    onPress={() => setExamType(type.id)}
+                  >
+                    <Text style={[styles.examTypePillText, examType === type.id && styles.examTypePillTextActive]}>
+                      {type.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
           </View>
 
           {filteredRows.length === 0 ? (
@@ -187,35 +209,27 @@ export function StudentExamScheduleScreen() {
         </ScrollView>
       )}
 
-      <Modal
-        visible={semesterPickerOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSemesterPickerOpen(false)}
+      <AnchoredDropdown
+        anchorRef={semesterPicker.anchorRef}
+        visible={semesterPicker.visible}
+        onClose={semesterPicker.close}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
       >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setSemesterPickerOpen(false)}
-        >
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>Semester</Text>
-            <ScrollView style={styles.modalList}>
-              {SEMESTERS.map((option) => (
-                <TouchableOpacity
-                  key={option}
-                  style={styles.modalOptionRow}
-                  onPress={() => selectSemester(option)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.modalOptionName}>Semester {option}</Text>
-                  {semester === option && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+        <Text style={styles.modalTitle}>Semester</Text>
+        <ScrollView style={styles.modalList}>
+          {SEMESTERS.map((option) => (
+            <TouchableOpacity
+              key={option}
+              style={styles.modalOptionRow}
+              onPress={() => selectSemester(option)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.modalOptionName}>Semester {option}</Text>
+              {semester === option && <Ionicons name="checkmark" size={18} color="#2F6FE0" />}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </AnchoredDropdown>
     </SafeAreaView>
   );
 }
@@ -255,7 +269,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },
@@ -443,17 +457,22 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     color: "#9AA6B2",
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.5)",
-    justifyContent: "center",
-    padding: 20,
-  },
   modalCard: {
     backgroundColor: "#fff",
     borderRadius: 18,
     padding: 18,
     maxHeight: "70%",
+  },
+  // Anchored dropdowns have no full-screen flex parent to resolve
+  // modalCard's percentage maxHeight against, so pin a concrete size here.
+  anchoredCard: {
+    width: 260,
+    maxHeight: 320,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   modalTitle: {
     fontSize: 15,

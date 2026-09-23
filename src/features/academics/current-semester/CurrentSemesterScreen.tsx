@@ -16,6 +16,7 @@ import {
   getMyCurrentSemesterAsFaculty,
 } from "@/services/api/current-semester.api";
 import { listMyAssignmentStatuses } from "@/services/api/no-due.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 type Subject = {
   id: number;
@@ -40,7 +41,7 @@ function initialsFromSubject(name: string) {
     .toUpperCase();
 }
 
-function CurrentSemesterHeader({ onBack, semester, subjectCount }: { onBack: () => void; semester: number | null; subjectCount: number }) {
+function CurrentSemesterHeader({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -57,12 +58,7 @@ function CurrentSemesterHeader({ onBack, semester, subjectCount }: { onBack: () 
       >
         <Ionicons name="arrow-back" size={20} color="#fff" />
       </TouchableOpacity>
-      <View>
-        <Text style={styles.headerTitle}>Current Semester</Text>
-        <Text style={styles.headerSubtitle}>
-          {semester !== null ? `Semester ${SEMESTER_NUMERALS[semester - 1] ?? semester}` : "Semester"} · {subjectCount} subjects
-        </Text>
-      </View>
+      <Text style={styles.headerTitle}>Current Semester</Text>
     </LinearGradient>
   );
 }
@@ -82,6 +78,12 @@ export function CurrentSemesterScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const role = useRole();
+  // A faculty/HoD reaches this screen via the erp tab's own local copy (see
+  // app/(tabs)/erp/current-semester/index.tsx), so the subject drill-down
+  // below must stay inside that same tab too - see OnlineClassScreen's
+  // identical basePath comment for why crossing into the (hidden, for
+  // these roles) Academics tab broke the Tabs navigator's back-stack.
+  const lmsBasePath = role === "employee" || role === "hod" ? "/(tabs)/erp/lms" : "/(tabs)/academics/lms";
 
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -89,7 +91,8 @@ export function CurrentSemesterScreen() {
 
   const loadForStudent = useCallback(() => {
     return Promise.all([getMyTimetable(), listMyAssignmentStatuses(), getMyClassSection().catch(() => null)]).then(
-      async ([days, statusRows, section]) => {
+      async ([days, statusRows, classSectionResult]) => {
+        const section = classSectionResult?.class_section ?? null;
         const bySubject = new Map<number, Subject>();
 
         for (const day of days) {
@@ -194,8 +197,6 @@ export function CurrentSemesterScreen() {
             onBack={() =>
               role === "employee" || role === "hod" ? router.replace("/(tabs)/erp") : router.back()
             }
-            semester={semester}
-            subjectCount={subjects.length}
           />
         ),
       });
@@ -208,6 +209,7 @@ export function CurrentSemesterScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       {status === "loading" && (
         <View style={styles.content}>
           <SkeletonListRows count={4} />
@@ -235,7 +237,7 @@ export function CurrentSemesterScreen() {
                 subject={subject}
                 onPress={() =>
                   router.push({
-                    pathname: "/(tabs)/academics/lms/[subjectId]",
+                    pathname: `${lmsBasePath}/[subjectId]`,
                     params: {
                       subjectId: String(subject.id),
                       subjectName: subject.name,
@@ -307,7 +309,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },

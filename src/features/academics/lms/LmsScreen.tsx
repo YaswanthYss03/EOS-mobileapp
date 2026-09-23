@@ -10,6 +10,7 @@ import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { useRole } from "@/hooks/useRole";
 import { getMyLmsSubjects, getMyTeachingSubjects, type LmsSubject, type LmsTeachingSubject } from "@/services/api/lms.api";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 function initials(name: string) {
   return name
@@ -76,6 +77,7 @@ export function LmsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <WatermarkBackground />
       <LinearGradient
         colors={["#2F6FE0", "#1A3D8F"]}
         start={{ x: 0, y: 0 }}
@@ -161,7 +163,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
+
     alignItems: "center",
     justifyContent: "center",
   },

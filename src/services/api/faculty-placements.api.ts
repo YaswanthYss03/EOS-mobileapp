@@ -93,3 +93,47 @@ export async function getDepartmentStudentPlacementHistory(studentId: number): P
   );
   return data.data;
 }
+
+// ───────────────────────────── HoD drive-centric history ─────────────────────────────
+// Distinct from getDepartmentStudentPlacementHistory above (student-centric:
+// pick a student, see their own drive history) - this is the other
+// direction the HoD's "History" tab also needs: pick a drive, see which
+// department students applied/attended it. See GET /me/department-drive-history
+// (DrivesService.getDriveHistoryForHod) - grouped by drive server-side,
+// each drive carrying its own list of department applicants (with their
+// batch_name/section already attached, so a Batch filter can be applied
+// client-side without a second request).
+
+export type DriveHistoryApplicant = {
+  id: number;
+  student_id_no: string;
+  name: string;
+  class_id: number | null;
+  section: string | null;
+  batch_name: string | null;
+  application_status: ApplicationStatus;
+  last_cleared_round: number | null;
+};
+
+export type DriveHistoryDrive = {
+  drive_id: number;
+  company_name: string;
+  scheduled_date: string;
+  drive_status: string;
+  applicants: DriveHistoryApplicant[];
+};
+
+// Named ...ForHod (not getDepartmentDriveHistory) to avoid colliding with
+// the differently-shaped, differently-scoped Principal function of that
+// name in @/services/api/placements.api.ts (departmentId param, flat
+// per-application rows) - PlacementsOverviewScreen imports both.
+//
+// classId narrows this to one class (from the same class selector as
+// getDepartmentStudents/getDepartmentClasses) - omit it to get every
+// concluded drive with a department applicant, across the whole department.
+export async function getDepartmentDriveHistoryForHod(classId?: number): Promise<DriveHistoryDrive[]> {
+  const { data } = await apiClient.get<{ data: DriveHistoryDrive[] }>("/me/department-drive-history", {
+    params: classId ? { class_id: classId } : undefined,
+  });
+  return data.data;
+}

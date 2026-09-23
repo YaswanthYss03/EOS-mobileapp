@@ -6,6 +6,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
+import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, toIsoDate } from "@/utils/calendar";
@@ -20,6 +21,7 @@ import {
 } from "@/services/api/medical-appointments.api";
 import { formatFullDate, formatTimeRange } from "./time";
 import { toast } from "@/utils/toast";
+import { useRole } from "@/hooks/useRole";
 
 type LoadStatus = "loading" | "success" | "error";
 
@@ -111,6 +113,14 @@ function MyAppointmentCard({ item, onCancelled }: { item: MyAppointment; onCance
 export function MedicalAppointmentCalendarScreen() {
   const navigation = useNavigation();
   const router = useRouter();
+  const role = useRole();
+  // Student and Employee now both reach this screen from the Campus tab
+  // (see AmenityHomeScreen.tsx's studentOptions) - HoD/Secretary/HR Payroll/
+  // Warden still reach it same-tab from their own Class-tab-style dashboard
+  // (employeeSectionItems.ts). isCampusTab decides which tab's own local
+  // route copy back navigation and the date drill-down push should target.
+  const isCampusTab = role === "student" || role === "employee";
+  const basePath = isCampusTab ? "/(tabs)/amenity" : "/(tabs)/erp";
 
   const today = useMemo(() => {
     const now = new Date();
@@ -202,7 +212,7 @@ export function MedicalAppointmentCalendarScreen() {
       toast.info("The medical centre has not opened any slots on this date.");
       return;
     }
-    router.push({ pathname: "/(tabs)/erp/medical-appointment/[date]", params: { date: iso } });
+    router.push({ pathname: `${basePath}/medical-appointment/[date]` as never, params: { date: iso } });
   }
 
   const upcoming = mine.filter((item) => item.status === "pending" || item.status === "approved");
@@ -210,7 +220,15 @@ export function MedicalAppointmentCalendarScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
-      <MedicalAppointmentHeader onBack={() => router.back()} />
+      <WatermarkBackground />
+      <MedicalAppointmentHeader
+        // Student and Employee reach this cross-tab, from the Campus tab
+        // (see isCampusTab above) - a plain router.back() pops within THIS
+        // (erp) tab's own stack, not back to the tab that actually pushed
+        // it. Every other role (HoD/HR/etc) reaches it same-tab, where a
+        // plain back is correct.
+        onBack={() => (isCampusTab ? router.replace("/(tabs)/amenity") : router.back())}
+      />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.calendarCard}>
@@ -352,7 +370,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
