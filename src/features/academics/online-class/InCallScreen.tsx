@@ -1,5 +1,18 @@
-import { useCallback, useEffect, useState } from "react";
-import { View, Text, TouchableOpacity, Modal, FlatList, TextInput, KeyboardAvoidingView, Platform, StyleSheet } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  Modal,
+  FlatList,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  BackHandler,
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+} from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -8,10 +21,19 @@ import { Ionicons } from "@expo/vector-icons";
 import type { useParticipants as UseParticipantsType, useChat as UseChatType, TrackReference } from "@livekit/react-native";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
+import { confirm } from "@/utils/confirm";
 import { getApiErrorMessage } from "@/services/api/client";
 import { useRole } from "@/hooks/useRole";
-import { leaveOnlineClass, endOnlineClass } from "@/services/api/online-class.api";
+import {
+  leaveOnlineClass,
+  endOnlineClass,
+  joinOnlineClass,
+  muteMeetingParticipant,
+  muteAllMeetingStudents,
+  removeMeetingParticipant,
+} from "@/services/api/online-class.api";
 import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
+import { takeCallSession, toCallSession, type CallSession } from "./callSession";
 
 // Real LiveKit in-call screen. <LiveKitRoom> owns the connection (built
 // from the serverUrl/token JoinLobbyScreen fetched from the real backend);
@@ -53,9 +75,34 @@ try {
 type RaiseHandPayload = { identity: string; name: string; raised: boolean };
 
 function formatElapsed(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  const safe = Math.max(0, seconds);
+  const hours = Math.floor(safe / 3600);
+  const mins = Math.floor((safe % 3600) / 60);
+  const secs = safe % 60;
+  const mmss = `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  return hours > 0 ? `${hours}:${mmss}` : mmss;
+}
+
+/**
+ * Seconds since the meeting started, from the server's start time
+ * (corrected for this device's clock drift) - identical for everyone and
+ * never restarting when someone leaves and rejoins. Falls back to "since
+ * this screen opened" only if the server didn't send a start time.
+ */
+function useMeetingElapsed(startedAtIso: string | undefined, clockOffsetMs: number): number {
+  const fallbackStart = useRef(Date.now());
+  const startMs = startedAtIso ? new Date(startedAtIso).getTime() : NaN;
+  const origin = Number.isFinite(startMs) ? startMs : fallbackStart.current;
+  const compute = useCallback(() => Math.floor((Date.now() + clockOffsetMs - origin) / 1000), [clockOffsetMs, origin]);
+  const [elapsed, setElapsed] = useState(compute);
+
+  useEffect(() => {
+    setElapsed(compute());
+    const interval = setInterval(() => setElapsed(compute()), 1000);
+    return () => clearInterval(interval);
+  }, [compute]);
+
+  return elapsed;
 }
 
 function CallHeader({ onBack, subject }: { onBack: () => void; subject: string }) {
@@ -102,14 +149,39 @@ export function InCallScreen() {
   const basePath = role === "employee" || role === "hod" ? "/(tabs)/erp/online-class" : "/(tabs)/academics/online-class";
   const params = useLocalSearchParams<{
     onlineClassId?: string;
-    serverUrl?: string;
-    token?: string;
     audio?: string;
     video?: string;
     initials?: string;
     teacher?: string;
     subject?: string;
   }>();
+
+  // Set right before this user leaves/ends on purpose, so the resulting
+  // disconnect isn't reported as "the meeting ended".
+  const intentionalExitRef = useRef(false);
+  // Why LiveKit disconnected us (host ended, removed, joined elsewhere...) -
+  // captured from the room's own Disconnected event inside CallBody.
+  const disconnectReasonRef = useRef<number | undefined>(undefined);
+  const onlineClassIdNum = Number(params.onlineClassId);
+  // Token + server URL come from memory (never route params); when absent
+  // (e.g. app reloaded) a fresh short-lived token is fetched.
+  const [session, setSession] = useState<CallSession | null>(() => takeCallSession(onlineClassIdNum));
+  const [sessionError, setSessionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (session || !Number.isFinite(onlineClassIdNum)) return;
+    let cancelled = false;
+    joinOnlineClass(onlineClassIdNum)
+      .then((info) => {
+        if (!cancelled) setSession(toCallSession(info));
+      })
+      .catch((err) => {
+        if (!cancelled) setSessionError(getApiErrorMessage(err, "Couldn't rejoin the class."));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, onlineClassIdNum]);
 
   // Only hides on focus, deliberately no restore-on-blur cleanup - leaving
   // this screen always replaces back to OnlineClassScreen, which re-hides
@@ -140,7 +212,26 @@ export function InCallScreen() {
   }
 
   function handleDisconnected() {
+    if (intentionalExitRef.current) return;
+    intentionalExitRef.current = true;
     leaveOnlineClass(onlineClassId).catch(() => {});
+    // Deferred one tick: LiveKitRoom's callback can run before CallBody's
+    // own Disconnected listener has recorded the reason.
+    setTimeout(() => showDisconnectMessage(), 0);
+  }
+
+  function showDisconnectMessage() {
+    const reasons = LiveKitClient?.DisconnectReason;
+    const reason = disconnectReasonRef.current;
+    const message =
+      reasons && reason === reasons.ROOM_DELETED
+        ? "The host ended the meeting."
+        : reasons && reason === reasons.PARTICIPANT_REMOVED
+          ? "The host removed you from the meeting."
+          : reasons && reason === reasons.DUPLICATE_IDENTITY
+            ? "You joined this meeting from another device."
+            : "You were disconnected from the meeting. Rejoin from Online class if it's still live.";
+    toast.info(message);
     goBack();
   }
 
@@ -152,13 +243,23 @@ export function InCallScreen() {
     return <UnavailableBody onBack={goBack} subject={subject} />;
   }
 
-  if (!params.serverUrl || !params.token) {
+  if (!session) {
     return (
       <SafeAreaView style={styles.container} edges={[]}>
         <WatermarkBackground />
         <CallHeader onBack={goBack} subject={subject} />
         <View style={styles.center}>
-          <Text style={styles.meta}>Missing connection details - please rejoin.</Text>
+          {sessionError ? (
+            <>
+              <Ionicons name="alert-circle-outline" size={28} color="#9AA6B2" />
+              <Text style={[styles.meta, { textAlign: "center", paddingHorizontal: 24 }]}>{sessionError}</Text>
+            </>
+          ) : (
+            <>
+              <ActivityIndicator color="#fff" />
+              <Text style={styles.meta}>Connecting…</Text>
+            </>
+          )}
         </View>
       </SafeAreaView>
     );
@@ -168,15 +269,25 @@ export function InCallScreen() {
 
   return (
     <LiveKitRoom
-      serverUrl={params.serverUrl}
-      token={params.token}
+      serverUrl={session.serverUrl}
+      token={session.token}
       connect
       audio={params.audio === "1"}
       video={params.video === "1"}
       onDisconnected={handleDisconnected}
       onError={handleError}
     >
-      <CallBody onlineClassId={onlineClassId} initials={initials} teacher={teacher} subject={subject} onLeft={goBack} />
+      <CallBody
+        onlineClassId={onlineClassId}
+        initials={initials}
+        teacher={teacher}
+        subject={subject}
+        startedAt={session.startedAt ?? undefined}
+        clockOffsetMs={session.clockOffsetMs}
+        intentionalExitRef={intentionalExitRef}
+        disconnectReasonRef={disconnectReasonRef}
+        onLeft={goBack}
+      />
     </LiveKitRoom>
   );
 }
@@ -186,19 +297,37 @@ function CallBody({
   initials,
   teacher,
   subject,
+  startedAt,
+  clockOffsetMs,
+  intentionalExitRef,
+  disconnectReasonRef,
   onLeft,
 }: {
   onlineClassId: number;
   initials: string;
   teacher: string;
   subject: string;
+  startedAt: string | undefined;
+  clockOffsetMs: number;
+  intentionalExitRef: { current: boolean };
+  disconnectReasonRef: { current: number | undefined };
   onLeft: () => void;
 }) {
   // Only ever rendered as <LiveKitRoom>'s child (see InCallScreen above),
   // which already guarantees LiveKitRN/LiveKitClient are non-null.
-  const { VideoTrack, useLocalParticipant, useRemoteParticipants, useParticipants, useTracks, useChat, useDataChannel, useRoomContext } =
-    LiveKitRN!;
-  const { Track } = LiveKitClient!;
+  const {
+    VideoTrack,
+    useLocalParticipant,
+    useRemoteParticipants,
+    useParticipants,
+    useTracks,
+    useChat,
+    useDataChannel,
+    useRoomContext,
+    useConnectionState,
+    useSpeakingParticipants,
+  } = LiveKitRN!;
+  const { Track, RoomEvent, ConnectionState } = LiveKitClient!;
 
   const role = useRole();
   const isFaculty = role === "employee" || role === "hod";
@@ -207,21 +336,46 @@ function CallBody({
   const participants = useParticipants();
   const remoteParticipants = useRemoteParticipants();
   const cameraTracks = useTracks([Track.Source.Camera]);
+  const screenTracks = useTracks([Track.Source.ScreenShare]);
+  const speakers = useSpeakingParticipants();
+  const connectionState = useConnectionState();
+  const [isRecording, setIsRecording] = useState(room.isRecording);
+
+  // Remember why we got disconnected (for the message shown afterwards)
+  // and track the room's recording status for the REC indicator.
+  useEffect(() => {
+    const onDisconnected = (reason?: number) => {
+      disconnectReasonRef.current = reason;
+    };
+    const onRecording = (recording: boolean) => setIsRecording(recording);
+    room.on(RoomEvent.Disconnected, onDisconnected);
+    room.on(RoomEvent.RecordingStatusChanged, onRecording);
+    return () => {
+      room.off(RoomEvent.Disconnected, onDisconnected);
+      room.off(RoomEvent.RecordingStatusChanged, onRecording);
+    };
+  }, [room, RoomEvent, disconnectReasonRef]);
   const { chatMessages, send: sendChat } = useChat();
   const { send: sendRaiseHand, message: raiseHandMessage } = useDataChannel("raise-hand");
 
-  const [elapsed, setElapsed] = useState(0);
+  const elapsed = useMeetingElapsed(startedAt, clockOffsetMs);
   const [handRaised, setHandRaised] = useState(false);
   const [raisedHands, setRaisedHands] = useState<Record<string, string>>({});
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
-  const [ending, setEnding] = useState(false);
+  const [leaveMenuOpen, setLeaveMenuOpen] = useState(false);
+  const [exiting, setExiting] = useState<"leave" | "end" | null>(null);
 
+  // Android back button opens the same leave menu instead of dropping the
+  // call silently.
   useEffect(() => {
-    const interval = setInterval(() => setElapsed((s) => s + 1), 1000);
-    return () => clearInterval(interval);
-  }, []);
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (!exiting) setLeaveMenuOpen(true);
+      return true;
+    });
+    return () => sub.remove();
+  }, [exiting]);
 
   useEffect(() => {
     if (!raiseHandMessage) return;
@@ -261,38 +415,133 @@ function CallBody({
   }
 
   function leaveCall() {
+    setExiting("leave");
+    intentionalExitRef.current = true;
     leaveOnlineClass(onlineClassId).catch(() => {});
     room.disconnect();
     onLeft();
   }
 
-  function endClassForEveryone() {
-    setEnding(true);
+  function endMeetingForEveryone() {
+    setExiting("end");
+    intentionalExitRef.current = true;
     endOnlineClass(onlineClassId)
       .then(() => {
         room.disconnect();
         onLeft();
       })
       .catch((err) => {
-        toast.error(getApiErrorMessage(err, "Couldn't end the class."));
-        setEnding(false);
+        intentionalExitRef.current = false;
+        setExiting(null);
+        toast.error(getApiErrorMessage(err, "Couldn't end the meeting. Please try again."));
       });
   }
 
-  const remoteCameraTrack = cameraTracks.find((t) => !t.participant.isLocal);
+  // Both choices ask once more in a centered dialog - leaving or ending by
+  // accident is disruptive, so nothing happens on "No".
+  async function chooseLeave() {
+    setLeaveMenuOpen(false);
+    const ok = await confirm({
+      title: "Leave meeting?",
+      message: isFaculty
+        ? "The meeting will continue without you. You can rejoin from Online class."
+        : "You can rejoin while the meeting is live.",
+      confirmText: "Yes",
+      cancelText: "No",
+    });
+    if (ok) leaveCall();
+  }
+
+  async function chooseEnd() {
+    setLeaveMenuOpen(false);
+    const ok = await confirm({
+      title: "End meeting for everyone?",
+      message: "This ends the meeting for all participants.",
+      confirmText: "Yes",
+      cancelText: "No",
+      destructive: true,
+    });
+    if (ok) endMeetingForEveryone();
+  }
+
+  // Main stage, like Meet: someone's screen share first, then the host's
+  // camera (for students), then whoever is speaking, then any camera.
+  const isHostIdentity = (identity: string) => identity.startsWith("faculty-");
+  const remoteCameras = cameraTracks.filter((t) => !t.participant.isLocal);
+  const speakingIds = new Set(speakers.filter((p) => !p.isLocal).map((p) => p.identity));
+  const stageTrack =
+    screenTracks.find((t) => !t.participant.isLocal) ??
+    (!isFaculty ? remoteCameras.find((t) => isHostIdentity(t.participant.identity)) : undefined) ??
+    remoteCameras.find((t) => speakingIds.has(t.participant.identity)) ??
+    remoteCameras[0];
+  const stripTracks = remoteCameras.filter((t) => t !== stageTrack).slice(0, 12);
   const localCameraTrack = cameraTracks.find((t) => t.participant.isLocal);
-  const remoteName = remoteParticipants[0]?.name || teacher || "Waiting for others to join…";
+  const hostParticipant = remoteParticipants.find((p) => isHostIdentity(p.identity));
+  const remoteName =
+    (!isFaculty ? hostParticipant?.name : undefined) ||
+    remoteParticipants[0]?.name ||
+    (remoteParticipants.length === 0 ? "Waiting for others to join…" : teacher);
+  const reconnecting = connectionState === ConnectionState.Reconnecting || connectionState === ConnectionState.SignalReconnecting;
+
+  async function hostMute(identity: string) {
+    try {
+      await muteMeetingParticipant(onlineClassId, identity);
+      toast.success("Muted");
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Couldn't mute that participant."));
+    }
+  }
+
+  async function hostMuteAll() {
+    try {
+      const res = await muteAllMeetingStudents(onlineClassId);
+      toast.success(res.muted > 0 ? `Muted ${res.muted} ${res.muted === 1 ? "student" : "students"}` : "No students to mute");
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Couldn't mute everyone."));
+    }
+  }
+
+  async function hostRemove(identity: string, name: string) {
+    const ok = await confirm({
+      title: "Remove from meeting?",
+      message: `${name} will be removed. They can rejoin while the meeting is live.`,
+      confirmText: "Remove",
+      cancelText: "Cancel",
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await removeMeetingParticipant(onlineClassId, identity);
+      toast.success(`${name} was removed`);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Couldn't remove that participant."));
+    }
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       <WatermarkBackground />
-      <CallHeader onBack={leaveCall} subject={subject} />
+      <CallHeader onBack={() => !exiting && setLeaveMenuOpen(true)} subject={subject} />
 
       <View style={styles.body}>
+        {reconnecting && (
+          <View style={styles.reconnectBanner}>
+            <ActivityIndicator color="#FDE68A" size="small" />
+            <Text style={styles.reconnectText}>Reconnecting… check your internet connection</Text>
+          </View>
+        )}
         <View style={styles.topRow}>
-          <View style={styles.timerChip}>
-            <View style={styles.liveDot} />
-            <Text style={styles.timerText}>{formatElapsed(elapsed)}</Text>
+          <View style={styles.topRowLeft}>
+            <View style={styles.timerChip}>
+              <View style={styles.liveDot} />
+              <Text style={styles.timerText}>{formatElapsed(elapsed)}</Text>
+            </View>
+            {isRecording && (
+              <View style={styles.recChip} accessibilityLabel="This meeting is being recorded">
+                <View style={styles.recDot} />
+                <Text style={styles.recText}>REC</Text>
+              </View>
+            )}
           </View>
           <TouchableOpacity style={styles.peopleChip} onPress={() => setPeopleOpen(true)} activeOpacity={0.8}>
             <Ionicons name="people" size={13} color="#fff" />
@@ -301,8 +550,20 @@ function CallBody({
         </View>
 
         <View style={styles.center}>
-          {remoteCameraTrack ? (
-            <VideoTrack trackRef={remoteCameraTrack} style={styles.remoteVideo} objectFit="cover" />
+          {stageTrack ? (
+            <>
+              <VideoTrack
+                trackRef={stageTrack}
+                style={styles.remoteVideo}
+                objectFit={stageTrack.source === Track.Source.ScreenShare ? "contain" : "cover"}
+              />
+              <View style={styles.stageLabel}>
+                <Text style={styles.stageLabelText} numberOfLines={1}>
+                  {stageTrack.participant.name || stageTrack.participant.identity}
+                  {stageTrack.source === Track.Source.ScreenShare ? " · presenting" : ""}
+                </Text>
+              </View>
+            </>
           ) : (
             <>
               <View style={styles.avatar}>
@@ -313,6 +574,19 @@ function CallBody({
             </>
           )}
         </View>
+
+        {stripTracks.length > 0 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.strip} contentContainerStyle={styles.stripContent}>
+            {stripTracks.map((t) => (
+              <View key={`${t.participant.identity}:${t.source}`} style={styles.stripTile}>
+                <VideoTrack trackRef={t} style={styles.selfVideo} objectFit="cover" />
+                <Text style={styles.stripName} numberOfLines={1}>
+                  {t.participant.name || t.participant.identity}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+        )}
 
         <View style={styles.selfTile}>
           {localCameraTrack ? (
@@ -339,22 +613,39 @@ function CallBody({
         <ControlButton icon="hand-left" label="Raise hand" active={handRaised} onPress={toggleRaiseHand} />
         <ControlButton icon="people" label="People" onPress={() => setPeopleOpen(true)} />
         <ControlButton icon="chatbubble" label="Chat" onPress={() => setChatOpen(true)} />
-        <TouchableOpacity style={styles.leaveButton} onPress={leaveCall} activeOpacity={0.85}>
-          <Ionicons name="call" size={20} color="#fff" style={styles.leaveIcon} />
+        <TouchableOpacity
+          style={styles.leaveButton}
+          onPress={() => setLeaveMenuOpen(true)}
+          activeOpacity={0.85}
+          disabled={exiting !== null}
+          accessibilityRole="button"
+          accessibilityLabel="Leave or end the meeting"
+        >
+          {exiting ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Ionicons name="call" size={20} color="#fff" style={styles.leaveIcon} />
+          )}
         </TouchableOpacity>
       </View>
 
-      {isFaculty && (
-        <TouchableOpacity style={styles.endClassButton} onPress={endClassForEveryone} activeOpacity={0.85} disabled={ending}>
-          <Text style={styles.endClassButtonText}>{ending ? "Ending…" : "End class for everyone"}</Text>
-        </TouchableOpacity>
-      )}
+      <LeaveMenu
+        visible={leaveMenuOpen}
+        canEnd={isFaculty}
+        onLeave={chooseLeave}
+        onEnd={chooseEnd}
+        onClose={() => setLeaveMenuOpen(false)}
+      />
 
       <PeopleSheet
         visible={peopleOpen}
         onClose={() => setPeopleOpen(false)}
         participants={participants}
         raisedHands={raisedHands}
+        isHost={isFaculty}
+        onMute={hostMute}
+        onMuteAll={hostMuteAll}
+        onRemove={hostRemove}
       />
       <ChatSheet
         visible={chatOpen}
@@ -365,6 +656,57 @@ function CallBody({
         onSend={handleSendChat}
       />
     </SafeAreaView>
+  );
+}
+
+function LeaveMenu({
+  visible,
+  canEnd,
+  onLeave,
+  onEnd,
+  onClose,
+}: {
+  visible: boolean;
+  canEnd: boolean;
+  onLeave: () => void;
+  onEnd: () => void;
+  onClose: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <TouchableOpacity style={styles.sheetOverlay} activeOpacity={1} onPress={onClose}>
+        <TouchableOpacity
+          activeOpacity={1}
+          style={[styles.sheet, styles.leaveSheet, { paddingBottom: Math.max(insets.bottom, 16) + 4 }]}
+        >
+          <View style={styles.sheetHandle} />
+          <TouchableOpacity style={styles.leaveOption} onPress={onLeave} activeOpacity={0.85}>
+            <View style={styles.leaveOptionIcon}>
+              <Ionicons name="exit-outline" size={20} color="#fff" />
+            </View>
+            <View style={styles.leaveOptionTextWrap}>
+              <Text style={styles.leaveOptionTitle}>Leave meeting</Text>
+              <Text style={styles.leaveOptionHint}>Others stay in the meeting</Text>
+            </View>
+          </TouchableOpacity>
+          {canEnd && (
+            <TouchableOpacity style={[styles.leaveOption, styles.endOption]} onPress={onEnd} activeOpacity={0.85}>
+              <View style={[styles.leaveOptionIcon, styles.endOptionIcon]}>
+                <Ionicons name="call" size={18} color="#fff" style={styles.leaveIcon} />
+              </View>
+              <View style={styles.leaveOptionTextWrap}>
+                <Text style={[styles.leaveOptionTitle, styles.endOptionTitle]}>End call</Text>
+                <Text style={styles.leaveOptionHint}>End the meeting for everyone</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={styles.leaveCancel} onPress={onClose} activeOpacity={0.8}>
+            <Text style={styles.leaveCancelText}>Cancel</Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
   );
 }
 
@@ -396,35 +738,89 @@ function PeopleSheet({
   onClose,
   participants,
   raisedHands,
+  isHost,
+  onMute,
+  onMuteAll,
+  onRemove,
 }: {
   visible: boolean;
   onClose: () => void;
   participants: ReturnType<typeof UseParticipantsType>;
   raisedHands: Record<string, string>;
+  isHost: boolean;
+  onMute: (identity: string) => void;
+  onMuteAll: () => void;
+  onRemove: (identity: string, name: string) => void;
 }) {
+  // Host first, then raised hands, then everyone else by name.
+  const sorted = [...participants].sort((a, b) => {
+    const rank = (p: (typeof participants)[number]) =>
+      p.identity.startsWith("faculty-") ? 0 : raisedHands[p.identity] ? 1 : 2;
+    return rank(a) - rank(b) || (a.name || a.identity).localeCompare(b.name || b.identity);
+  });
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.sheetOverlay}>
         <View style={styles.sheet}>
           <View style={styles.sheetHeaderRow}>
             <Text style={styles.sheetTitle}>People ({participants.length})</Text>
-            <TouchableOpacity onPress={onClose} hitSlop={8}>
-              <Ionicons name="close" size={22} color="#fff" />
-            </TouchableOpacity>
+            <View style={styles.sheetHeaderActions}>
+              {isHost && (
+                <TouchableOpacity onPress={onMuteAll} style={styles.muteAllButton} activeOpacity={0.8}>
+                  <Ionicons name="mic-off" size={14} color="#fff" />
+                  <Text style={styles.muteAllText}>Mute all</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity onPress={onClose} hitSlop={8}>
+                <Ionicons name="close" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
           </View>
           <FlatList
-            data={participants}
+            data={sorted}
             keyExtractor={(p) => p.identity}
             style={styles.sheetList}
-            renderItem={({ item }) => (
-              <View style={styles.peopleRow}>
-                <Text style={styles.peopleRowName}>
-                  {item.name || item.identity}
-                  {item.isLocal ? " (You)" : ""}
-                </Text>
-                {raisedHands[item.identity] && <Ionicons name="hand-left" size={16} color="#F59E0B" />}
-              </View>
-            )}
+            renderItem={({ item }) => {
+              const name = item.name || item.identity;
+              const isStudent = item.identity.startsWith("student-");
+              return (
+                <View style={styles.peopleRow}>
+                  <View style={styles.peopleRowNameWrap}>
+                    <Text style={styles.peopleRowName} numberOfLines={1}>
+                      {name}
+                      {item.isLocal ? " (You)" : ""}
+                    </Text>
+                    {item.identity.startsWith("faculty-") && <Text style={styles.hostTag}>Host</Text>}
+                  </View>
+                  <View style={styles.peopleRowActions}>
+                    {raisedHands[item.identity] && <Ionicons name="hand-left" size={16} color="#F59E0B" />}
+                    {!item.isMicrophoneEnabled && <Ionicons name="mic-off" size={15} color="#6B7280" />}
+                    {isHost && isStudent && (
+                      <>
+                        {item.isMicrophoneEnabled && (
+                          <TouchableOpacity
+                            onPress={() => onMute(item.identity)}
+                            style={styles.peopleAction}
+                            hitSlop={6}
+                            accessibilityLabel={`Mute ${name}`}
+                          >
+                            <Ionicons name="mic-off-outline" size={16} color="#fff" />
+                          </TouchableOpacity>
+                        )}
+                        <TouchableOpacity
+                          onPress={() => onRemove(item.identity, name)}
+                          style={[styles.peopleAction, styles.peopleActionDanger]}
+                          hitSlop={6}
+                          accessibilityLabel={`Remove ${name}`}
+                        >
+                          <Ionicons name="person-remove-outline" size={15} color="#FCA5A5" />
+                        </TouchableOpacity>
+                      </>
+                    )}
+                  </View>
+                </View>
+              );
+            }}
           />
         </View>
       </View>
@@ -530,6 +926,89 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+  },
+  topRowLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  recChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "rgba(220,38,38,0.2)",
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  recDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: "#EF4444",
+  },
+  recText: {
+    fontSize: 11,
+    fontFamily: fonts.bold,
+    color: "#FCA5A5",
+    letterSpacing: 0.5,
+  },
+  reconnectBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(245,158,11,0.15)",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 10,
+  },
+  reconnectText: {
+    flex: 1,
+    fontSize: 12,
+    fontFamily: fonts.semibold,
+    color: "#FDE68A",
+  },
+  stageLabel: {
+    position: "absolute",
+    left: 10,
+    bottom: 10,
+    maxWidth: "70%",
+    backgroundColor: "rgba(0,0,0,0.5)",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  stageLabelText: {
+    fontSize: 11.5,
+    fontFamily: fonts.semibold,
+    color: "#fff",
+  },
+  strip: {
+    flexGrow: 0,
+    marginTop: 10,
+    marginRight: 100,
+  },
+  stripContent: {
+    gap: 8,
+  },
+  stripTile: {
+    width: 84,
+    height: 84,
+    borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: "#141B2D",
+  },
+  stripName: {
+    position: "absolute",
+    left: 4,
+    right: 4,
+    bottom: 4,
+    fontSize: 10,
+    fontFamily: fonts.semibold,
+    color: "#fff",
+    textShadowColor: "rgba(0,0,0,0.8)",
+    textShadowRadius: 3,
   },
   timerChip: {
     flexDirection: "row",
@@ -664,20 +1143,67 @@ const styles = StyleSheet.create({
   leaveIcon: {
     transform: [{ rotate: "135deg" }],
   },
-  endClassButton: {
+  leaveSheet: {
+    paddingTop: 10,
+  },
+  sheetHandle: {
+    alignSelf: "center",
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    marginBottom: 14,
+  },
+  leaveOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 10,
+  },
+  endOption: {
+    backgroundColor: "rgba(220,38,38,0.12)",
+  },
+  leaveOptionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.12)",
     alignItems: "center",
     justifyContent: "center",
-    marginHorizontal: 16,
-    marginBottom: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(220,38,38,0.4)",
   },
-  endClassButtonText: {
-    fontSize: 13,
+  endOptionIcon: {
+    backgroundColor: "#DC2626",
+  },
+  leaveOptionTextWrap: {
+    flex: 1,
+  },
+  leaveOptionTitle: {
+    fontSize: 15,
     fontFamily: fonts.bold,
-    color: "#DC2626",
+    color: "#fff",
+  },
+  endOptionTitle: {
+    color: "#FCA5A5",
+  },
+  leaveOptionHint: {
+    fontSize: 12,
+    fontFamily: fonts.medium,
+    color: "#9AA6B2",
+    marginTop: 2,
+  },
+  leaveCancel: {
+    alignItems: "center",
+    paddingVertical: 12,
+    marginTop: 2,
+  },
+  leaveCancelText: {
+    fontSize: 14,
+    fontFamily: fonts.semibold,
+    color: "#9AA6B2",
   },
   sheetOverlay: {
     flex: 1,
@@ -722,6 +1248,59 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     fontFamily: fonts.medium,
     color: "#E5E7EB",
+    flexShrink: 1,
+  },
+  peopleRowNameWrap: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginRight: 8,
+  },
+  hostTag: {
+    fontSize: 10,
+    fontFamily: fonts.bold,
+    color: "#93C5FD",
+    backgroundColor: "rgba(47,111,224,0.25)",
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    overflow: "hidden",
+  },
+  peopleRowActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  peopleAction: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  peopleActionDanger: {
+    backgroundColor: "rgba(220,38,38,0.18)",
+  },
+  sheetHeaderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
+  muteAllButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  muteAllText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#fff",
   },
   chatRow: {
     paddingVertical: 8,

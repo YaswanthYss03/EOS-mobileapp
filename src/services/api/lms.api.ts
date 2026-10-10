@@ -79,6 +79,10 @@ export type LmsSubmission = {
   name: string;
   status_id: number | null;
   is_submitted: boolean;
+  // True only once a faculty member has explicitly approved this
+  // submission (toggleSubmissionReview, or grading it) - never just
+  // because the student uploaded something, which alone leaves it pending.
+  is_reviewed: boolean;
   submission_file_url: string | null;
   submitted_at: string | null;
   marks_obtained: number | null;
@@ -236,6 +240,13 @@ export async function getTaskSubmissions(taskId: number): Promise<LmsSubmission[
 
 export async function gradeSubmission(statusId: number, marksObtained: number): Promise<void> {
   await apiClient.patch(`/me/lms/submissions/${statusId}`, { marks_obtained: marksObtained });
+}
+
+export async function toggleSubmissionReview(statusId: number): Promise<{ is_reviewed: boolean }> {
+  const { data } = await apiClient.patch<{ data: { is_reviewed: boolean } }>(
+    `/me/lms/submissions/${statusId}/toggle-review`,
+  );
+  return data.data;
 }
 
 export async function getFacultyLessonPlan(subjectId: number, classId: number): Promise<LmsLessonPlan> {

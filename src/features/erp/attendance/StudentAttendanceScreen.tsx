@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState, type RefObject } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Modal } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -10,15 +10,17 @@ import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { AnchoredDropdown } from "@/components/ui/dropdown";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
+import { confirm } from "@/utils/confirm";
+import { getCalendarWeeks, WEEKDAY_LABELS, MONTH_NAMES, formatDate, toIsoDate } from "@/utils/calendar";
 import { getApiErrorMessage } from "@/services/api/client";
 import {
   getTodayClasses,
-  getHandledClasses,
+  getClassAttendanceDraft,
   recognizeAttendance,
   markClassAttendance,
   publishClassAttendance,
+  MAX_RECOGNIZE_IMAGES,
   type TodayClassSlot,
-  type HandledClass,
   type RosterStudent,
 } from "@/services/api/attendance-cv.api";
 import { FaceCaptureCamera } from "./FaceCaptureCamera";
@@ -27,8 +29,8 @@ import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 // Mobile-side status label - "onduty" (no underscore) is kept distinct from
 // the backend's own attendance_status_enum spelling ("on_duty") purely so
 // this file's existing STATUS_META/toggle-grid code (unchanged from the
-// mock-data version) didn't need renaming; mapped at the one call site that
-// actually talks to the backend - see STATUS_TO_BACKEND in handleSave.
+// mock-data version) didn't need renaming; mapped at the two call sites that
+// actually talk to the backend - see STATUS_TO_BACKEND/STATUS_FROM_BACKEND.
 type AttendanceStatus = "present" | "absent" | "onduty";
 
 const STATUS_META: Record<AttendanceStatus, { label: string; color: string }> = {
@@ -43,9 +45,19 @@ const STATUS_TO_BACKEND: Record<AttendanceStatus, "present" | "absent" | "on_dut
   onduty: "on_duty",
 };
 
-// What the class picker actually needs, whichever of the two backend list
-// endpoints it came from (today's timetable vs. the broader handled-classes
-// fallback) - both normalize to this shape.
+const STATUS_FROM_BACKEND: Record<"present" | "absent" | "on_duty", AttendanceStatus> = {
+  present: "present",
+  absent: "absent",
+  on_duty: "onduty",
+};
+
+// Every student starts out present - the faculty only touches the
+// exceptions (absent / on duty), there's no separate "mark all" step.
+const DEFAULT_STATUS: AttendanceStatus = "present";
+
+// One (class, subject) the faculty teaches on the selected date. Several
+// periods of the same subject for the same class that day collapse into a
+// single option, since attendance is stored per class+subject+date.
 type ClassOption = {
   class_id: number;
   subject_id: number;
@@ -55,30 +67,51 @@ type ClassOption = {
   label: string;
 };
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+function startOfToday(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
 }
 
-function todayClassSlotToOption(slot: TodayClassSlot): ClassOption {
-  return {
-    class_id: slot.class_id,
-    subject_id: slot.subject_id,
-    subject_name: slot.subject_name,
-    class_section: slot.class_section,
-    department_name: slot.department_name,
-    label: `Period ${slot.period_number} · ${slot.start_time}–${slot.end_time}`,
-  };
+function isSameDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
-function handledClassToOption(cls: HandledClass): ClassOption {
-  return {
-    class_id: cls.class_id,
-    subject_id: cls.subject_id,
-    subject_name: cls.subject_name,
-    class_section: cls.section,
-    department_name: cls.department_name,
-    label: cls.academic_year,
-  };
+// Slots handed over to another faculty that day (covered_by) are dropped -
+// that period's attendance belongs to whoever is covering it.
+function slotsToOptions(slots: TodayClassSlot[]): ClassOption[] {
+  const grouped = new Map<string, TodayClassSlot[]>();
+  for (const slot of slots) {
+    if (slot.covered_by) continue;
+    const key = `${slot.class_id}:${slot.subject_id}`;
+    const group = grouped.get(key);
+    if (group) group.push(slot);
+    else grouped.set(key, [slot]);
+  }
+
+  return Array.from(grouped.values()).map((group) => {
+    const sorted = [...group].sort((a, b) => a.period_number - b.period_number);
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+    const periods =
+      sorted.length === 1
+        ? `Period ${first.period_number}`
+        : `Periods ${sorted.map((s) => s.period_number).join(", ")}`;
+    const substitution = sorted.some((s) => s.is_substitution) ? " · Substitution" : "";
+    return {
+      class_id: first.class_id,
+      subject_id: first.subject_id,
+      subject_name: first.subject_name,
+      class_section: first.class_section,
+      department_name: first.department_name,
+      label: `${periods} · ${first.start_time}–${last.end_time}${substitution}`,
+    };
+  });
+}
+
+function allPresent(students: RosterStudent[]): Record<number, AttendanceStatus> {
+  const next: Record<number, AttendanceStatus> = {};
+  for (const s of students) next[s.student_id] = DEFAULT_STATUS;
+  return next;
 }
 
 function initialsFromName(name: string) {
@@ -90,13 +123,14 @@ function initialsFromName(name: string) {
     .join("");
 }
 
-// Wired to EOSbackend1's attendance-cv module: GET /me/classes/today +
-// /me/handled-classes back the class picker, POST
+// Wired to EOSbackend1: GET /me/classes/today?date= backs the class picker
+// (only classes on the selected date), POST
 // /me/classes/:class_id/attendance/recognize drives the AI suggestions
-// (also doubles as the plain roster fetch when called with no photos), and
-// the existing, unmodified POST /me/classes/:class_id/attendance
-// (markForClass) is the only thing that ever actually persists attendance -
-// the AI step only ever produces a draft the faculty reviews here first.
+// (also doubles as the plain roster fetch when called with no photos), GET
+// .../attendance/draft resumes anything already saved for that date, POST
+// .../attendance saves a draft and POST .../attendance/publish makes it
+// final. The backend independently rejects future dates, unmapped
+// classes and edits after publish - the checks here are UX, not security.
 export function StudentAttendanceScreen() {
   const router = useRouter();
   const navigation = useNavigation();
@@ -119,70 +153,229 @@ export function StudentAttendanceScreen() {
     }, [navigation]),
   );
 
+  const [selectedDate, setSelectedDate] = useState<Date>(startOfToday);
+  const selectedDateIso = toIsoDate(selectedDate);
+  const [datePickerVisible, setDatePickerVisible] = useState(false);
+  const [pickerYear, setPickerYear] = useState(selectedDate.getFullYear());
+  const [pickerMonth, setPickerMonth] = useState(selectedDate.getMonth());
+
   const classPickerAnchorRef = useRef<View>(null);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [pickerLoading, setPickerLoading] = useState(false);
-  const [pickerLoaded, setPickerLoaded] = useState(false);
-  const [todayOptions, setTodayOptions] = useState<ClassOption[]>([]);
-  const [handledOptions, setHandledOptions] = useState<ClassOption[]>([]);
+  const [optionsLoadedFor, setOptionsLoadedFor] = useState<string | null>(null);
+  const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
 
   const [selectedClass, setSelectedClass] = useState<ClassOption | null>(null);
   const [rosterLoading, setRosterLoading] = useState(false);
   const [students, setStudents] = useState<RosterStudent[]>([]);
   const [analyzed, setAnalyzed] = useState(false);
-  const [statusMap, setStatusMap] = useState<Record<number, AttendanceStatus | undefined>>({});
+  // Evidence photo URL the backend returned from the AI step, saved with
+  // the attendance rows. Dropped whenever the AI result is discarded.
+  const [evidencePhotoUrl, setEvidencePhotoUrl] = useState<string | null>(null);
+  const [statusMap, setStatusMap] = useState<Record<number, AttendanceStatus>>({});
+  const [isPublished, setIsPublished] = useState(false);
+  const [hasSavedDraft, setHasSavedDraft] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
 
-  async function openPicker() {
-    setPickerVisible(true);
-    if (pickerLoaded) return;
+  // Bumped on every date/class switch so a slow response for the previous
+  // selection can never overwrite the current one.
+  const selectionSeq = useRef(0);
+  const optionsSeq = useRef(0);
+
+  function resetRoster() {
+    setSelectedClass(null);
+    setStudents([]);
+    setStatusMap({});
+    setAnalyzed(false);
+    setEvidencePhotoUrl(null);
+    setIsPublished(false);
+    setHasSavedDraft(false);
+    setDirty(false);
+  }
+
+  async function confirmDiscardIfDirty(): Promise<boolean> {
+    if (!dirty) return true;
+    return confirm({
+      title: "Discard changes?",
+      message: "You have attendance changes that haven't been saved.",
+      confirmText: "Discard",
+      destructive: true,
+    });
+  }
+
+  async function loadClassOptions(dateIso: string) {
+    const seq = ++optionsSeq.current;
     setPickerLoading(true);
     try {
-      const [today, handled] = await Promise.all([getTodayClasses(), getHandledClasses()]);
-      setTodayOptions(today.map(todayClassSlotToOption));
-      setHandledOptions(handled.map(handledClassToOption));
-      setPickerLoaded(true);
+      const slots = await getTodayClasses(dateIso);
+      if (seq !== optionsSeq.current) return;
+      setClassOptions(slotsToOptions(slots));
+      setOptionsLoadedFor(dateIso);
     } catch (error) {
+      if (seq !== optionsSeq.current) return;
+      setPickerVisible(false);
       toast.error(getApiErrorMessage(error, "Couldn't load your classes"));
     } finally {
-      setPickerLoading(false);
+      if (seq === optionsSeq.current) setPickerLoading(false);
     }
   }
 
-  async function loadRoster(option: ClassOption, images: string[] | undefined) {
+  function openPicker() {
+    setPickerVisible(true);
+    if (optionsLoadedFor !== selectedDateIso && !pickerLoading) {
+      void loadClassOptions(selectedDateIso);
+    }
+  }
+
+  async function loadRoster(option: ClassOption, dateIso: string) {
+    const seq = ++selectionSeq.current;
     setRosterLoading(true);
     try {
-      const result = await recognizeAttendance(option.class_id, option.subject_id, images);
-      setStudents(result.students);
-      setAnalyzed(result.analyzed);
-      const nextStatusMap: Record<number, AttendanceStatus | undefined> = {};
-      for (const s of result.students) {
-        if (s.suggested_status) nextStatusMap[s.student_id] = s.suggested_status;
+      const [roster, draft] = await Promise.all([
+        recognizeAttendance(option.class_id, option.subject_id, dateIso),
+        getClassAttendanceDraft(option.class_id, option.subject_id, dateIso).catch(() => null),
+      ]);
+      if (seq !== selectionSeq.current) return;
+
+      const nextStatusMap = allPresent(roster.students);
+      if (draft) {
+        for (const record of draft.records) {
+          if (record.student_id in nextStatusMap) {
+            nextStatusMap[record.student_id] = STATUS_FROM_BACKEND[record.status];
+          }
+        }
+      } else {
+        toast.warning("Couldn't check for previously saved attendance - showing everyone present");
       }
+
+      setStudents(roster.students);
+      setAnalyzed(false);
       setStatusMap(nextStatusMap);
+      setIsPublished(draft?.is_published ?? false);
+      setHasSavedDraft(!!draft && draft.records.length > 0 && !draft.is_published);
+      setDirty(false);
     } catch (error) {
+      if (seq !== selectionSeq.current) return;
       toast.error(getApiErrorMessage(error, "Couldn't load the class roster"));
     } finally {
-      setRosterLoading(false);
+      if (seq === selectionSeq.current) setRosterLoading(false);
     }
   }
 
   async function handleSelectClass(option: ClassOption) {
     setPickerVisible(false);
+    if (
+      selectedClass &&
+      selectedClass.class_id === option.class_id &&
+      selectedClass.subject_id === option.subject_id
+    ) {
+      return;
+    }
+    if (!(await confirmDiscardIfDirty())) return;
+    resetRoster();
     setSelectedClass(option);
-    setStudents([]);
-    setStatusMap({});
-    setAnalyzed(false);
-    await loadRoster(option, undefined);
+    await loadRoster(option, selectedDateIso);
+  }
+
+  function openDatePicker() {
+    setPickerYear(selectedDate.getFullYear());
+    setPickerMonth(selectedDate.getMonth());
+    setDatePickerVisible(true);
+  }
+
+  const today = startOfToday();
+  const pickerWeeks = useMemo(() => getCalendarWeeks(pickerYear, pickerMonth), [pickerYear, pickerMonth]);
+  const canGoToNextMonth =
+    pickerYear < today.getFullYear() || (pickerYear === today.getFullYear() && pickerMonth < today.getMonth());
+
+  function goToPreviousPickerMonth() {
+    if (pickerMonth === 0) {
+      setPickerMonth(11);
+      setPickerYear((y) => y - 1);
+    } else {
+      setPickerMonth((m) => m - 1);
+    }
+  }
+
+  function goToNextPickerMonth() {
+    if (!canGoToNextMonth) return;
+    if (pickerMonth === 11) {
+      setPickerMonth(0);
+      setPickerYear((y) => y + 1);
+    } else {
+      setPickerMonth((m) => m + 1);
+    }
+  }
+
+  async function handlePickDate(day: number) {
+    const picked = new Date(pickerYear, pickerMonth, day);
+    if (picked > startOfToday()) return;
+    setDatePickerVisible(false);
+    if (isSameDay(picked, selectedDate)) return;
+    if (!(await confirmDiscardIfDirty())) return;
+
+    selectionSeq.current++;
+    optionsSeq.current++;
+    setRosterLoading(false);
+    setPickerLoading(false);
+    resetRoster();
+    setClassOptions([]);
+    setOptionsLoadedFor(null);
+    setSelectedDate(picked);
+  }
+
+  function handleOpenCamera() {
+    if (!selectedClass) {
+      toast.warning("Please select a class and try again");
+      return;
+    }
+    if (rosterLoading || students.length === 0) {
+      toast.info("Class roster is still loading - try again in a moment");
+      return;
+    }
+    if (isPublished) {
+      toast.warning("Attendance for this class is already published");
+      return;
+    }
+    setCameraOpen(true);
   }
 
   async function handleCameraDone(images: string[]) {
     setCameraOpen(false);
     if (!selectedClass || images.length === 0) return;
-    await loadRoster(selectedClass, images);
-    toast.success("Photos analyzed - review and correct below before saving");
+    const seq = selectionSeq.current;
+    setRosterLoading(true);
+    try {
+      const result = await recognizeAttendance(
+        selectedClass.class_id,
+        selectedClass.subject_id,
+        selectedDateIso,
+        images,
+      );
+      if (seq !== selectionSeq.current) return;
+      setStudents(result.students);
+      setAnalyzed(result.analyzed);
+      setEvidencePhotoUrl(result.photo_url);
+      // Only students the AI actually has a verdict for change - everyone
+      // else keeps whatever they were already marked as.
+      setStatusMap((prev) => {
+        const next: Record<number, AttendanceStatus> = {};
+        for (const s of result.students) {
+          next[s.student_id] = s.suggested_status ?? prev[s.student_id] ?? DEFAULT_STATUS;
+        }
+        return next;
+      });
+      setDirty(true);
+      toast.success("Photos analyzed - review and correct below before saving");
+    } catch (error) {
+      if (seq !== selectionSeq.current) return;
+      toast.error(getApiErrorMessage(error, "Couldn't analyze the photos"));
+    } finally {
+      if (seq === selectionSeq.current) setRosterLoading(false);
+    }
   }
 
   const counts = useMemo(() => {
@@ -195,53 +388,61 @@ export function StudentAttendanceScreen() {
       else if (status === "absent") absent++;
       else if (status === "onduty") onduty++;
     }
-    return { present, absent, onduty, left: students.length - present - absent - onduty };
+    return { present, absent, onduty };
   }, [statusMap, students]);
 
   function setStatus(studentId: number, status: AttendanceStatus) {
-    setStatusMap((prev) => ({
-      ...prev,
-      [studentId]: prev[studentId] === status ? undefined : status,
-    }));
-  }
-
-  function handleMarkAllPresent() {
-    const next: Record<number, AttendanceStatus> = {};
-    for (const s of students) next[s.student_id] = "present";
-    setStatusMap(next);
+    if (isPublished) return;
+    setStatusMap((prev) => (prev[studentId] === status ? prev : { ...prev, [studentId]: status }));
+    setDirty(true);
   }
 
   function handleClear() {
-    setStatusMap({});
+    setStatusMap(allPresent(students));
+    setAnalyzed(false);
+    setEvidencePhotoUrl(null);
+    setDirty(true);
+  }
+
+  function buildRecords() {
+    return students.map((s) => ({
+      student_id: s.student_id,
+      status: STATUS_TO_BACKEND[statusMap[s.student_id] ?? DEFAULT_STATUS],
+    }));
+  }
+
+  function canSubmit(): boolean {
+    if (!selectedClass || students.length === 0) {
+      toast.warning("Please select a class and try again");
+      return false;
+    }
+    if (selectedDate > startOfToday()) {
+      toast.warning("Attendance can't be marked for a future date");
+      return false;
+    }
+    if (isPublished) {
+      toast.warning("Attendance for this class is already published");
+      return false;
+    }
+    return true;
   }
 
   async function handleSave() {
-    if (!selectedClass || students.length === 0) {
-      toast.warning("Choose a class first");
-      return;
-    }
-    if (counts.left > 0) {
-      toast.warning(`Mark every student before saving - ${counts.left} left`);
-      return;
-    }
-
-    const records = students.map((s) => ({
-      student_id: s.student_id,
-      status: STATUS_TO_BACKEND[statusMap[s.student_id]!],
-    }));
-
+    if (!canSubmit() || !selectedClass) return;
     setSaving(true);
     try {
       const result = await markClassAttendance(
         selectedClass.class_id,
         selectedClass.subject_id,
-        todayIso(),
-        records,
+        selectedDateIso,
+        buildRecords(),
+        evidencePhotoUrl,
       );
       // Saved as a draft only (is_published: false) - not yet visible to
       // students/parents/advisors, and can still be re-marked and re-saved
-      // from here. The screen stays open (unlike before) so Publish can
-      // follow right away instead of having to re-pick the same class.
+      // from here before Publish.
+      setHasSavedDraft(true);
+      setDirty(false);
       toast.success(`Draft saved for ${result.marked} students - tap Publish to send it out`);
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Couldn't save attendance"));
@@ -251,21 +452,32 @@ export function StudentAttendanceScreen() {
   }
 
   async function handlePublish() {
-    if (!selectedClass || students.length === 0) {
-      toast.warning("Choose a class first");
-      return;
-    }
+    if (!canSubmit() || !selectedClass) return;
+    const target = selectedClass;
+    const dateIso = selectedDateIso;
+
+    const ok = await confirm({
+      title: "Publish attendance?",
+      message: `${target.subject_name} · ${target.department_name} ${target.class_section} on ${formatDate(selectedDate)}: ${counts.present} present, ${counts.absent} absent, ${counts.onduty} on duty. Published attendance can't be changed.`,
+      confirmText: "Publish",
+    });
+    if (!ok) return;
 
     setPublishing(true);
     try {
-      const result = await publishClassAttendance(selectedClass.class_id, selectedClass.subject_id, todayIso());
+      // Publish only ever flips the saved draft, so anything not yet saved
+      // is saved first - what gets published is exactly what's on screen.
+      if (dirty || !hasSavedDraft) {
+        await markClassAttendance(target.class_id, target.subject_id, dateIso, buildRecords(), evidencePhotoUrl);
+        setHasSavedDraft(true);
+        setDirty(false);
+      }
+      const result = await publishClassAttendance(target.class_id, target.subject_id, dateIso);
       toast.success(`Attendance published for ${result.published} students`);
-      setSelectedClass(null);
-      setStudents([]);
-      setStatusMap({});
-      setAnalyzed(false);
+      selectionSeq.current++;
+      resetRoster();
     } catch (error) {
-      toast.error(getApiErrorMessage(error, "Couldn't publish attendance - save a draft first"));
+      toast.error(getApiErrorMessage(error, "Couldn't publish attendance"));
     } finally {
       setPublishing(false);
     }
@@ -274,8 +486,7 @@ export function StudentAttendanceScreen() {
   if (cameraOpen) {
     return (
       <FaceCaptureCamera
-        title="Class Attendance"
-        hint="Pan across the room and take a few photos, then tap Done"
+        maxPhotos={MAX_RECOGNIZE_IMAGES}
         onDone={handleCameraDone}
         onCancel={() => setCameraOpen(false)}
       />
@@ -284,6 +495,9 @@ export function StudentAttendanceScreen() {
 
   const recognizedCount = students.filter((s) => s.suggested_status !== null).length;
   const presentCount = students.filter((s) => s.suggested_status === "present").length;
+  const isToday = isSameDay(selectedDate, today);
+  const selectedDateLabel = `${formatDate(selectedDate)}${isToday ? " (Today)" : ""}`;
+  const busy = saving || publishing;
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
@@ -298,19 +512,31 @@ export function StudentAttendanceScreen() {
           onPress={() => router.back()}
           style={styles.backButton}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <Ionicons name="arrow-back" size={20} color="#fff" />
         </TouchableOpacity>
-        <View>
+        <TouchableOpacity
+          onPress={openDatePicker}
+          style={styles.backButton}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          disabled={busy}
+          accessibilityRole="button"
+          accessibilityLabel="Change attendance date"
+        >
+          <Ionicons name="calendar-outline" size={19} color="#fff" />
+        </TouchableOpacity>
+        <View style={styles.headerTextWrap}>
           <Text style={styles.headerTitle}>Attendance</Text>
-          <Text style={styles.headerSubtitle}>{todayIso()} · Biometric log</Text>
+          <Text style={styles.headerSubtitle}>{selectedDateLabel} · Biometric log</Text>
         </View>
       </LinearGradient>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Class picker */}
         <View ref={classPickerAnchorRef} collapsable={false}>
-          <TouchableOpacity style={styles.card} activeOpacity={0.8} onPress={openPicker}>
+          <TouchableOpacity style={styles.card} activeOpacity={0.8} onPress={openPicker} disabled={busy}>
             <View style={styles.calendarRow}>
               <View style={styles.calendarIconWrap}>
                 <Ionicons name="book-outline" size={18} color="#2F6FE0" />
@@ -324,7 +550,7 @@ export function StudentAttendanceScreen() {
                 <Text style={styles.calendarSubtitle}>
                   {selectedClass
                     ? `${selectedClass.subject_name} · ${selectedClass.label}`
-                    : "Choose the class you're taking attendance for"}
+                    : `Your classes on ${selectedDateLabel}`}
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={18} color="#B0B7C3" />
@@ -345,6 +571,49 @@ export function StudentAttendanceScreen() {
           <Ionicons name="chevron-forward" size={16} color="#B0B7C3" />
         </TouchableOpacity>
 
+        {/* AI Face Attendance - always shown; Open Camera itself explains
+            that a class has to be picked first. */}
+        <View style={styles.aiCard}>
+          <View style={styles.aiCardHeader}>
+            <Text style={styles.aiCardTitle}>AI Face Attendance</Text>
+            <View style={styles.notMarkedBadge}>
+              <Text style={styles.notMarkedBadgeText}>
+                {isPublished ? "PUBLISHED" : analyzed ? "ANALYZED" : "NOT MARKED"}
+              </Text>
+            </View>
+          </View>
+          <Text style={styles.aiCardSubtitle}>Snap the class - students are marked present</Text>
+
+          <View style={styles.cameraBox}>
+            <View style={styles.cameraIconWrap}>
+              <Ionicons name="camera-outline" size={22} color="#fff" />
+            </View>
+            <Text style={styles.cameraOffText}>Camera is off</Text>
+            <Text style={styles.cameraHintText}>Open the camera and photograph the class</Text>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.openCameraButton, (!selectedClass || isPublished) && styles.openCameraButtonMuted]}
+            onPress={handleOpenCamera}
+            activeOpacity={0.85}
+            disabled={busy}
+          >
+            <Ionicons name="camera" size={18} color="#2F6FE0" />
+            <Text style={styles.openCameraText}>Open Camera</Text>
+          </TouchableOpacity>
+
+          <View style={styles.aiStatsRow}>
+            <View style={styles.aiStatBox}>
+              <Text style={styles.aiStatLabel}>RECOGNISED</Text>
+              <Text style={styles.aiStatValue}>{analyzed ? recognizedCount : "–"}</Text>
+            </View>
+            <View style={styles.aiStatBox}>
+              <Text style={styles.aiStatLabel}>MARKED PRESENT</Text>
+              <Text style={styles.aiStatValue}>{analyzed ? presentCount : "–"}</Text>
+            </View>
+          </View>
+        </View>
+
         {!selectedClass && (
           <View style={styles.emptyState}>
             <Ionicons name="school-outline" size={32} color="#B0B7C3" />
@@ -356,50 +625,21 @@ export function StudentAttendanceScreen() {
 
         {selectedClass && students.length > 0 && (
           <>
-            {/* AI Face Attendance */}
-            <View style={styles.aiCard}>
-              <View style={styles.aiCardHeader}>
-                <Text style={styles.aiCardTitle}>AI Face Attendance</Text>
-                <View style={styles.notMarkedBadge}>
-                  <Text style={styles.notMarkedBadgeText}>{analyzed ? "ANALYZED" : "NOT MARKED"}</Text>
-                </View>
-              </View>
-              <Text style={styles.aiCardSubtitle}>Snap the class - students are marked present</Text>
-
-              <View style={styles.cameraBox}>
-                <View style={styles.cameraIconWrap}>
-                  <Ionicons name="camera-outline" size={22} color="#fff" />
-                </View>
-                <Text style={styles.cameraOffText}>Camera is off</Text>
-                <Text style={styles.cameraHintText}>Open the camera and photograph the class</Text>
-              </View>
-
-              <TouchableOpacity
-                style={styles.openCameraButton}
-                onPress={() => setCameraOpen(true)}
-                activeOpacity={0.85}
-              >
-                <Ionicons name="camera" size={18} color="#2F6FE0" />
-                <Text style={styles.openCameraText}>Open Camera</Text>
-              </TouchableOpacity>
-
-              <View style={styles.aiStatsRow}>
-                <View style={styles.aiStatBox}>
-                  <Text style={styles.aiStatLabel}>RECOGNISED</Text>
-                  <Text style={styles.aiStatValue}>{analyzed ? recognizedCount : "–"}</Text>
-                </View>
-                <View style={styles.aiStatBox}>
-                  <Text style={styles.aiStatLabel}>MARKED PRESENT</Text>
-                  <Text style={styles.aiStatValue}>{analyzed ? presentCount : "–"}</Text>
-                </View>
-              </View>
-            </View>
-
             {/* Mark student attendance */}
             <Text style={styles.sectionTitle}>Mark Student Attendance</Text>
+
+            {isPublished && (
+              <View style={styles.publishedBanner}>
+                <Ionicons name="lock-closed-outline" size={16} color="#15803D" />
+                <Text style={styles.publishedBannerText}>
+                  Attendance for this class on {formatDate(selectedDate)} is already published and can't be changed.
+                </Text>
+              </View>
+            )}
+
             <View style={styles.card}>
               <Text style={styles.classDate}>
-                {todayIso()} · {students.length} students
+                {formatDate(selectedDate)} · {students.length} students
               </Text>
 
               <View style={styles.statsRow}>
@@ -415,57 +655,60 @@ export function StudentAttendanceScreen() {
                   <Text style={[styles.statValue, styles.statValueOnDuty]}>{counts.onduty}</Text>
                   <Text style={styles.statLabel}>ON DUTY</Text>
                 </View>
-                <View style={styles.statBox}>
-                  <Text style={[styles.statValue, styles.statValueLeft]}>{counts.left}</Text>
-                  <Text style={styles.statLabel}>LEFT</Text>
-                </View>
               </View>
-
-              <View style={styles.bulkActionsRow}>
-                <TouchableOpacity style={styles.markAllButton} onPress={handleMarkAllPresent} activeOpacity={0.85}>
-                  <Text style={styles.markAllButtonText}>Mark all present</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.clearButton} onPress={handleClear} activeOpacity={0.85}>
-                  <Text style={styles.clearButtonText}>Clear</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.saveButton, saving && styles.saveButtonDisabled]}
-                  onPress={handleSave}
-                  activeOpacity={0.85}
-                  disabled={saving}
-                >
-                  {saving ? (
-                    <ActivityIndicator color="#fff" size="small" />
-                  ) : (
-                    <Text style={styles.saveButtonText}>Save</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-
-              <TouchableOpacity
-                style={[styles.publishButton, publishing && styles.publishButtonDisabled]}
-                onPress={handlePublish}
-                activeOpacity={0.85}
-                disabled={publishing}
-              >
-                {publishing ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.publishButtonText}>Publish Attendance</Text>
-                )}
-              </TouchableOpacity>
 
               <View style={styles.studentList}>
                 {students.map((student) => (
                   <StudentAttendanceRow
                     key={student.student_id}
                     student={student}
-                    status={statusMap[student.student_id]}
+                    status={statusMap[student.student_id] ?? DEFAULT_STATUS}
+                    disabled={isPublished || busy}
                     onSetStatus={(status) => setStatus(student.student_id, status)}
                   />
                 ))}
               </View>
             </View>
+
+            {!isPublished && (
+              <View style={styles.footerActions}>
+                <View style={styles.bulkActionsRow}>
+                  <TouchableOpacity
+                    style={styles.clearButton}
+                    onPress={handleClear}
+                    activeOpacity={0.85}
+                    disabled={busy}
+                  >
+                    <Text style={styles.clearButtonText}>Clear</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.saveButton, busy && styles.saveButtonDisabled]}
+                    onPress={handleSave}
+                    activeOpacity={0.85}
+                    disabled={busy}
+                  >
+                    {saving ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text style={styles.saveButtonText}>Save</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.publishButton, busy && styles.publishButtonDisabled]}
+                  onPress={handlePublish}
+                  activeOpacity={0.85}
+                  disabled={busy}
+                >
+                  {publishing ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.publishButtonText}>Publish Attendance</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
           </>
         )}
       </ScrollView>
@@ -474,11 +717,89 @@ export function StudentAttendanceScreen() {
         anchorRef={classPickerAnchorRef}
         visible={pickerVisible}
         loading={pickerLoading}
-        todayOptions={todayOptions}
-        handledOptions={handledOptions}
+        dateLabel={selectedDateLabel}
+        options={classOptions}
         onSelect={handleSelectClass}
         onClose={() => setPickerVisible(false)}
       />
+
+      <Modal
+        visible={datePickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDatePickerVisible(false)}
+      >
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setDatePickerVisible(false)}>
+          <TouchableOpacity style={styles.dateModalCard} activeOpacity={1}>
+            <View style={styles.calendarNav}>
+              <TouchableOpacity onPress={goToPreviousPickerMonth} style={styles.navButton} hitSlop={8}>
+                <Ionicons name="chevron-back" size={18} color="#2F6FE0" />
+              </TouchableOpacity>
+              <Text style={styles.calendarMonthLabel}>
+                {MONTH_NAMES[pickerMonth]} {pickerYear}
+              </Text>
+              <TouchableOpacity
+                onPress={goToNextPickerMonth}
+                style={[styles.navButton, !canGoToNextMonth && styles.navButtonDisabled]}
+                hitSlop={8}
+                disabled={!canGoToNextMonth}
+              >
+                <Ionicons name="chevron-forward" size={18} color={canGoToNextMonth ? "#2F6FE0" : "#C7CDD6"} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.weekdayRow}>
+              {WEEKDAY_LABELS.map((label, index) => (
+                <Text key={index} style={styles.weekdayLabel}>
+                  {label}
+                </Text>
+              ))}
+            </View>
+
+            {pickerWeeks.map((week, weekIndex) => (
+              <View key={weekIndex} style={styles.weekRow}>
+                {week.map((day, dayIndex) => {
+                  if (day === null) {
+                    return <View key={dayIndex} style={styles.dayCell} />;
+                  }
+                  const cellDate = new Date(pickerYear, pickerMonth, day);
+                  const disabled = cellDate > today;
+                  const selected = isSameDay(cellDate, selectedDate);
+                  const isTodayCell = isSameDay(cellDate, today);
+                  return (
+                    <TouchableOpacity
+                      key={dayIndex}
+                      style={styles.dayCell}
+                      onPress={() => handlePickDate(day)}
+                      disabled={disabled}
+                    >
+                      <View
+                        style={[
+                          styles.dayCellInner,
+                          isTodayCell && styles.dayCellToday,
+                          selected && styles.dayCellSelected,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.dayCellText,
+                            disabled && styles.dayCellTextDisabled,
+                            selected && styles.dayCellTextSelected,
+                          ]}
+                        >
+                          {day}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ))}
+
+            <Text style={styles.dateModalHint}>Future dates can't be selected</Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -487,30 +808,19 @@ function ClassPickerModal({
   anchorRef,
   visible,
   loading,
-  todayOptions,
-  handledOptions,
+  dateLabel,
+  options,
   onSelect,
   onClose,
 }: {
   anchorRef: RefObject<View | null>;
   visible: boolean;
   loading: boolean;
-  todayOptions: ClassOption[];
-  handledOptions: ClassOption[];
+  dateLabel: string;
+  options: ClassOption[];
   onSelect: (option: ClassOption) => void;
   onClose: () => void;
 }) {
-  // Classes already shown under "Today's Timetable" are dropped from "All
-  // My Classes" below so the same (class, subject) never appears twice.
-  const todayKeys = useMemo(
-    () => new Set(todayOptions.map((o) => `${o.class_id}:${o.subject_id}`)),
-    [todayOptions],
-  );
-  const otherOptions = useMemo(
-    () => handledOptions.filter((o) => !todayKeys.has(`${o.class_id}:${o.subject_id}`)),
-    [handledOptions, todayKeys],
-  );
-
   return (
     <AnchoredDropdown
       anchorRef={anchorRef}
@@ -531,21 +841,16 @@ function ClassPickerModal({
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.modalList}>
-          <Text style={styles.modalSectionLabel}>TODAY'S TIMETABLE</Text>
-          {todayOptions.length === 0 ? (
-            <Text style={styles.modalEmptyText}>No periods scheduled for you today</Text>
+          <Text style={styles.modalSectionLabel}>CLASSES ON {dateLabel.toUpperCase()}</Text>
+          {options.length === 0 ? (
+            <Text style={styles.modalEmptyText}>No classes scheduled for you on this day</Text>
           ) : (
-            todayOptions.map((option, index) => (
-              <ClassOptionRow key={`today-${index}`} option={option} onPress={() => onSelect(option)} />
-            ))
-          )}
-
-          <Text style={[styles.modalSectionLabel, { marginTop: 18 }]}>ALL MY CLASSES</Text>
-          {otherOptions.length === 0 ? (
-            <Text style={styles.modalEmptyText}>Nothing else to show</Text>
-          ) : (
-            otherOptions.map((option, index) => (
-              <ClassOptionRow key={`handled-${index}`} option={option} onPress={() => onSelect(option)} />
+            options.map((option) => (
+              <ClassOptionRow
+                key={`${option.class_id}:${option.subject_id}`}
+                option={option}
+                onPress={() => onSelect(option)}
+              />
             ))
           )}
         </ScrollView>
@@ -574,10 +879,12 @@ function ClassOptionRow({ option, onPress }: { option: ClassOption; onPress: () 
 function StudentAttendanceRow({
   student,
   status,
+  disabled,
   onSetStatus,
 }: {
   student: RosterStudent;
-  status: AttendanceStatus | undefined;
+  status: AttendanceStatus;
+  disabled: boolean;
   onSetStatus: (status: AttendanceStatus) => void;
 }) {
   return (
@@ -592,7 +899,7 @@ function StudentAttendanceRow({
         <Text style={styles.studentRoll}>{student.student_id_no}</Text>
       </View>
 
-      <View style={styles.statusToggleRow}>
+      <View style={[styles.statusToggleRow, disabled && styles.statusToggleRowDisabled]}>
         {(["present", "absent", "onduty"] as const).map((option) => {
           const meta = STATUS_META[option];
           const active = status === option;
@@ -605,6 +912,7 @@ function StudentAttendanceRow({
                 active && { backgroundColor: meta.color },
               ]}
               onPress={() => onSetStatus(option)}
+              disabled={disabled}
             >
               <Text style={[styles.statusToggleText, { color: active ? "#fff" : meta.color }]}>
                 {meta.label}
@@ -636,6 +944,9 @@ const styles = StyleSheet.create({
 
     alignItems: "center",
     justifyContent: "center",
+  },
+  headerTextWrap: {
+    flex: 1,
   },
   headerTitle: {
     color: "#fff",
@@ -764,6 +1075,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginTop: 14,
   },
+  openCameraButtonMuted: {
+    opacity: 0.75,
+  },
   openCameraText: {
     fontSize: 14,
     fontFamily: fonts.bold,
@@ -859,9 +1173,6 @@ const styles = StyleSheet.create({
   statValueOnDuty: {
     color: "#2F6FE0",
   },
-  statValueLeft: {
-    color: "#6B7280",
-  },
   statLabel: {
     fontSize: 9,
     fontFamily: fonts.bold,
@@ -874,21 +1185,6 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 14,
   },
-  markAllButton: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#BBF7D0",
-    backgroundColor: "#F0FDF4",
-    paddingVertical: 10,
-  },
-  markAllButtonText: {
-    fontSize: 13,
-    fontFamily: fonts.semibold,
-    color: "#16A34A",
-  },
   clearButton: {
     flex: 1,
     alignItems: "center",
@@ -896,6 +1192,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "#E5E7EB",
+    backgroundColor: "#fff",
     paddingVertical: 10,
   },
   clearButtonText: {
@@ -947,6 +1244,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 6,
   },
+  statusToggleRowDisabled: {
+    opacity: 0.55,
+  },
   statusToggle: {
     minWidth: 30,
     height: 28,
@@ -959,6 +1259,27 @@ const styles = StyleSheet.create({
   statusToggleText: {
     fontSize: 11,
     fontFamily: fonts.bold,
+  },
+  footerActions: {
+    marginTop: 2,
+  },
+  publishedBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#F0FDF4",
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  publishedBannerText: {
+    flex: 1,
+    fontSize: 12,
+    fontFamily: fonts.semibold,
+    color: "#15803D",
   },
   saveButton: {
     flex: 1,
@@ -1076,5 +1397,93 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     color: "#9AA6B2",
     marginTop: 1,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.5)",
+    justifyContent: "center",
+    padding: 20,
+  },
+  dateModalCard: {
+    backgroundColor: "#fff",
+    borderRadius: 18,
+    padding: 18,
+  },
+  calendarNav: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  navButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#F1F3F6",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  navButtonDisabled: {
+    opacity: 0.5,
+  },
+  calendarMonthLabel: {
+    fontSize: 15,
+    fontFamily: fonts.bold,
+    color: "#111827",
+  },
+  weekdayRow: {
+    flexDirection: "row",
+    marginBottom: 6,
+  },
+  weekdayLabel: {
+    flex: 1,
+    textAlign: "center",
+    fontSize: 11,
+    fontFamily: fonts.semibold,
+    color: "#9AA6B2",
+  },
+  weekRow: {
+    flexDirection: "row",
+    gap: 4,
+    marginBottom: 6,
+  },
+  dayCell: {
+    flex: 1,
+    aspectRatio: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dayCellInner: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dayCellToday: {
+    borderWidth: 1.5,
+    borderColor: "#2F6FE0",
+  },
+  dayCellSelected: {
+    backgroundColor: "#2F6FE0",
+    borderColor: "#2F6FE0",
+  },
+  dayCellText: {
+    fontSize: 13,
+    fontFamily: fonts.semibold,
+    color: "#111827",
+  },
+  dayCellTextDisabled: {
+    color: "#D1D5DB",
+  },
+  dayCellTextSelected: {
+    color: "#fff",
+  },
+  dateModalHint: {
+    fontSize: 11,
+    fontFamily: fonts.regular,
+    color: "#9AA6B2",
+    textAlign: "center",
+    marginTop: 6,
   },
 });

@@ -26,13 +26,19 @@ export function FaceCaptureCamera({
   title,
   hint,
   minPhotos = 1,
+  maxPhotos,
   facing = "back",
   onDone,
   onCancel,
 }: {
-  title: string;
-  hint: string;
+  // Both optional - omitted, the top bar shows only the close button and
+  // photo count (class attendance), with no overlay text over the frame.
+  title?: string;
+  hint?: string;
   minPhotos?: number;
+  // Upper bound matching what the receiving endpoint accepts; unlimited
+  // when omitted.
+  maxPhotos?: number;
   facing?: CameraType;
   onDone: (images: string[]) => void;
   onCancel: () => void;
@@ -43,8 +49,14 @@ export function FaceCaptureCamera({
   const [photos, setPhotos] = useState<string[]>([]);
   const [capturing, setCapturing] = useState(false);
 
+  const atMax = maxPhotos !== undefined && photos.length >= maxPhotos;
+
   async function handleCapture() {
     if (capturing || !cameraRef.current) return;
+    if (atMax) {
+      toast.info(`You can take up to ${maxPhotos} photos - tap Done to continue`);
+      return;
+    }
     setCapturing(true);
     try {
       const shot = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.5 });
@@ -53,7 +65,8 @@ export function FaceCaptureCamera({
         return;
       }
       const mime = shot.format === "png" ? "image/png" : "image/jpeg";
-      setPhotos((prev) => [...prev, `data:${mime};base64,${shot.base64}`]);
+      const dataUrl = `data:${mime};base64,${shot.base64}`;
+      setPhotos((prev) => (maxPhotos !== undefined && prev.length >= maxPhotos ? prev : [...prev, dataUrl]));
     } catch {
       toast.error("Couldn't capture that photo, try again");
     } finally {
@@ -99,8 +112,8 @@ export function FaceCaptureCamera({
           <Ionicons name="close" size={22} color="#fff" />
         </TouchableOpacity>
         <View style={styles.topBarTextWrap}>
-          <Text style={styles.topBarTitle}>{title}</Text>
-          <Text style={styles.topBarHint}>{hint}</Text>
+          {!!title && <Text style={styles.topBarTitle}>{title}</Text>}
+          {!!hint && <Text style={styles.topBarHint}>{hint}</Text>}
         </View>
         <View style={styles.photoCountBadge}>
           <Text style={styles.photoCountText}>{photos.length}</Text>
@@ -124,7 +137,7 @@ export function FaceCaptureCamera({
         <TouchableOpacity
           onPress={handleCapture}
           disabled={capturing}
-          style={styles.shutterOuter}
+          style={[styles.shutterOuter, atMax && styles.shutterAtMax]}
           activeOpacity={0.85}
         >
           <View style={styles.shutterInner}>
@@ -254,6 +267,9 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.85)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  shutterAtMax: {
+    opacity: 0.4,
   },
   shutterInner: {
     width: 58,

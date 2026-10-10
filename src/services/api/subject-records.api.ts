@@ -19,6 +19,10 @@ export type SubjectRecordSubject = {
 export type SubjectRecordExam = {
   id: number;
   type: string;
+  // internal (CIA1/2/3, Quiz, Lab, ...) marks are entered by faculty;
+  // external (University End Semester Exam) marks come from COE's own
+  // results pipeline and are read-only here.
+  category: "internal" | "external";
   academic_year: string;
   semester: number;
 };
@@ -58,10 +62,24 @@ export type Topper = {
   score: number;
 };
 
+// Every student in the class, ranked - the scored ones first (highest
+// percentage first), then anyone with no mark entered yet for this mapping,
+// unranked (rank/score null), appended in roll-no order. "Complete list",
+// not just the top 3.
+export type RankedStudent = {
+  student_id: number;
+  rank: number | null;
+  name: string;
+  roll_no: string;
+  score: number | null;
+  max_marks: number | null;
+};
+
 export type SubjectRecordDetail = SubjectRecordMapping & {
   total_students: number;
   grade_distribution: GradeCount[];
   toppers: Topper[];
+  all_students: RankedStudent[];
 };
 
 export async function getMySubjectRecordMappings(): Promise<SubjectRecordMapping[]> {

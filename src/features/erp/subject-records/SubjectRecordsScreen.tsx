@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -8,7 +8,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { useSkipSharedHeaderToggle } from "@/hooks/useSkipSharedHeaderToggle";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
-import { AnchoredDropdown } from "@/components/ui/dropdown";
+import { AcademicScopeSelector, useAcademicScope } from "@/components/ui/AcademicScopeSelector";
+import { ExamMarksTable, type ExamMarksColumn, type ExamMarksRow } from "@/components/ui/ExamMarksTable";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
@@ -23,51 +24,8 @@ import {
 
 type LoadStatus = "loading" | "success" | "error";
 
-function initialsFromName(name: string) {
-  return name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
-    .join("");
-}
-
-// Display-only shortening, same convention as CiaMarksScreen's identical
-// helper - exam.type is the real exam_types.name, used as-is everywhere
-// else.
 function examTabLabel(type: string): string {
   return type === "University End Semester Exam" ? "SEM" : type;
-}
-
-// Groups the flat mapping list by class+subject, so Exam Type can be its
-// own dropdown scoped to whichever class is selected - same grouping shape
-// as CiaMarksScreen's groupMappings.
-type ClassSubjectGroup = {
-  key: string;
-  classLabel: string;
-  subjectCode: string;
-  subjectName: string;
-  mappings: SubjectRecordMapping[];
-};
-
-function groupMappings(mappings: SubjectRecordMapping[]): ClassSubjectGroup[] {
-  const groups = new Map<string, ClassSubjectGroup>();
-  for (const m of mappings) {
-    const key = `${m.class.id}-${m.subject.id}`;
-    const existing = groups.get(key);
-    if (existing) {
-      existing.mappings.push(m);
-    } else {
-      groups.set(key, {
-        key,
-        classLabel: m.class.label,
-        subjectCode: m.subject.subject_code,
-        subjectName: m.subject.name,
-        mappings: [m],
-      });
-    }
-  }
-  return Array.from(groups.values());
 }
 
 export function SubjectRecordsScreen() {
@@ -78,20 +36,11 @@ export function SubjectRecordsScreen() {
   const [mappingsStatus, setMappingsStatus] = useState<LoadStatus>("loading");
   const [mappingsError, setMappingsError] = useState<string | null>(null);
   const [mappings, setMappings] = useState<SubjectRecordMapping[]>([]);
-  const [selectedGroupKey, setSelectedGroupKey] = useState<string | null>(null);
-  const [selectedMappingId, setSelectedMappingId] = useState<number | null>(null);
+  const scope = useAcademicScope(mappings);
 
-  // Class (each option already shows class+subject together) and Exam Type
-  // are both picked via a dropdown, same AnchoredDropdown pattern as
-  // CiaMarksScreen.
-  const [classDropdownOpen, setClassDropdownOpen] = useState(false);
-  const classAnchorRef = useRef<View | null>(null);
-  const [examTypeDropdownOpen, setExamTypeDropdownOpen] = useState(false);
-  const examTypeAnchorRef = useRef<View | null>(null);
-
-  const [detailStatus, setDetailStatus] = useState<LoadStatus>("loading");
-  const [detailError, setDetailError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<SubjectRecordDetail | null>(null);
+  const [detailsStatus, setDetailsStatus] = useState<LoadStatus>("loading");
+  const [detailsError, setDetailsError] = useState<string | null>(null);
+  const [details, setDetails] = useState<SubjectRecordDetail[]>([]);
   const [publishing, setPublishing] = useState(false);
 
   const loadMappings = useCallback(() => {
@@ -101,11 +50,6 @@ export function SubjectRecordsScreen() {
       .then((rows) => {
         setMappings(rows);
         setMappingsStatus("success");
-        const grouped = groupMappings(rows);
-        if (grouped.length > 0) {
-          setSelectedGroupKey((current) => current ?? grouped[0].key);
-          setSelectedMappingId((current) => current ?? grouped[0].mappings[0].exam_subject_mapping_id);
-        }
       })
       .catch((err) => {
         setMappingsError(getApiErrorMessage(err, "Couldn't load your classes & subjects."));
@@ -113,17 +57,32 @@ export function SubjectRecordsScreen() {
       });
   }, []);
 
-  const loadDetail = useCallback((examSubjectMappingId: number) => {
-    setDetailStatus("loading");
-    setDetailError(null);
-    getMySubjectRecordDetail(examSubjectMappingId)
-      .then((data) => {
-        setDetail(data);
-        setDetailStatus("success");
+  const loadDetails = useCallback((matchingMappings: SubjectRecordMapping[]) => {
+    if (matchingMappings.length === 0) {
+      setDetails([]);
+      setDetailsStatus("success");
+      return;
+    }
+    setDetailsStatus("loading");
+    setDetailsError(null);
+    // Sequential, not Promise.all - fetching every exam type's detail at once
+    // (up to 6+ concurrent requests, each running several queries) can exceed
+    // the backend's DB connection pool. One at a time is slightly slower but
+    // never spikes concurrent DB load.
+    (async () => {
+      const rows = [];
+      for (const m of matchingMappings) {
+        rows.push(await getMySubjectRecordDetail(m.exam_subject_mapping_id));
+      }
+      return rows;
+    })()
+      .then((rows) => {
+        setDetails(rows);
+        setDetailsStatus("success");
       })
       .catch((err) => {
-        setDetailError(getApiErrorMessage(err, "Couldn't load this subject's records."));
-        setDetailStatus("error");
+        setDetailsError(getApiErrorMessage(err, "Couldn't load this subject's records."));
+        setDetailsStatus("error");
       });
   }, []);
 
@@ -132,10 +91,9 @@ export function SubjectRecordsScreen() {
   }, [loadMappings]);
 
   useEffect(() => {
-    if (selectedMappingId !== null) {
-      loadDetail(selectedMappingId);
-    }
-  }, [selectedMappingId, loadDetail]);
+    loadDetails(scope.matchingMappings);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope.matchingMappings.map((m) => m.exam_subject_mapping_id).join(",")]);
 
   const skipHeaderToggle = useSkipSharedHeaderToggle();
 
@@ -149,42 +107,65 @@ export function SubjectRecordsScreen() {
     }, [navigation, skipHeaderToggle]),
   );
 
-  const groups = useMemo(() => groupMappings(mappings), [mappings]);
-  const selectedGroup = useMemo(
-    () => groups.find((g) => g.key === selectedGroupKey) ?? null,
-    [groups, selectedGroupKey],
-  );
-  const selectedMapping = useMemo(
-    () => mappings.find((m) => m.exam_subject_mapping_id === selectedMappingId) ?? null,
-    [mappings, selectedMappingId],
-  );
+  // The University Semester Exam (an "external" exam - COE's own results,
+  // read-only here) is the canonical "semester performance" record when
+  // one exists for this scope; otherwise whichever exam type has the most
+  // entered marks drives the grade-distribution card, so it's never empty
+  // just because CIA1 happened to be entered before the SEM result exists.
+  const primaryDetail = useMemo(() => {
+    if (details.length === 0) return null;
+    const external = details.find((d) => d.exam.category === "external");
+    if (external) return external;
+    return [...details].sort((a, b) => b.entered_count - a.entered_count)[0];
+  }, [details]);
 
   const maxCount = useMemo(() => {
-    if (!detail || detail.grade_distribution.length === 0) return 1;
-    return Math.max(1, ...detail.grade_distribution.map((item) => item.count));
-  }, [detail]);
+    if (!primaryDetail || primaryDetail.grade_distribution.length === 0) return 1;
+    return Math.max(1, ...primaryDetail.grade_distribution.map((item) => item.count));
+  }, [primaryDetail]);
 
-  function handlePickGroup(group: ClassSubjectGroup) {
-    setSelectedGroupKey(group.key);
-    setSelectedMappingId(group.mappings[0].exam_subject_mapping_id);
-  }
+  const tableColumns = useMemo<ExamMarksColumn[]>(
+    () =>
+      details.map((d) => ({
+        key: String(d.exam_subject_mapping_id),
+        label: examTabLabel(d.exam.type),
+        maxMarks: d.all_students.find((s) => s.max_marks !== null)?.max_marks ?? null,
+      })),
+    [details],
+  );
+
+  const tableRows = useMemo<ExamMarksRow[]>(() => {
+    if (details.length === 0) return [];
+    // Every detail in scope covers the exact same class, so its roster is
+    // identical - the first one's student order anchors every row.
+    const base = details[0].all_students;
+    return base.map((student) => {
+      const cells: ExamMarksRow["cells"] = {};
+      for (const d of details) {
+        const match = d.all_students.find((s) => s.student_id === student.student_id);
+        cells[String(d.exam_subject_mapping_id)] = {
+          value: match?.score !== null && match?.score !== undefined ? String(match.score) : "",
+          editable: false,
+        };
+      }
+      return { studentId: student.student_id, name: student.name, rollNo: student.roll_no, cells };
+    });
+  }, [details]);
 
   function handlePublish() {
-    if (!detail || publishing) return;
+    if (!primaryDetail || publishing || primaryDetail.exam.category === "external") return;
     setPublishing(true);
-    publishSubjectRecordResult(detail.exam_subject_mapping_id)
+    publishSubjectRecordResult(primaryDetail.exam_subject_mapping_id)
       .then((updated) => {
-        setDetail((current) => (current ? { ...current, ...updated } : current));
+        setDetails((current) =>
+          current.map((d) => (d.exam_subject_mapping_id === updated.exam_subject_mapping_id ? { ...d, ...updated } : d)),
+        );
         setMappings((current) =>
-          current.map((m) =>
-            m.exam_subject_mapping_id === updated.exam_subject_mapping_id ? { ...m, ...updated } : m,
-          ),
+          current.map((m) => (m.exam_subject_mapping_id === updated.exam_subject_mapping_id ? { ...m, ...updated } : m)),
         );
         toast.success("Result published to class");
       })
-      .catch((err) => {
-        toast.error(getApiErrorMessage(err, "Couldn't publish the result."));
-      })
+      .catch((err) => toast.error(getApiErrorMessage(err, "Couldn't publish the result.")))
       .finally(() => setPublishing(false));
   }
 
@@ -224,161 +205,71 @@ export function SubjectRecordsScreen() {
           </View>
         )}
 
-        {mappingsStatus === "success" && mappings.length > 0 && selectedGroup && (
+        {mappingsStatus === "success" && mappings.length > 0 && (
           <>
-            <View style={styles.filterRow}>
-              <View ref={classAnchorRef} collapsable={false} style={styles.filterFieldFlex}>
-                <TouchableOpacity
-                  style={[styles.filterField, classDropdownOpen && styles.filterFieldOpen]}
-                  onPress={() => setClassDropdownOpen((open) => !open)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.filterFieldLabel}>CLASS</Text>
-                  <Text style={styles.filterFieldValue} numberOfLines={1}>
-                    {selectedGroup.classLabel} · {selectedGroup.subjectCode} {selectedGroup.subjectName}
-                  </Text>
-                </TouchableOpacity>
+            <AcademicScopeSelector scope={scope} />
+
+            {detailsStatus === "loading" && <SkeletonListRows count={3} />}
+
+            {detailsStatus === "error" && (
+              <ErrorNotice
+                message={detailsError ?? "Something went wrong."}
+                onRetry={() => loadDetails(scope.matchingMappings)}
+              />
+            )}
+
+            {detailsStatus === "success" && details.length === 0 && (
+              <View style={styles.emptyCard}>
+                <Ionicons name="bar-chart-outline" size={26} color="#B0B7C3" />
+                <Text style={styles.emptyCardText}>No exams created yet for this class & subject.</Text>
               </View>
+            )}
 
-              {selectedGroup.mappings.length > 0 && (
-                <View ref={examTypeAnchorRef} collapsable={false} style={styles.filterFieldFlex}>
-                  <TouchableOpacity
-                    style={[styles.filterField, examTypeDropdownOpen && styles.filterFieldOpen]}
-                    onPress={() => setExamTypeDropdownOpen((open) => !open)}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.filterFieldLabel}>EXAM TYPE</Text>
-                    <Text style={styles.filterFieldValue} numberOfLines={1}>
-                      {examTabLabel(selectedMapping?.exam.type ?? "Select")}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-
-            <AnchoredDropdown
-              anchorRef={classAnchorRef}
-              visible={classDropdownOpen}
-              onClose={() => setClassDropdownOpen(false)}
-              contentStyle={styles.dropdownCard}
-            >
-              {groups.map((group) => (
-                <TouchableOpacity
-                  key={group.key}
-                  style={styles.filterOptionRow}
-                  onPress={() => {
-                    handlePickGroup(group);
-                    setClassDropdownOpen(false);
-                  }}
-                >
-                  <Text style={styles.filterOptionText} numberOfLines={1}>
-                    {group.classLabel} · {group.subjectCode} {group.subjectName}
-                  </Text>
-                  {group.key === selectedGroupKey && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
-                </TouchableOpacity>
-              ))}
-            </AnchoredDropdown>
-
-            <AnchoredDropdown
-              anchorRef={examTypeAnchorRef}
-              visible={examTypeDropdownOpen}
-              onClose={() => setExamTypeDropdownOpen(false)}
-              contentStyle={styles.dropdownCard}
-            >
-              {selectedGroup.mappings.map((m) => (
-                <TouchableOpacity
-                  key={m.exam_subject_mapping_id}
-                  style={styles.filterOptionRow}
-                  onPress={() => {
-                    setSelectedMappingId(m.exam_subject_mapping_id);
-                    setExamTypeDropdownOpen(false);
-                  }}
-                >
-                  <Text style={styles.filterOptionText}>{examTabLabel(m.exam.type)}</Text>
-                  {m.exam_subject_mapping_id === selectedMappingId && (
-                    <Ionicons name="checkmark" size={16} color="#2F6FE0" />
+            {detailsStatus === "success" && details.length > 0 && primaryDetail && (
+              <>
+                <Text style={styles.sectionTitle}>Grade Distribution · {examTabLabel(primaryDetail.exam.type)}</Text>
+                <View style={styles.card}>
+                  {primaryDetail.entered_count === 0 ? (
+                    <Text style={styles.emptyCardText}>No marks entered for this exam yet</Text>
+                  ) : (
+                    primaryDetail.grade_distribution.map((item) => (
+                      <View key={item.grade} style={styles.gradeRow}>
+                        <Text style={styles.gradeLabel}>{item.grade}</Text>
+                        <View style={styles.gradeBarTrack}>
+                          <View
+                            style={[
+                              styles.gradeBarFill,
+                              { width: `${Math.max((item.count / maxCount) * 100, item.count > 0 ? 6 : 0)}%` },
+                            ]}
+                          />
+                        </View>
+                        <Text style={styles.gradeCount}>{item.count}</Text>
+                      </View>
+                    ))
                   )}
-                </TouchableOpacity>
-              ))}
-            </AnchoredDropdown>
-          </>
-        )}
-
-        {detailStatus === "loading" && <SkeletonListRows count={3} />}
-
-        {detailStatus === "error" && (
-          <ErrorNotice
-            message={detailError ?? "Something went wrong."}
-            onRetry={() => selectedMappingId !== null && loadDetail(selectedMappingId)}
-          />
-        )}
-
-        {detailStatus === "success" && detail && detail.entered_count === 0 && (
-          <View style={styles.emptyCard}>
-            <Ionicons name="bar-chart-outline" size={26} color="#B0B7C3" />
-            <Text style={styles.emptyCardText}>No marks entered for this subject yet</Text>
-          </View>
-        )}
-
-        {detailStatus === "success" && detail && detail.entered_count > 0 && (
-          <>
-            <Text style={styles.sectionTitle}>Grade Distribution</Text>
-            <View style={styles.card}>
-              {detail.grade_distribution.map((item) => (
-                <View key={item.grade} style={styles.gradeRow}>
-                  <Text style={styles.gradeLabel}>{item.grade}</Text>
-                  <View style={styles.gradeBarTrack}>
-                    <View
-                      style={[
-                        styles.gradeBarFill,
-                        { width: `${Math.max((item.count / maxCount) * 100, item.count > 0 ? 6 : 0)}%` },
-                      ]}
-                    />
-                  </View>
-                  <Text style={styles.gradeCount}>{item.count}</Text>
                 </View>
-              ))}
-            </View>
 
-            <Text style={styles.sectionTitle}>Toppers</Text>
-            <View style={styles.card}>
-              {detail.toppers.length === 0 && (
-                <Text style={styles.emptyCardText}>No scored entries yet</Text>
-              )}
-              {detail.toppers.map((topper, index) => (
-                <View
-                  key={topper.rank}
-                  style={[styles.topperRow, index < detail.toppers.length - 1 && styles.topperRowDivider]}
-                >
-                  <View style={styles.rankBadge}>
-                    <Text style={styles.rankBadgeText}>{topper.rank}</Text>
-                  </View>
-                  <View style={styles.topperAvatar}>
-                    <Text style={styles.topperAvatarText}>{initialsFromName(topper.name)}</Text>
-                  </View>
-                  <View style={styles.topperTextWrap}>
-                    <Text style={styles.topperName}>{topper.name}</Text>
-                    <Text style={styles.topperRoll}>{topper.roll_no}</Text>
-                  </View>
-                  <Text style={styles.topperScore}>{topper.score}</Text>
-                </View>
-              ))}
-            </View>
+                <Text style={styles.sectionTitle}>Students · {tableRows.length}</Text>
+                <ExamMarksTable columns={tableColumns} rows={tableRows} />
 
-            <TouchableOpacity
-              style={[styles.publishButton, (publishing || detail.is_published) && styles.publishButtonDisabled]}
-              onPress={handlePublish}
-              activeOpacity={0.85}
-              disabled={publishing || detail.is_published}
-            >
-              {publishing ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.publishButtonText}>
-                  {detail.is_published ? "Result Already Published" : "Publish Result to Class"}
-                </Text>
-              )}
-            </TouchableOpacity>
+                {primaryDetail.exam.category === "internal" && (
+                  <TouchableOpacity
+                    style={[styles.publishButton, (publishing || primaryDetail.is_published) && styles.publishButtonDisabled]}
+                    onPress={handlePublish}
+                    activeOpacity={0.85}
+                    disabled={publishing || primaryDetail.is_published}
+                  >
+                    {publishing ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.publishButtonText}>
+                        {primaryDetail.is_published ? "Result Already Published" : "Publish Result to Class"}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                )}
+              </>
+            )}
           </>
         )}
       </ScrollView>
@@ -414,7 +305,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-
     alignItems: "center",
     justifyContent: "center",
   },
@@ -477,62 +367,6 @@ const styles = StyleSheet.create({
     color: "#9AA6B2",
     textAlign: "center",
   },
-  filterField: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: "#E5E7EB",
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  filterFieldOpen: {
-    borderColor: "#2F6FE0",
-  },
-  filterFieldLabel: {
-    fontSize: 9,
-    fontFamily: fonts.bold,
-    color: "#9AA6B2",
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  filterFieldValue: {
-    fontSize: 12.5,
-    fontFamily: fonts.bold,
-    color: "#111827",
-  },
-  filterRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 20,
-  },
-  filterFieldFlex: {
-    flex: 1,
-  },
-  dropdownCard: {
-    width: 240,
-    maxHeight: 320,
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    elevation: 6,
-    shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-  },
-  filterOptionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F1F3F6",
-  },
-  filterOptionText: {
-    fontSize: 13,
-    fontFamily: fonts.semibold,
-    color: "#111827",
-  },
   sectionTitle: {
     fontSize: 12,
     fontFamily: fonts.bold,
@@ -582,61 +416,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: fonts.semibold,
     color: "#111827",
-  },
-  topperRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingVertical: 10,
-  },
-  topperRowDivider: {
-    borderBottomWidth: 1,
-    borderBottomColor: "#F1F3F6",
-  },
-  rankBadge: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: "#E4EBFB",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  rankBadgeText: {
-    fontSize: 11,
-    fontFamily: fonts.bold,
-    color: "#2F6FE0",
-  },
-  topperAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "#E4EBFB",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  topperAvatarText: {
-    fontSize: 11,
-    fontFamily: fonts.bold,
-    color: "#2F6FE0",
-  },
-  topperTextWrap: {
-    flex: 1,
-  },
-  topperName: {
-    fontSize: 13,
-    fontFamily: fonts.semibold,
-    color: "#111827",
-  },
-  topperRoll: {
-    fontSize: 11,
-    fontFamily: fonts.regular,
-    color: "#9AA6B2",
-    marginTop: 1,
-  },
-  topperScore: {
-    fontSize: 15,
-    fontFamily: fonts.bold,
-    color: "#2F6FE0",
   },
   publishButton: {
     alignItems: "center",

@@ -9,29 +9,33 @@ import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { useRole } from "@/hooks/useRole";
+import { formatClassLine, type ClassLabelParts } from "@/utils/classLabel";
 import {
   getMyTimetable,
-  getLmsNoteCountForSubject,
   getMyClassSection,
   getMyCurrentSemesterAsFaculty,
 } from "@/services/api/current-semester.api";
 import { listMyAssignmentStatuses } from "@/services/api/no-due.api";
 import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
+// One entry per class this subject is taught to - always exactly one for a
+// student (their own class), but a faculty member can teach the same
+// subject to several classes at once, so this merges those into one card
+// listing every class in full (year, department, section - never
+// abbreviated down to a bare section letter, and never truncated).
 type Subject = {
   id: number;
-  classId: number | null;
   code: string;
   name: string;
-  section: string | null;
-  materials: number | null;
-  tasks: number;
+  classes: ClassLabelParts[];
   hoursPerWeek: number;
 };
 
 type LoadStatus = "loading" | "success" | "error";
 
-const SEMESTER_NUMERALS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"];
+function semesterToYear(semester: number | null): number | null {
+  return semester ? Math.ceil(semester / 2) : null;
+}
 
 function initialsFromSubject(name: string) {
   return name
@@ -87,26 +91,27 @@ export function CurrentSemesterScreen() {
 
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [semester, setSemester] = useState<number | null>(null);
 
   const loadForStudent = useCallback(() => {
     return Promise.all([getMyTimetable(), listMyAssignmentStatuses(), getMyClassSection().catch(() => null)]).then(
-      async ([days, statusRows, classSectionResult]) => {
-        const section = classSectionResult?.class_section ?? null;
+      ([timetable, statusRows, classSectionResult]) => {
+        const classPart: ClassLabelParts = {
+          label: classSectionResult?.class_section ?? "—",
+          year: semesterToYear(classSectionResult?.current_semester ?? null),
+          department_code: classSectionResult?.department_code ?? undefined,
+          section: classSectionResult?.class_section ?? undefined,
+        };
         const bySubject = new Map<number, Subject>();
 
-        for (const day of days) {
+        for (const day of timetable.days) {
           for (const slot of day.slots) {
             const entry =
               bySubject.get(slot.subject.id) ??
               ({
                 id: slot.subject.id,
-                classId: null,
                 code: slot.subject.subject_code,
                 name: slot.subject.name,
-                section,
-                materials: null,
-                tasks: 0,
+                classes: [classPart],
                 hoursPerWeek: 0,
               } as Subject);
             entry.hoursPerWeek += 1;
@@ -114,62 +119,52 @@ export function CurrentSemesterScreen() {
           }
         }
 
-        let resolvedSemester: number | null = null;
-        const taskIdsBySubject = new Map<number, Set<number>>();
         for (const row of statusRows) {
           const subjectId = row.assignment.subject.id;
-          if (resolvedSemester === null) resolvedSemester = row.assignment.semester;
-          const entry =
-            bySubject.get(subjectId) ??
-            ({
+          if (!bySubject.has(subjectId)) {
+            bySubject.set(subjectId, {
               id: subjectId,
-              classId: null,
               code: row.assignment.subject.subject_code,
               name: row.assignment.subject.name,
-              section,
-              materials: null,
-              tasks: 0,
+              classes: [classPart],
               hoursPerWeek: 0,
-            } as Subject);
-          bySubject.set(subjectId, entry);
-
-          const ids = taskIdsBySubject.get(subjectId) ?? new Set<number>();
-          ids.add(row.assignment.id);
-          taskIdsBySubject.set(subjectId, ids);
-        }
-        for (const [subjectId, ids] of taskIdsBySubject) {
-          bySubject.get(subjectId)!.tasks = ids.size;
+            });
+          }
         }
 
         const sorted = Array.from(bySubject.values()).sort((a, b) => a.code.localeCompare(b.code));
-
-        const withMaterials = await Promise.all(
-          sorted.map(async (subject) => {
-            const materials = await getLmsNoteCountForSubject(subject.id).catch(() => null);
-            return { ...subject, materials };
-          }),
-        );
-
-        setSubjects(withMaterials);
-        setSemester(resolvedSemester);
+        setSubjects(sorted);
       },
     );
   }, []);
 
+  // Merges by subject_id: a faculty member teaching the same subject to
+  // several classes gets ONE card listing every one of those classes in
+  // full (year/department/section), instead of one duplicate card per class.
   const loadForFaculty = useCallback(() => {
     return getMyCurrentSemesterAsFaculty().then((response) => {
-      const mapped: Subject[] = response.subjects.map((subject) => ({
-        id: subject.subject_id,
-        classId: subject.class_id,
-        code: subject.subject_code,
-        name: subject.subject_name,
-        section: subject.section,
-        materials: subject.materials,
-        tasks: subject.tasks,
-        hoursPerWeek: subject.hours_per_week,
-      }));
-      setSubjects(mapped);
-      setSemester(response.subjects[0]?.semester ?? null);
+      const bySubject = new Map<number, Subject>();
+      for (const subject of response.subjects) {
+        const classPart: ClassLabelParts = {
+          label: subject.section,
+          year: semesterToYear(subject.semester),
+          department_code: subject.department_code ?? undefined,
+          section: subject.section,
+        };
+        const entry =
+          bySubject.get(subject.subject_id) ??
+          ({
+            id: subject.subject_id,
+            code: subject.subject_code,
+            name: subject.subject_name,
+            classes: [],
+            hoursPerWeek: 0,
+          } as Subject);
+        entry.classes.push(classPart);
+        entry.hoursPerWeek += subject.hours_per_week;
+        bySubject.set(subject.subject_id, entry);
+      }
+      setSubjects(Array.from(bySubject.values()).sort((a, b) => a.code.localeCompare(b.code)));
     });
   }, []);
 
@@ -204,7 +199,7 @@ export function CurrentSemesterScreen() {
         navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [navigation, router, semester, subjects.length]),
+    }, [navigation, router, subjects.length]),
   );
 
   return (
@@ -233,7 +228,7 @@ export function CurrentSemesterScreen() {
           ) : (
             subjects.map((subject) => (
               <SubjectCard
-                key={`${subject.id}-${subject.classId ?? ""}`}
+                key={subject.id}
                 subject={subject}
                 onPress={() =>
                   router.push({
@@ -265,28 +260,21 @@ function SubjectCard({ subject, onPress }: { subject: Subject; onPress: () => vo
           <Text style={styles.subjectName}>{subject.name}</Text>
           <Text style={styles.subjectMeta}>{subject.code}</Text>
         </View>
-        {subject.section && (
-          <View style={styles.sectionBadge}>
-            <Text style={styles.sectionBadgeText}>{subject.section}</Text>
-          </View>
-        )}
       </View>
+
+      {subject.classes.length > 0 && (
+        <View style={styles.classChipList}>
+          {subject.classes.map((classPart, index) => (
+            <View key={index} style={styles.classChip}>
+              <Text style={styles.classChipText}>{formatClassLine(classPart)}</Text>
+            </View>
+          ))}
+        </View>
+      )}
 
       <View style={styles.divider} />
 
       <View style={styles.footerRow}>
-        <View style={styles.footerLeft}>
-          <View style={styles.footerItem}>
-            <Ionicons name="document-text-outline" size={14} color="#8A93A3" />
-            <Text style={styles.footerText}>
-              {subject.materials === null ? "—" : subject.materials} materials
-            </Text>
-          </View>
-          <View style={styles.footerItem}>
-            <Ionicons name="checkbox-outline" size={14} color="#8A93A3" />
-            <Text style={styles.footerText}>{subject.tasks} tasks</Text>
-          </View>
-        </View>
         <Text style={styles.footerText}>{subject.hoursPerWeek} hrs / week</Text>
       </View>
     </TouchableOpacity>
@@ -400,13 +388,23 @@ const styles = StyleSheet.create({
     color: "#8A93A3",
     marginTop: 2,
   },
-  sectionBadge: {
-    backgroundColor: "#EAF0FD",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+  // Each class gets its own full-width chip (never cropped to a single
+  // letter) so a subject shared across several classes can list every one
+  // of them, wrapping onto new lines as needed instead of overflowing or
+  // truncating.
+  classChipList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginBottom: 12,
   },
-  sectionBadgeText: {
+  classChip: {
+    backgroundColor: "#EAF0FD",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  classChipText: {
     fontSize: 11,
     fontFamily: fonts.bold,
     color: "#2F6FE0",
@@ -418,17 +416,8 @@ const styles = StyleSheet.create({
   },
   footerRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
+    justifyContent: "flex-end",
     alignItems: "center",
-  },
-  footerLeft: {
-    flexDirection: "row",
-    gap: 16,
-  },
-  footerItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
   },
   footerText: {
     fontSize: 12,

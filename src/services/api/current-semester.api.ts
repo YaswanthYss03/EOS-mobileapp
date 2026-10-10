@@ -4,12 +4,14 @@ import { apiClient } from "./client";
 // caller's own class + its classes.current_semester - see
 // EOS-backend/src/modules/faculty/timetable/timetable.service.ts
 // findForStudent()). timetable_slots has no "room" column at all, so there
-// is no real room to show per subject.
+// is no real room to show per subject. course_type comes straight from the
+// subjects table ('PRACTICAL'/'THEORY_WITH_PRACTICAL' = a lab period) - real
+// data, not client-side guessing.
 export type MyTimetableSlot = {
   period_number: number;
   start_time: string;
   end_time: string;
-  subject: { id: number; name: string; subject_code: string };
+  subject: { id: number; name: string; subject_code: string; course_type: string | null };
   faculty: { id: number; name: string };
 };
 
@@ -18,20 +20,29 @@ export type MyTimetableDay = {
   slots: MyTimetableSlot[];
 };
 
-export async function getMyTimetable(): Promise<MyTimetableDay[]> {
-  const { data } = await apiClient.get<{ data: { days: MyTimetableDay[] } }>("/me/timetable");
-  return data.data.days;
+// total_periods is the institution-wide period_timings count (excluding
+// breaks) - the same every day, since period_timings has no day_of_week
+// column - used for the Timetable screen's "Free" summary card
+// (total_periods - that day's slots.length).
+export type MyTimetable = {
+  total_periods: number;
+  days: MyTimetableDay[];
+};
+
+export async function getMyTimetable(): Promise<MyTimetable> {
+  const { data } = await apiClient.get<{ data: MyTimetable }>("/me/timetable");
+  return data.data;
 }
 
 // GET /me/faculty-timetable (Faculty/HoD) - see
 // EOS-backend/src/modules/faculty/timetable/timetable.service.ts
 // findFullWeekForFaculty(). GET /me/timetable above is student-only
 // (@Roles(ROLES.STUDENT)); this is the separate faculty/HoD self-scoped
-// equivalent, returning the exact same MyTimetableDay[] shape so it's a
-// drop-in for the shared TimetableScreen.
-export async function getMyTimetableAsFaculty(): Promise<MyTimetableDay[]> {
-  const { data } = await apiClient.get<{ data: { days: MyTimetableDay[] } }>("/me/faculty-timetable");
-  return data.data.days;
+// equivalent, returning the exact same MyTimetable shape so it's a drop-in
+// for the shared TimetableScreen.
+export async function getMyTimetableAsFaculty(): Promise<MyTimetable> {
+  const { data } = await apiClient.get<{ data: MyTimetable }>("/me/faculty-timetable");
+  return data.data;
 }
 
 // GET /me/classes/today (Faculty/HoD) - see
@@ -79,11 +90,19 @@ export async function getLmsNoteCountForSubject(subjectId: number): Promise<numb
 // current semester, e.g. 7) - this is the one place that number can be
 // resolved from, since a student's own semester range isn't exposed
 // anywhere else.
-export type MyClassSection = { class_section: string | null; current_semester: number | null };
+export type MyClassSection = {
+  class_section: string | null;
+  current_semester: number | null;
+  department_code: string | null;
+};
 
 export async function getMyClassSection(): Promise<MyClassSection> {
   const { data } = await apiClient.get<{ data: MyClassSection }>("/me/profile");
-  return { class_section: data.data.class_section, current_semester: data.data.current_semester };
+  return {
+    class_section: data.data.class_section,
+    current_semester: data.data.current_semester,
+    department_code: data.data.department_code,
+  };
 }
 
 // GET /me/current-semester (Faculty/HoD) - see
@@ -99,6 +118,7 @@ export type MyFacultySubject = {
   class_id: number;
   section: string;
   semester: number | null;
+  department_code: string | null;
   hours_per_week: number;
   tasks: number;
   materials: number;

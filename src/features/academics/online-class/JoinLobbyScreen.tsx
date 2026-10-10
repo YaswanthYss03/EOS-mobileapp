@@ -11,8 +11,9 @@ import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
 import { useRole } from "@/hooks/useRole";
-import { startOnlineClass, joinOnlineClass } from "@/services/api/online-class.api";
+import { startOnlineClass, startOnlineClassById, joinOnlineClass } from "@/services/api/online-class.api";
 import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
+import { setCallSession } from "./callSession";
 
 // Real pre-join lobby for a LiveKit online class, pushed from
 // OnlineClassScreen's "Start class"/"Join" button. Requests real camera/mic
@@ -88,7 +89,10 @@ export function JoinLobbyScreen() {
   const teacher = params.teacher ?? "";
   const subject = params.subject ?? "";
   const timeRange = params.timeRange ?? "";
-  const isStarting = params.mode === "start";
+  // "start" = start today's session for a subject/class; "startMeeting" =
+  // start (or rejoin) one specific meeting by id (scheduled list); "join" =
+  // join a live meeting.
+  const isStarting = params.mode === "start" || params.mode === "startMeeting";
 
   async function toggleCamera() {
     if (!cameraOn && !cameraPermission?.granted) {
@@ -113,19 +117,22 @@ export function JoinLobbyScreen() {
     if (connecting) return;
     setConnecting(true);
 
-    const request = isStarting
-      ? startOnlineClass(Number(params.subjectId), Number(params.classId))
-      : joinOnlineClass(Number(params.onlineClassId));
+    const request =
+      params.mode === "startMeeting"
+        ? startOnlineClassById(Number(params.onlineClassId))
+        : params.mode === "start"
+          ? startOnlineClass(Number(params.subjectId), Number(params.classId))
+          : joinOnlineClass(Number(params.onlineClassId));
 
     request
       .then((info) => {
+        // Token/server URL stay in memory (see callSession.ts) - only
+        // non-sensitive display values go into the route params.
+        setCallSession(info);
         router.replace({
           pathname: `${basePath}/call`,
           params: {
             onlineClassId: String(info.onlineClassId),
-            roomName: info.roomName,
-            serverUrl: info.serverUrl,
-            token: info.token,
             audio: micOn ? "1" : "0",
             video: cameraOn ? "1" : "0",
             initials,

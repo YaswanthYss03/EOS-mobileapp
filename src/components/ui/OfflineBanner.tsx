@@ -54,7 +54,15 @@ export function OfflineBanner() {
   return (
     <Animated.View
       pointerEvents="none"
-      style={[styles.container, { top: insets.top + 8, transform: [{ translateY }] }]}
+      // Every screen's own header (custom ones like AcademicCalendarHeader,
+      // and the shared CollegeHeader) follows the same rough shape -
+      // paddingTop: insets.top + 10, ~36px content row, paddingBottom: 14 -
+      // so they all end around insets.top + 60. This banner used to sit at
+      // insets.top + 8 with a ~60px card, which fully covered every header
+      // (including in-header buttons like "Add event") rather than floating
+      // over the page content below it. Starting it past that point instead
+      // keeps the header - and anything in it - visible and tappable.
+      style={[styles.container, { top: insets.top + 64, transform: [{ translateY }] }]}
     >
       <View style={[styles.card, isOffline ? styles.cardOffline : styles.cardOnline]}>
         <View style={styles.iconWrap}>

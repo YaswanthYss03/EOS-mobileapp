@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import {
   View,
   Text,
-  FlatList,
+  ScrollView,
   TouchableOpacity,
   Modal,
   TextInput,
@@ -134,62 +134,57 @@ export function FacultyMaterialTab({
 
   return (
     <>
-      <FlatList
-        data={folders}
-        keyExtractor={(item) => String(item.id)}
-        contentContainerStyle={styles.list}
-        ListHeaderComponent={
-          <>
-            <TouchableOpacity style={styles.newButton} onPress={openCreate} activeOpacity={0.9}>
-              <View style={styles.newButtonIconWrap}>
-                <Ionicons name="add" size={18} color="#fff" />
-              </View>
-              <Text style={styles.newButtonText}>Create new folder</Text>
-            </TouchableOpacity>
-            {folders.length > 0 && (
-              <View style={styles.sectionHeaderRow}>
-                <Text style={styles.sectionHeaderText}>YOUR FOLDERS</Text>
-                <Text style={styles.sectionHeaderCount}>{folders.length}</Text>
-              </View>
-            )}
-          </>
-        }
-        ListEmptyComponent={
+      <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+        <TouchableOpacity style={styles.newButton} onPress={openCreate} activeOpacity={0.9}>
+          <View style={styles.newButtonIconWrap}>
+            <Ionicons name="add" size={18} color="#fff" />
+          </View>
+          <Text style={styles.newButtonText}>Create new folder</Text>
+        </TouchableOpacity>
+
+        {folders.length > 0 && (
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionHeaderText}>YOUR FOLDERS</Text>
+            <Text style={styles.sectionHeaderCount}>{folders.length}</Text>
+          </View>
+        )}
+
+        {folders.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="folder-open-outline" size={30} color="#C7CDD8" />
             <Text style={styles.emptyText}>No folders yet</Text>
             <Text style={styles.emptySubtext}>Create one to share material with your class</Text>
           </View>
-        }
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.row}
-            activeOpacity={0.85}
-            onPress={() =>
-              router.push({ pathname: `${basePath}/folder/[folderId]`, params: { folderId: String(item.id), title: item.title } })
-            }
-          >
-            <View style={styles.iconWrap}>
-              <Ionicons name="folder-outline" size={22} color="#2F6FE0" />
-            </View>
-            <View style={styles.textWrap}>
-              <Text style={styles.title}>{item.title}</Text>
-              {item.description && (
-                <Text style={styles.description} numberOfLines={1}>
-                  {item.description}
-                </Text>
-              )}
-              <Text style={styles.meta}>
-                {item.resource_count} {item.resource_count === 1 ? "item" : "items"} · Shared to{" "}
-                {item.classes.map((c) => c.label).join(", ")}
-              </Text>
-            </View>
-            <TouchableOpacity onPress={() => handleDelete(item)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name="trash-outline" size={18} color="#B0B7C3" />
-            </TouchableOpacity>
-          </TouchableOpacity>
+        ) : (
+          <View style={styles.listCard}>
+            {folders.map((item, index) => (
+              <TouchableOpacity
+                key={item.id}
+                style={[styles.row, index > 0 && styles.rowDivider]}
+                activeOpacity={0.85}
+                onPress={() =>
+                  router.push({ pathname: `${basePath}/folder/[folderId]`, params: { folderId: String(item.id), title: item.title } })
+                }
+              >
+                <View style={styles.iconWrap}>
+                  <Ionicons name="folder-outline" size={22} color="#2F6FE0" />
+                </View>
+                <View style={styles.textWrap}>
+                  <Text style={styles.title}>{item.title}</Text>
+                  {item.description && <Text style={styles.description}>{item.description}</Text>}
+                  <Text style={styles.meta}>
+                    {item.resource_count} {item.resource_count === 1 ? "item" : "items"} · Shared to{" "}
+                    {item.classes.map((c) => c.label).join(", ")}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => handleDelete(item)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name="trash-outline" size={18} color="#B0B7C3" />
+                </TouchableOpacity>
+              </TouchableOpacity>
+            ))}
+          </View>
         )}
-      />
+      </ScrollView>
 
       <Modal visible={createOpen} transparent animationType="fade" onRequestClose={() => setCreateOpen(false)}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setCreateOpen(false)}>
@@ -293,21 +288,23 @@ const styles = StyleSheet.create({
   emptyState: { alignItems: "center", gap: 6, marginTop: 40 },
   emptyText: { fontSize: 13, fontFamily: fonts.bold, color: "#6B7280", textAlign: "center", marginTop: 4 },
   emptySubtext: { fontSize: 12, fontFamily: fonts.regular, color: "#9AA6B2", textAlign: "center" },
+  listCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#EEF0F4",
+    paddingHorizontal: 14,
+    marginBottom: 12,
+  },
+  rowDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#E5E7EB",
+  },
   row: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#EEF0F4",
-    padding: 14,
-    marginBottom: 10,
-    shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 1,
+    paddingVertical: 14,
   },
   iconWrap: { width: 40, height: 40, borderRadius: 10, backgroundColor: "#EAF0FD", alignItems: "center", justifyContent: "center" },
   textWrap: { flex: 1 },

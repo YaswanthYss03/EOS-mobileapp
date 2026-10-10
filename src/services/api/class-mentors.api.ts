@@ -14,6 +14,8 @@ export type MentorClass = {
   section: string;
   department: { id: number; name: string; code: string };
   academic_year: string;
+  // Year of study (1 = first year) when the backend can derive it.
+  year?: number | null;
 };
 
 export async function getMyMentorClasses(): Promise<MentorClass[]> {

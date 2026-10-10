@@ -11,15 +11,14 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
-import * as Linking from "expo-linking";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
-import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
 import { formatDate } from "@/utils/calendar";
 import { getAnnouncements, type Announcement } from "@/services/api/announcements.api";
+import { NoticeFileRow, NoticeImage, isNoticeImage } from "./components/NoticeAttachment";
 
 type LoadStatus = "loading" | "success" | "error";
 const NEW_BADGE_WINDOW_MS = 3 * 24 * 60 * 60 * 1000; // 3 days, matches AnnouncementsSection
@@ -137,11 +136,6 @@ export function AnnouncementsListScreen() {
     load();
   }, [load]);
 
-  function handleOpenAttachment(announcement: Announcement) {
-    if (!announcement.file_url) return;
-    Linking.openURL(announcement.file_url).catch(() => toast.error("Couldn't open that attachment"));
-  }
-
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       <LinearGradient
@@ -182,7 +176,7 @@ export function AnnouncementsListScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor="#2F6FE0" />}
           contentContainerStyle={styles.list}
           renderItem={({ item }) => (
-            <AnnouncementListItem announcement={item} onOpenAttachment={() => handleOpenAttachment(item)} />
+            <AnnouncementListItem announcement={item} />
           )}
           ListEmptyComponent={
             status === "loading" ? (
@@ -200,14 +194,12 @@ export function AnnouncementsListScreen() {
   );
 }
 
-function AnnouncementListItem({
-  announcement,
-  onOpenAttachment,
-}: {
-  announcement: Announcement;
-  onOpenAttachment: () => void;
-}) {
+function AnnouncementListItem({ announcement }: { announcement: Announcement }) {
   const sender = senderDisplayName(announcement);
+  const fileUrl = announcement.file_url;
+  // An attached image is shown in full above the text; any other file
+  // (PDF, DOC, ...) is a download row below the text.
+  const imageAttachment = isNoticeImage(announcement.file_name, fileUrl);
 
   return (
     <View style={styles.card}>
@@ -231,18 +223,14 @@ function AnnouncementListItem({
         <Text style={styles.categoryPill}>{categoryLabel(announcement.category)}</Text>
       </View>
 
-      <Text style={styles.cardTitle}>{announcement.title}</Text>
-      <Text style={styles.cardContent}>{announcement.content}</Text>
+      {fileUrl && imageAttachment && <NoticeImage url={fileUrl} fileName={announcement.file_name} />}
 
-      {announcement.file_url && (
-        <TouchableOpacity style={styles.attachmentRow} onPress={onOpenAttachment} activeOpacity={0.8}>
-          <Ionicons name="attach-outline" size={16} color="#2F6FE0" />
-          <Text style={styles.attachmentText} numberOfLines={1}>
-            {announcement.file_name ?? "View attachment"}
-          </Text>
-          <Ionicons name="open-outline" size={14} color="#2F6FE0" />
-        </TouchableOpacity>
-      )}
+      <Text style={[styles.cardTitle, fileUrl && imageAttachment ? styles.cardTitleAfterImage : null]}>
+        {announcement.title}
+      </Text>
+      {announcement.content.trim().length > 0 && <Text style={styles.cardContent}>{announcement.content}</Text>}
+
+      {fileUrl && !imageAttachment && <NoticeFileRow url={fileUrl} fileName={announcement.file_name} />}
     </View>
   );
 }
@@ -390,26 +378,14 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     color: "#111827",
   },
+  cardTitleAfterImage: {
+    marginTop: 12,
+  },
   cardContent: {
     fontSize: 13,
     fontFamily: fonts.regular,
     color: "#4B5563",
     marginTop: 6,
     lineHeight: 19,
-  },
-  attachmentRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#F1F3F6",
-  },
-  attachmentText: {
-    flex: 1,
-    fontSize: 13,
-    fontFamily: fonts.semibold,
-    color: "#2F6FE0",
   },
 });

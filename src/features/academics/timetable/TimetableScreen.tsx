@@ -15,6 +15,11 @@ import {
   type MyTimetableDay,
   type MyTimetableSlot,
 } from "@/services/api/current-semester.api";
+
+// The only two subject_course_type_enum values that represent a lab/practical
+// period - everything else (THEORY, PROJECT, MANDATORY, AUDIT) is a regular
+// class for the purposes of this screen's "Labs" count.
+const LAB_COURSE_TYPES = new Set(["PRACTICAL", "THEORY_WITH_PRACTICAL"]);
 import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 const DAY_SHORT = ["", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
@@ -107,11 +112,13 @@ function TimetableHeader({
 // Wired to GET /me/timetable for STUDENTS (real weekly schedule for the
 // student's own class) and GET /me/faculty-timetable for Faculty/HoD app
 // users, who reach this exact same screen (see AcademicsChooserScreen -
-// "same for hod, faculty and student"). timetable_slots has no room column
-// and no way to distinguish a "lab" period from a regular class, so only
-// real scheduled periods are shown - no fabricated "free period" gap-filling,
-// no Labs count, no room badge. The day strip shows the actual current
-// week's real dates instead of a pinned mock week.
+// "same for hod, faculty and student"). timetable_slots has no room column,
+// so there is no real room to show per subject. "Free" and "Labs" are both
+// real, backend-derived numbers: Free = total_periods (the institution's
+// period_timings count, excluding breaks) minus this day's scheduled slots;
+// Labs = slots whose subject.course_type is PRACTICAL or
+// THEORY_WITH_PRACTICAL (see subject_course_type_enum). The day strip shows
+// the actual current week's real dates instead of a pinned mock week.
 export function TimetableScreen() {
   const router = useRouter();
   const navigation = useNavigation();
@@ -124,13 +131,15 @@ export function TimetableScreen() {
 
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [days, setDays] = useState<MyTimetableDay[]>([]);
+  const [totalPeriods, setTotalPeriods] = useState(0);
 
   const load = useCallback(() => {
     setStatus("loading");
     const request = role === "student" ? getMyTimetable() : getMyTimetableAsFaculty();
     request
       .then((response) => {
-        setDays(response);
+        setDays(response.days);
+        setTotalPeriods(response.total_periods);
         setStatus("success");
       })
       .catch(() => setStatus("error"));
@@ -168,6 +177,9 @@ export function TimetableScreen() {
 
   const forenoon = slots.filter((s) => s.start_time < "13:00");
   const afternoon = slots.filter((s) => s.start_time >= "13:00");
+
+  const freeCount = Math.max(totalPeriods - slots.length, 0);
+  const labsCount = slots.filter((s) => LAB_COURSE_TYPES.has(s.subject.course_type ?? "")).length;
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
@@ -211,20 +223,23 @@ export function TimetableScreen() {
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.statsRow}>
             <SummaryCard label="Classes" value={String(slots.length)} />
-            <SummaryCard label="Free" value="—" />
-            <SummaryCard label="Labs" value="—" />
+            <SummaryCard label="Free" value={String(freeCount)} />
+            <SummaryCard label="Labs" value={String(labsCount)} />
           </View>
 
           {forenoon.length > 0 && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Forenoon</Text>
-              {forenoon.map((period) => (
-                <PeriodCard
-                  key={period.period_number}
-                  period={period}
-                  isNow={isToday && currentTime >= period.start_time && currentTime < period.end_time}
-                />
-              ))}
+              <View style={styles.listCard}>
+                {forenoon.map((period, index) => (
+                  <PeriodRow
+                    key={period.period_number}
+                    period={period}
+                    isFirst={index === 0}
+                    isNow={isToday && currentTime >= period.start_time && currentTime < period.end_time}
+                  />
+                ))}
+              </View>
             </View>
           )}
 
@@ -235,13 +250,16 @@ export function TimetableScreen() {
                 <View style={styles.sessionDivider} />
               </View>
               <Text style={styles.sectionTitle}>Afternoon</Text>
-              {afternoon.map((period) => (
-                <PeriodCard
-                  key={period.period_number}
-                  period={period}
-                  isNow={isToday && currentTime >= period.start_time && currentTime < period.end_time}
-                />
-              ))}
+              <View style={styles.listCard}>
+                {afternoon.map((period, index) => (
+                  <PeriodRow
+                    key={period.period_number}
+                    period={period}
+                    isFirst={index === 0}
+                    isNow={isToday && currentTime >= period.start_time && currentTime < period.end_time}
+                  />
+                ))}
+              </View>
             </View>
           )}
 
@@ -261,36 +279,23 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function PeriodCard({ period, isNow }: { period: MyTimetableSlot; isNow: boolean }) {
-  if (isNow) {
-    return (
-      <View style={[styles.periodCard, styles.periodCardNow]}>
-        <View style={styles.periodTimeCol}>
-          <Text style={styles.periodTimeNow}>{formatTime(period.start_time)}</Text>
-          <Text style={styles.periodLabelNow}>P{period.period_number}</Text>
-        </View>
-        <View style={styles.periodInfo}>
-          <Text style={styles.periodSubjectNow}>{period.subject.name}</Text>
-          <Text style={styles.periodMetaNow}>{period.faculty.name}</Text>
-        </View>
+function PeriodRow({ period, isNow, isFirst }: { period: MyTimetableSlot; isNow: boolean; isFirst: boolean }) {
+  return (
+    <View style={[styles.periodRow, !isFirst && styles.rowDivider, isNow && styles.periodRowNow]}>
+      {isNow && <View style={styles.periodAccentBar} />}
+      <View style={styles.periodTimeCol}>
+        <Text style={[styles.periodTime, isNow && styles.periodTimeNow]}>{formatTime(period.start_time)}</Text>
+        <Text style={[styles.periodLabel, isNow && styles.periodLabelNow]}>P{period.period_number}</Text>
+      </View>
+      <View style={styles.periodInfo}>
+        <Text style={[styles.periodSubject, isNow && styles.periodSubjectNow]}>{period.subject.name}</Text>
+        <Text style={[styles.periodMeta, isNow && styles.periodMetaNow]}>{period.faculty.name}</Text>
+      </View>
+      {isNow && (
         <View style={styles.nowBadge}>
           <Text style={styles.nowBadgeText}>NOW</Text>
         </View>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.periodCard}>
-      <View style={styles.accentBar} />
-      <View style={styles.periodTimeCol}>
-        <Text style={styles.periodTime}>{formatTime(period.start_time)}</Text>
-        <Text style={styles.periodLabel}>P{period.period_number}</Text>
-      </View>
-      <View style={styles.periodInfo}>
-        <Text style={styles.periodSubject}>{period.subject.name}</Text>
-        <Text style={styles.periodMeta}>{period.faculty.name}</Text>
-      </View>
+      )}
     </View>
   );
 }
@@ -435,20 +440,31 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: "#EEF0F4",
   },
-  periodCard: {
+  listCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#EEF0F4",
+    paddingHorizontal: 14,
+    marginBottom: 12,
+  },
+  rowDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#E5E7EB",
+  },
+  periodRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#EEF0F4",
     paddingVertical: 12,
-    paddingHorizontal: 14,
-    marginBottom: 10,
-    overflow: "hidden",
+    position: "relative",
   },
-  accentBar: {
+  periodRowNow: {
+    backgroundColor: "#EAF0FD",
+    marginHorizontal: -14,
+    paddingHorizontal: 14 + 10,
+  },
+  periodAccentBar: {
     position: "absolute",
     left: 0,
     top: 0,
@@ -484,34 +500,20 @@ const styles = StyleSheet.create({
     color: "#8A93A3",
     marginTop: 2,
   },
-  periodCardNow: {
-    backgroundColor: "#2F6FE0",
-    borderColor: "#2F6FE0",
-  },
   periodTimeNow: {
-    fontSize: 14,
-    fontFamily: fonts.bold,
-    color: "#fff",
+    color: "#1A3D8F",
   },
   periodLabelNow: {
-    fontSize: 11,
-    fontFamily: fonts.regular,
-    color: "#D7E2FA",
-    marginTop: 1,
+    color: "#2F6FE0",
   },
   periodSubjectNow: {
-    fontSize: 15,
-    fontFamily: fonts.bold,
-    color: "#fff",
+    color: "#1A3D8F",
   },
   periodMetaNow: {
-    fontSize: 12,
-    fontFamily: fonts.regular,
-    color: "#D7E2FA",
-    marginTop: 2,
+    color: "#2F6FE0",
   },
   nowBadge: {
-    backgroundColor: "rgba(255,255,255,0.25)",
+    backgroundColor: "#2F6FE0",
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 5,

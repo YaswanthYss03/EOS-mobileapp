@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { AnchoredDropdown } from "@/components/ui/dropdown";
+import { TimeWheelPicker } from "@/components/ui/TimeWheelPicker";
 import { AnimatedTabBar, TabTransitionView, useTabScrollMemory } from "@/components/ui/tabs";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
@@ -24,25 +25,9 @@ import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 type Tab = "apply" | "history";
 type DateField = "from" | "to" | null;
-type ListPickerField = "venue" | "fromTime" | "toTime" | null;
+type ListPickerField = "venue" | null;
+type TimeField = "from" | "to" | null;
 type LoadStatus = "loading" | "success" | "error";
-
-// 08:00 AM through 08:00 PM in 30-minute steps - a client-side input aid for
-// picking a time of day, not backend data (from/to are combined with the
-// selected dates into real from_datetime/to_datetime ISO values on submit).
-function generateTimeSlots(): string[] {
-  const slots: string[] = [];
-  for (let hour = 8; hour <= 20; hour++) {
-    for (const minute of [0, 30]) {
-      if (hour === 20 && minute === 30) continue;
-      const period = hour < 12 ? "AM" : "PM";
-      const displayHour = hour % 12 === 0 ? 12 : hour % 12;
-      slots.push(`${String(displayHour).padStart(2, "0")}:${String(minute).padStart(2, "0")} ${period}`);
-    }
-  }
-  return slots;
-}
-const timeSlots = generateTimeSlots();
 
 function combineDateAndTime(date: Date, time: string): Date {
   const match = /^(\d{2}):(\d{2}) (AM|PM)$/.exec(time);
@@ -88,9 +73,7 @@ export function VenueRequestScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [datePickerFor, setDatePickerFor] = useState<DateField>(null);
   const [listPickerFor, setListPickerFor] = useState<ListPickerField>(null);
-  // One <AnchoredDropdown> is shared by all 3 list fields below - it needs
-  // to measure whichever field's own trigger was actually tapped, so each
-  // field keeps its own node here rather than fighting over a single ref.
+  const [timePickerFor, setTimePickerFor] = useState<TimeField>(null);
   const listFieldAnchors = useRef<Partial<Record<Exclude<ListPickerField, null>, View | null>>>({});
   const [pickerYear, setPickerYear] = useState(today.getFullYear());
   const [pickerMonth, setPickerMonth] = useState(today.getMonth());
@@ -147,11 +130,9 @@ export function VenueRequestScreen() {
   const pickerWeeks = useMemo(() => getCalendarWeeks(pickerYear, pickerMonth), [pickerYear, pickerMonth]);
 
   const venueNames = venues.map((item) => item.name);
-  const listPickerOptions = listPickerFor === "venue" ? venueNames : listPickerFor ? timeSlots : [];
-  const listPickerTitle =
-    listPickerFor === "venue" ? "Select Venue" : listPickerFor === "fromTime" ? "From Time" : "To Time";
-  const listPickerSelected =
-    listPickerFor === "venue" ? venue?.name ?? null : listPickerFor === "fromTime" ? fromTime : toTime;
+  const listPickerOptions = listPickerFor === "venue" ? venueNames : [];
+  const listPickerTitle = "Select Venue";
+  const listPickerSelected = venue?.name ?? null;
 
   const bookedVenues = useMemo(() => venues.filter((item) => !item.is_available && item.booking), [venues]);
 
@@ -187,10 +168,6 @@ export function VenueRequestScreen() {
   function handleSelectListOption(value: string) {
     if (listPickerFor === "venue") {
       setVenue(venues.find((item) => item.name === value) ?? null);
-    } else if (listPickerFor === "fromTime") {
-      setFromTime(value);
-    } else if (listPickerFor === "toTime") {
-      setToTime(value);
     }
     setListPickerFor(null);
   }
@@ -347,43 +324,29 @@ export function VenueRequestScreen() {
               <View style={styles.dateRow}>
                 <View style={styles.dateCol}>
                   <Text style={styles.fieldLabel}>From Time</Text>
-                  <View
-                    ref={(node) => {
-                      listFieldAnchors.current.fromTime = node;
-                    }}
-                    collapsable={false}
+                  <TouchableOpacity
+                    style={styles.dateButton}
+                    onPress={() => setTimePickerFor("from")}
+                    activeOpacity={0.8}
                   >
-                    <TouchableOpacity
-                      style={styles.dateButton}
-                      onPress={() => setListPickerFor("fromTime")}
-                      activeOpacity={0.8}
-                    >
-                      <Ionicons name="time-outline" size={14} color="#2F6FE0" />
-                      <Text style={[styles.dateButtonText, !fromTime && styles.dateButtonPlaceholder]}>
-                        {fromTime ?? "Select time"}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
+                    <Ionicons name="time-outline" size={14} color="#2F6FE0" />
+                    <Text style={[styles.dateButtonText, !fromTime && styles.dateButtonPlaceholder]}>
+                      {fromTime ?? "Select time"}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
                 <View style={styles.dateCol}>
                   <Text style={styles.fieldLabel}>To Time</Text>
-                  <View
-                    ref={(node) => {
-                      listFieldAnchors.current.toTime = node;
-                    }}
-                    collapsable={false}
+                  <TouchableOpacity
+                    style={styles.dateButton}
+                    onPress={() => setTimePickerFor("to")}
+                    activeOpacity={0.8}
                   >
-                    <TouchableOpacity
-                      style={styles.dateButton}
-                      onPress={() => setListPickerFor("toTime")}
-                      activeOpacity={0.8}
-                    >
-                      <Ionicons name="time-outline" size={14} color="#2F6FE0" />
-                      <Text style={[styles.dateButtonText, !toTime && styles.dateButtonPlaceholder]}>
-                        {toTime ?? "Select time"}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
+                    <Ionicons name="time-outline" size={14} color="#2F6FE0" />
+                    <Text style={[styles.dateButtonText, !toTime && styles.dateButtonPlaceholder]}>
+                      {toTime ?? "Select time"}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               </View>
 
@@ -420,7 +383,7 @@ export function VenueRequestScreen() {
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.sectionTitle}>Already Booked Venues</Text>
+            <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>Already Booked Venues</Text>
             <View style={styles.card}>
               {venuesStatus === "loading" ? (
                 <SkeletonListRows count={2} />
@@ -536,6 +499,14 @@ export function VenueRequestScreen() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      <TimeWheelPicker
+        visible={timePickerFor !== null}
+        title={timePickerFor === "from" ? "From Time" : "To Time"}
+        value={timePickerFor === "from" ? fromTime : toTime}
+        onClose={() => setTimePickerFor(null)}
+        onChange={(next) => (timePickerFor === "from" ? setFromTime(next) : setToTime(next))}
+      />
     </SafeAreaView>
   );
 }
@@ -597,9 +568,12 @@ function BookedVenueRow({ venue, isLast }: { venue: Venue; isLast: boolean }) {
 
   return (
     <View style={[styles.bookedVenueRow, isLast && styles.bookedVenueRowLast]}>
-      <View style={styles.historyHeader}>
-        <Text style={styles.historyType}>{venue.name}</Text>
-        <Text style={styles.bookedByText}>{venue.booking.booked_by}</Text>
+      <Text style={styles.historyType}>{venue.name}</Text>
+      <View style={styles.bookedByRow}>
+        <Ionicons name="person-circle-outline" size={14} color="#2F6FE0" />
+        <Text style={styles.bookedByText} numberOfLines={1}>
+          {venue.booking.booked_by}
+        </Text>
       </View>
       <Text style={styles.historyDates}>
         {formatDate(fromDatetime)} · {formatTime(fromDatetime)} → {formatDate(toDatetime)} · {formatTime(toDatetime)}
@@ -697,6 +671,9 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textTransform: "uppercase",
     marginBottom: 8,
+  },
+  sectionTitleSpaced: {
+    marginTop: 24,
   },
   card: {
     backgroundColor: "#fff",
@@ -883,7 +860,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   bookedVenueRow: {
-    paddingVertical: 12,
+    paddingVertical: 16,
+    gap: 6,
     borderBottomWidth: 1,
     borderBottomColor: "#F1F3F6",
   },
@@ -891,7 +869,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
     paddingBottom: 0,
   },
+  bookedByRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
   bookedByText: {
+    flexShrink: 1,
     fontSize: 12,
     fontFamily: fonts.semibold,
     color: "#2F6FE0",

@@ -16,12 +16,20 @@ export type TodayClassSlot = {
   class_id: number;
   class_section: string;
   department_name: string;
+  // Accepted period swaps/takeovers for that date (see the backend's
+  // findTodayForFaculty). covered_by set = this slot was handed to someone
+  // else that day; is_substitution = this caller is covering it.
+  is_substitution?: boolean;
+  covered_by?: { id: number; name: string } | null;
 };
 
-// GET /me/classes/today (Faculty/HoD) - today's own timetable, ordered by
-// period. The Student Attendance tile's primary class-picker source.
-export async function getTodayClasses(): Promise<TodayClassSlot[]> {
-  const { data } = await apiClient.get<{ data: TodayClassSlot[] }>("/me/classes/today");
+// GET /me/classes/today?date=YYYY-MM-DD (Faculty/HoD) - the caller's own
+// timetable for that date (today when omitted), ordered by period. The
+// Student Attendance screen's only class-picker source.
+export async function getTodayClasses(date?: string): Promise<TodayClassSlot[]> {
+  const { data } = await apiClient.get<{ data: TodayClassSlot[] }>("/me/classes/today", {
+    params: date ? { date } : undefined,
+  });
   return data.data;
 }
 
@@ -60,22 +68,36 @@ export type RecognizeAttendanceResult = {
   subject_id: number;
   analyzed: boolean;
   spoofed: number;
+  // The classroom photo the backend kept as evidence (its own Cloudinary
+  // attendance/ folder), or null. Handed back unchanged to
+  // markClassAttendance - the backend rejects any other URL.
+  photo_url: string | null;
   students: RosterStudent[];
 };
 
+// Mirrors the backend's MAX_RECOGNIZE_IMAGES (RecognizeAttendanceDto).
+export const MAX_RECOGNIZE_IMAGES = 10;
+
 // POST /me/classes/:class_id/attendance/recognize (Faculty/HoD mapped to
-// teach this subject/class). Call with no images to fetch the plain roster
-// (populates the manual grid as soon as a class is picked); call again with
-// captured photos to get back AI suggestions for the same roster. Read-only
-// - never persists attendance itself, see markClassAttendance.
+// teach this subject/class, or covering it on attendanceDate via an
+// accepted period swap/takeover). Call with no images to fetch the plain
+// roster (active students only - populates the manual grid as soon as a
+// class is picked); call again with captured photos to get back AI
+// suggestions for the same roster. Read-only - never persists attendance
+// itself, see markClassAttendance.
 export async function recognizeAttendance(
   classId: number,
   subjectId: number,
+  attendanceDate: string,
   images?: string[],
 ): Promise<RecognizeAttendanceResult> {
   const { data } = await apiClient.post<{ data: RecognizeAttendanceResult }>(
     `/me/classes/${classId}/attendance/recognize`,
-    { subject_id: subjectId, ...(images && images.length > 0 ? { images } : {}) },
+    {
+      subject_id: subjectId,
+      attendance_date: attendanceDate,
+      ...(images && images.length > 0 ? { images } : {}),
+    },
   );
   return data.data;
 }
@@ -98,10 +120,16 @@ export async function markClassAttendance(
   subjectId: number,
   attendanceDate: string,
   records: Array<{ student_id: number; status: "present" | "absent" | "on_duty" }>,
+  photoUrl?: string | null,
 ): Promise<MarkClassAttendanceResult> {
   const { data } = await apiClient.post<{ data: MarkClassAttendanceResult }>(
     `/me/classes/${classId}/attendance`,
-    { subject_id: subjectId, attendance_date: attendanceDate, records },
+    {
+      subject_id: subjectId,
+      attendance_date: attendanceDate,
+      records,
+      ...(photoUrl ? { photo_url: photoUrl } : {}),
+    },
   );
   return data.data;
 }
@@ -126,6 +154,30 @@ export async function publishClassAttendance(
   const { data } = await apiClient.post<{ data: PublishClassAttendanceResult }>(
     `/me/classes/${classId}/attendance/publish`,
     { subject_id: subjectId, attendance_date: attendanceDate },
+  );
+  return data.data;
+}
+
+export type ClassAttendanceDraft = {
+  class_id: number;
+  subject_id: number;
+  attendance_date: string;
+  is_published: boolean;
+  records: Array<{ student_id: number; status: "present" | "absent" | "on_duty" }>;
+};
+
+// GET /me/classes/:class_id/attendance/draft?subject_id=&date= - whatever
+// was already saved for this class/subject/date (empty records if nothing
+// yet), plus whether it's been published. Lets the screen resume a draft
+// and lock a date that's already final.
+export async function getClassAttendanceDraft(
+  classId: number,
+  subjectId: number,
+  date: string,
+): Promise<ClassAttendanceDraft> {
+  const { data } = await apiClient.get<{ data: ClassAttendanceDraft }>(
+    `/me/classes/${classId}/attendance/draft`,
+    { params: { subject_id: subjectId, date } },
   );
   return data.data;
 }

@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import {
   View,
   Text,
-  FlatList,
+  ScrollView,
   TouchableOpacity,
   Modal,
   TextInput,
@@ -16,7 +16,6 @@ import { useRouter } from "expo-router";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import * as DocumentPicker from "expo-document-picker";
 import * as Linking from "expo-linking";
-import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonListRows } from "@/components/ui/Skeleton";
@@ -33,10 +32,17 @@ import {
   type LmsResource,
 } from "@/services/api/lms.api";
 
-const fileIcon: Record<string, keyof typeof Ionicons.glyphMap> = {
-  file: "document-text-outline",
-  link: "link-outline",
-};
+// No mime_type is stored server-side for an uploaded file - detected here
+// from the file's own extension (in its URL, falling back to the title)
+// purely to pick the right icon; a video gets its own icon instead of the
+// generic file one, a link keeps its own.
+const VIDEO_EXTENSION_PATTERN = /\.(mp4|mov|m4v|webm|mkv|avi|3gp)(\?|#|$)/i;
+
+function resourceIcon(item: LmsResource): keyof typeof Ionicons.glyphMap {
+  if (item.resource_type === "link") return "link-outline";
+  const source = item.file_url ?? item.title;
+  return VIDEO_EXTENSION_PATTERN.test(source) ? "videocam-outline" : "document-text-outline";
+}
 
 export function FolderResourcesScreen({ folderId, title }: { folderId: number; title?: string }) {
   const router = useRouter();
@@ -47,7 +53,6 @@ export function FolderResourcesScreen({ folderId, title }: { folderId: number; t
 
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [resources, setResources] = useState<LmsResource[]>([]);
-  const [expandedId, setExpandedId] = useState<number | null>(null);
   const [addLinkOpen, setAddLinkOpen] = useState(false);
   const [linkTitle, setLinkTitle] = useState("");
   const [linkDescription, setLinkDescription] = useState("");
@@ -149,11 +154,6 @@ export function FolderResourcesScreen({ folderId, title }: { folderId: number; t
     Linking.openURL(url).catch(() => toast.error("Couldn't open that item"));
   }
 
-  async function handleCopyLink(url: string) {
-    await Clipboard.setStringAsync(url);
-    toast.success("Link copied");
-  }
-
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       <WatermarkBackground />
@@ -214,69 +214,44 @@ export function FolderResourcesScreen({ folderId, title }: { folderId: number; t
       )}
 
       {status === "success" && (
-        <FlatList
-          data={resources}
-          keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={styles.list}
-          ListEmptyComponent={<Text style={styles.emptyText}>Nothing added to this folder yet.</Text>}
-          renderItem={({ item }) => {
-            const expanded = expandedId === item.id;
-            return (
-              <View style={styles.card}>
-                <TouchableOpacity
-                  style={styles.cardHeader}
-                  activeOpacity={0.85}
-                  onPress={() => setExpandedId(expanded ? null : item.id)}
-                >
-                  <View style={styles.iconWrap}>
-                    <Ionicons name={fileIcon[item.resource_type]} size={20} color="#2F6FE0" />
-                  </View>
-                  <View style={styles.textWrap}>
-                    <Text style={styles.title} numberOfLines={1}>
-                      {item.title}
-                    </Text>
-                    <Text style={styles.meta}>{item.resource_type === "file" ? "File" : "External link"}</Text>
-                  </View>
-                  <View style={styles.typeBadge}>
-                    <Text style={styles.typeBadgeText}>{item.resource_type === "file" ? "FILE" : "LINK"}</Text>
-                  </View>
-                </TouchableOpacity>
-
-                {expanded && (
-                  <View style={styles.expandedBody}>
-                    {item.description && <Text style={styles.description}>{item.description}</Text>}
-                    <Text style={styles.openHint}>
-                      {item.resource_type === "link" ? "Opens in the browser" : "Opens in your default viewer"}
-                    </Text>
-                    <View style={styles.buttonRow}>
-                      <TouchableOpacity style={styles.primaryButton} onPress={() => handleOpen(item)} activeOpacity={0.85}>
-                        <Text style={styles.primaryButtonText}>Open {item.resource_type === "link" ? "link" : "file"}</Text>
-                      </TouchableOpacity>
-                      {item.resource_type === "link" && item.link_url && (
-                        <TouchableOpacity
-                          style={styles.secondaryButton}
-                          onPress={() => handleCopyLink(item.link_url!)}
-                          activeOpacity={0.85}
-                        >
-                          <Text style={styles.secondaryButtonText}>Copy link</Text>
-                        </TouchableOpacity>
-                      )}
-                      {canManage && (
-                        <TouchableOpacity
-                          style={styles.deleteButton}
-                          onPress={() => handleDelete(item)}
-                          activeOpacity={0.85}
-                        >
-                          <Ionicons name="trash-outline" size={16} color="#DC2626" />
-                        </TouchableOpacity>
+        <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+          {resources.length === 0 ? (
+            <Text style={styles.emptyText}>Nothing added to this folder yet.</Text>
+          ) : (
+            <View style={styles.listCard}>
+              {resources.map((item, index) => (
+                <View key={item.id} style={[styles.row, index > 0 && styles.rowDivider]}>
+                  <TouchableOpacity style={styles.rowHeader} activeOpacity={0.7} onPress={() => handleOpen(item)}>
+                    <View style={styles.iconWrap}>
+                      <Ionicons name={resourceIcon(item)} size={20} color="#2F6FE0" />
+                    </View>
+                    <View style={styles.textWrap}>
+                      <Text style={styles.title} numberOfLines={1}>
+                        {item.title}
+                      </Text>
+                      {item.description && (
+                        <Text style={styles.description} numberOfLines={1}>
+                          {item.description}
+                        </Text>
                       )}
                     </View>
-                  </View>
-                )}
-              </View>
-            );
-          }}
-        />
+                    <Ionicons name="chevron-forward" size={18} color="#C6CCD6" />
+                  </TouchableOpacity>
+                  {canManage && (
+                    <TouchableOpacity
+                      style={styles.deleteButton}
+                      onPress={() => handleDelete(item)}
+                      activeOpacity={0.85}
+                      hitSlop={8}
+                    >
+                      <Ionicons name="trash-outline" size={18} color="#DC2626" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
+        </ScrollView>
       )}
 
       <Modal visible={addLinkOpen} transparent animationType="fade" onRequestClose={() => setAddLinkOpen(false)}>
@@ -359,58 +334,25 @@ const styles = StyleSheet.create({
   retryButtonText: { color: "#fff", fontSize: 13, fontFamily: fonts.semibold },
   list: { padding: 16, paddingTop: 8 },
   emptyText: { fontSize: 13, fontFamily: fonts.regular, color: "#9AA6B2", textAlign: "center", marginTop: 32 },
-  card: {
+  listCard: {
     backgroundColor: "#fff",
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: "#EEF0F4",
-    marginBottom: 10,
-    overflow: "hidden",
-    shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 1,
-  },
-  cardHeader: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 },
-  iconWrap: { width: 40, height: 40, borderRadius: 10, backgroundColor: "#EAF0FD", alignItems: "center", justifyContent: "center" },
-  textWrap: { flex: 1 },
-  title: { fontSize: 14, fontFamily: fonts.bold, color: "#111827" },
-  meta: { fontSize: 11.5, fontFamily: fonts.regular, color: "#9AA6B2", marginTop: 2 },
-  typeBadge: { backgroundColor: "#E4EBFB", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
-  typeBadgeText: { fontSize: 10, fontFamily: fonts.bold, color: "#2F6FE0" },
-  expandedBody: {
     paddingHorizontal: 14,
-    paddingBottom: 14,
-    borderTopWidth: 1,
-    borderTopColor: "#F1F3F6",
-    paddingTop: 12,
-    gap: 10,
+    marginBottom: 12,
   },
-  description: { fontSize: 13, fontFamily: fonts.regular, color: "#374151", lineHeight: 19 },
-  openHint: {
-    fontSize: 12,
-    fontFamily: fonts.regular,
-    color: "#6B7280",
-    backgroundColor: "#F7F8FA",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+  rowDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#E5E7EB",
   },
-  buttonRow: { flexDirection: "row", gap: 10 },
-  primaryButton: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 11, borderRadius: 10, backgroundColor: "#2F6FE0" },
-  primaryButtonText: { fontSize: 13, fontFamily: fonts.bold, color: "#fff" },
-  secondaryButton: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 11,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#2F6FE0",
-  },
-  secondaryButtonText: { fontSize: 13, fontFamily: fonts.bold, color: "#2F6FE0" },
-  deleteButton: { width: 40, alignItems: "center", justifyContent: "center", borderRadius: 10, borderWidth: 1, borderColor: "#FCA5A5" },
+  row: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8 },
+  rowHeader: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 6 },
+  iconWrap: { width: 40, height: 40, borderRadius: 10, backgroundColor: "#EAF0FD", alignItems: "center", justifyContent: "center" },
+  textWrap: { flex: 1, minWidth: 0 },
+  title: { fontSize: 14, fontFamily: fonts.bold, color: "#111827" },
+  description: { fontSize: 12, fontFamily: fonts.regular, color: "#9AA6B2", marginTop: 2 },
+  deleteButton: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: 10, borderWidth: 1, borderColor: "#FCA5A5" },
   modalOverlay: { flex: 1, backgroundColor: "rgba(15,23,42,0.5)", alignItems: "center", justifyContent: "center", padding: 24 },
   modalCard: { width: "100%", backgroundColor: "#fff", borderRadius: 18, padding: 20 },
   modalTitle: { fontSize: 16, fontFamily: fonts.bold, color: "#111827", marginBottom: 14 },

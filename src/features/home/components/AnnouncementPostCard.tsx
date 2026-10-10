@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { View, Text, Image, TouchableOpacity, Linking, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { NoticeFileRow, isNoticeImage } from "./NoticeAttachment";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { formatRelativeTime } from "@/utils/calendar";
@@ -98,8 +99,8 @@ export function AnnouncementPostCard({
 
   const carousel = post.media ?? [];
   const attachment = post.file_url;
-  const looksLikeImage =
-    attachment != null && /\.(png|jpe?g|gif|webp|bmp|heic)(\?|$)/i.test(attachment);
+  // By file name first (signed/extensionless URLs), then the URL itself.
+  const looksLikeImage = isNoticeImage(post.file_name, attachment);
 
   async function openLink() {
     if (!linkUrl) return;
@@ -168,17 +169,13 @@ export function AnnouncementPostCard({
         />
       )}
 
-      {carousel.length === 0 && !looksLikeImage && attachment && (
-        <TouchableOpacity style={styles.attachmentRow} onPress={() => void Linking.openURL(attachment)}>
-          <Ionicons name="document-attach-outline" size={16} color="#2F6FE0" />
-          <Text style={styles.attachmentText} numberOfLines={1}>
-            {post.file_name ?? "Open attachment"}
-          </Text>
-        </TouchableOpacity>
-      )}
-
       {post.title.trim().length > 0 && <Text style={styles.title}>{post.title}</Text>}
       {post.content.trim().length > 0 && <CaptionText text={post.content} />}
+
+      {/* A PDF/document attachment comes after the text, as a download. */}
+      {carousel.length === 0 && !looksLikeImage && attachment && (
+        <NoticeFileRow url={attachment} fileName={post.file_name} />
+      )}
 
       {linkUrl && (
         <TouchableOpacity style={styles.linkRow} onPress={openLink}>
@@ -315,23 +312,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginTop: 10,
     backgroundColor: "#F1F5F9",
-  },
-  attachmentRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-    marginTop: 10,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 10,
-    paddingHorizontal: 11,
-    paddingVertical: 9,
-  },
-  attachmentText: {
-    flex: 1,
-    fontSize: 12.5,
-    fontFamily: fonts.semibold,
-    color: "#2F6FE0",
   },
   linkRow: {
     flexDirection: "row",

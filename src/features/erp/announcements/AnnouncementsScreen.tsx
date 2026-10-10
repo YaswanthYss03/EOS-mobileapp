@@ -35,6 +35,7 @@ import {
   publishDraftToClasses,
   getMyDraftAnnouncements,
   deleteAnnouncement,
+  formatClassLine,
   type AnnouncementClass,
   type AnnouncementFacultyTarget,
   type AnnouncementRole,
@@ -149,7 +150,16 @@ export function AnnouncementsScreen() {
     setClassesStatus("loading");
     setClassesError(null);
     const request = isMentorScope
-      ? getMyMentorClasses().then((rows) => rows.map((r) => ({ id: r.class_id, label: r.label })))
+      ? getMyMentorClasses().then((rows) =>
+          rows.map((r) => ({
+            id: r.class_id,
+            label: r.label,
+            year: r.year,
+            department_code: r.department?.code,
+            department_name: r.department?.name,
+            section: r.section,
+          })),
+        )
       : getMyAssignedClasses();
     request
       .then((rows) => {
@@ -479,7 +489,12 @@ export function AnnouncementsScreen() {
             {!canTargetRoles && (
               <>
                 <View style={styles.sectionHeaderRow}>
-                  <Text style={styles.fieldLabel}>Target classes</Text>
+                  <Text style={styles.fieldLabel}>
+                    Target classes
+                    {classesStatus === "success" && classes.length > 0 && selectedClassIds.length > 0
+                      ? `  ·  ${selectedClassIds.length} of ${classes.length} selected`
+                      : ""}
+                  </Text>
                   {classesStatus === "success" && classes.length > 0 && (
                     <TouchableOpacity style={styles.smallPillButton} onPress={handleTogglePublishToAll}>
                       <Text style={styles.smallPillButtonText}>
@@ -500,16 +515,11 @@ export function AnnouncementsScreen() {
                 )}
 
                 {classesStatus === "success" && classes.length > 0 && (
-                  <View style={styles.checkboxGrid}>
-                    {classes.map((item) => (
-                      <CheckboxOption
-                        key={item.id}
-                        label={item.label}
-                        checked={selectedClassIds.includes(item.id)}
-                        onPress={() => setSelectedClassIds((prev) => toggleId(prev, item.id))}
-                      />
-                    ))}
-                  </View>
+                  <ClassSelectList
+                    classes={classes}
+                    selectedIds={selectedClassIds}
+                    onToggle={(id) => setSelectedClassIds((prev) => toggleId(prev, id))}
+                  />
                 )}
               </>
             )}
@@ -679,6 +689,63 @@ export function AnnouncementsScreen() {
         )}
       </TabTransitionView>
     </SafeAreaView>
+  );
+}
+
+// One class per line (year · department · section, never truncated
+// mid-word). Shows up to CLASS_LIST_VISIBLE_ROWS rows; beyond that the list
+// scrolls inside its own box so the rest of the form stays in place.
+const CLASS_LIST_VISIBLE_ROWS = 5;
+const CLASS_ROW_HEIGHT = 48;
+
+function ClassSelectList({
+  classes,
+  selectedIds,
+  onToggle,
+}: {
+  classes: AnnouncementClass[];
+  selectedIds: number[];
+  onToggle: (id: number) => void;
+}) {
+  const scrollable = classes.length > CLASS_LIST_VISIBLE_ROWS;
+  return (
+    <View style={styles.classList}>
+      <ScrollView
+        style={scrollable ? { maxHeight: CLASS_ROW_HEIGHT * CLASS_LIST_VISIBLE_ROWS } : undefined}
+        nestedScrollEnabled
+        showsVerticalScrollIndicator={scrollable}
+        keyboardShouldPersistTaps="handled"
+      >
+        {classes.map((item, index) => {
+          const checked = selectedIds.includes(item.id);
+          const line = formatClassLine(item);
+          return (
+            <TouchableOpacity
+              key={item.id}
+              style={[styles.classRow, index > 0 && styles.classRowDivider, checked && styles.classRowChecked]}
+              onPress={() => onToggle(item.id)}
+              activeOpacity={0.7}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked }}
+              accessibilityLabel={line}
+            >
+              <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
+                {checked && <Ionicons name="checkmark" size={12} color="#fff" />}
+              </View>
+              <Text style={[styles.classRowText, checked && styles.classRowTextChecked]} numberOfLines={1} ellipsizeMode="tail">
+                {line}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+      {scrollable && (
+        <View style={styles.classListFooter}>
+          <Ionicons name="swap-vertical" size={12} color="#9AA6B2" />
+          <Text style={styles.classListFooterText}>Scroll to see all {classes.length} classes</Text>
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -902,6 +969,52 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     color: "#9AA6B2",
     marginBottom: 16,
+  },
+  classList: {
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 12,
+    overflow: "hidden",
+    marginBottom: 16,
+  },
+  classRow: {
+    height: CLASS_ROW_HEIGHT,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 14,
+    backgroundColor: "#fff",
+  },
+  classRowDivider: {
+    borderTopWidth: 1,
+    borderTopColor: "#F1F3F6",
+  },
+  classRowChecked: {
+    backgroundColor: "#F3F7FE",
+  },
+  classRowText: {
+    flex: 1,
+    fontSize: 13.5,
+    fontFamily: fonts.semibold,
+    color: "#374151",
+  },
+  classRowTextChecked: {
+    color: "#1E3A8A",
+  },
+  classListFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 6,
+    borderTopWidth: 1,
+    borderTopColor: "#F1F3F6",
+    backgroundColor: "#FAFBFC",
+  },
+  classListFooterText: {
+    fontSize: 11,
+    fontFamily: fonts.medium,
+    color: "#9AA6B2",
   },
   checkboxGrid: {
     flexDirection: "row",

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { ActivityIndicator, View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -7,10 +7,13 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { SkeletonCalendarBlock, SkeletonListRows } from "@/components/ui/Skeleton";
+import { AnchoredDropdown, useDropdown } from "@/components/ui/dropdown";
 import { fonts } from "@/theme";
 import { useAuth } from "@/context/AuthContext";
 import { useRole } from "@/hooks/useRole";
 import { getApiErrorMessage } from "@/services/api/client";
+import { toIsoDate } from "@/utils/calendar";
+import { toast } from "@/utils/toast";
 import {
   getMyAcademicCalendar,
   getMyAcademicCalendarAsFaculty,
@@ -19,7 +22,28 @@ import {
   type MyAcademicCalendar,
   type MyCalendarEvent,
 } from "@/services/api/academic-calendar.api";
+import {
+  listPersonalCalendarEntries,
+  createPersonalCalendarEntry,
+  updatePersonalCalendarEntry,
+  deletePersonalCalendarEntry,
+  type PersonalCalendarEntry,
+  type PersonalCalendarEntryCategory,
+} from "@/services/api/personal-calendar.api";
 import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
+
+const CATEGORY_LABEL: Record<PersonalCalendarEntryCategory, string> = {
+  personal: "Personal",
+  reminder: "Reminder",
+  meeting: "Meeting",
+};
+
+// GET/POST/PATCH/DELETE /me/personal-calendar-entries only allows PRINCIPAL,
+// CORRESPONDENT, STUDENT, HOD, FACULTY (see EOS-backend's
+// PersonalCalendarController) - every other rawRole this shared screen
+// serves (library, finance, academic_coordinator, ...) would just get a 403,
+// so the "Add event" feature is hidden for them rather than shown broken.
+const CAN_ADD_PERSONAL_EVENTS = new Set(["student", "faculty", "hod"]);
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -55,7 +79,18 @@ function formatShortMonthYear(dateOnly: string): string {
   return `${MONTH_NAMES[date.getMonth()].slice(0, 3)} ${date.getFullYear()}`;
 }
 
-function AcademicCalendarHeader({ onBack }: { onBack: () => void }) {
+function formatLongDate(isoDate: string): string {
+  const date = new Date(isoDate);
+  return `${WEEKDAY_FULL[date.getDay()]}, ${MONTH_NAMES[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
+}
+
+function AcademicCalendarHeader({
+  onBack,
+  onAddEvent,
+}: {
+  onBack: () => void;
+  onAddEvent: (() => void) | null;
+}) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -73,6 +108,12 @@ function AcademicCalendarHeader({ onBack }: { onBack: () => void }) {
         <Ionicons name="arrow-back" size={20} color="#fff" />
       </TouchableOpacity>
       <Text style={styles.headerTitle}>Academic Calendar</Text>
+      {onAddEvent && (
+        <TouchableOpacity style={styles.addEventButton} onPress={onAddEvent} activeOpacity={0.85}>
+          <Ionicons name="add" size={16} color="#2F6FE0" />
+          <Text style={styles.addEventButtonText}>Add event</Text>
+        </TouchableOpacity>
+      )}
     </LinearGradient>
   );
 }
@@ -111,10 +152,28 @@ export function AcademicCalendarScreen() {
   const today = useMemo(() => new Date(), []);
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
+  const [selectedDate, setSelectedDate] = useState(toIsoDate(today));
 
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [calendar, setCalendar] = useState<MyAcademicCalendar | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  const canAddPersonalEvents = CAN_ADD_PERSONAL_EVENTS.has(rawRole ?? "");
+  const [personalEntries, setPersonalEntries] = useState<PersonalCalendarEntry[]>([]);
+  const [formOpen, setFormOpen] = useState(false);
+  const [formEntryId, setFormEntryId] = useState<number | null>(null);
+  const [formTitle, setFormTitle] = useState("");
+  const [formCategory, setFormCategory] = useState<PersonalCalendarEntryCategory>("personal");
+  const categoryPicker = useDropdown();
+  const [formDetails, setFormDetails] = useState("");
+  const [formSaving, setFormSaving] = useState(false);
+
+  const reloadPersonalEntries = useCallback(() => {
+    if (!canAddPersonalEvents) return;
+    listPersonalCalendarEntries()
+      .then(setPersonalEntries)
+      .catch(() => toast.error("Couldn't load your own events."));
+  }, [canAddPersonalEvents]);
 
   const load = useCallback(() => {
     setStatus("loading");
@@ -134,11 +193,64 @@ export function AcademicCalendarScreen() {
         setLoadError(getApiErrorMessage(error, "Couldn't load the academic calendar."));
         setStatus("error");
       });
-  }, [rawRole]);
+
+    reloadPersonalEntries();
+  }, [rawRole, reloadPersonalEntries]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  function openAddForm() {
+    setFormEntryId(null);
+    setFormTitle("");
+    setFormCategory("personal");
+    setFormDetails("");
+    setFormOpen(true);
+  }
+
+  function openEditForm(entry: PersonalCalendarEntry) {
+    setFormEntryId(entry.id);
+    setFormTitle(entry.title);
+    setFormCategory(entry.category);
+    setFormDetails(entry.details ?? "");
+    setFormOpen(true);
+  }
+
+  function handleSaveEntry() {
+    if (!formTitle.trim()) {
+      toast.warning("Add a title");
+      return;
+    }
+    setFormSaving(true);
+    const input = {
+      entry_date: selectedDate,
+      title: formTitle.trim(),
+      category: formCategory,
+      details: formDetails.trim() || undefined,
+    };
+    const request = formEntryId
+      ? updatePersonalCalendarEntry(formEntryId, input)
+      : createPersonalCalendarEntry(input);
+
+    request
+      .then(() => {
+        toast.success(formEntryId ? "Entry updated" : "Event added");
+        setFormOpen(false);
+        reloadPersonalEntries();
+      })
+      .catch((err) => toast.error(getApiErrorMessage(err, "Couldn't save this entry.")))
+      .finally(() => setFormSaving(false));
+  }
+
+  function handleDeleteEntry(id: number) {
+    deletePersonalCalendarEntry(id)
+      .then(() => {
+        setPersonalEntries((prev) => prev.filter((e) => e.id !== id));
+        toast.success("Entry deleted");
+      })
+      .catch((err) => toast.error(getApiErrorMessage(err, "Couldn't delete this entry.")));
+  }
 
   useFocusEffect(
     useCallback(() => {
@@ -156,6 +268,7 @@ export function AcademicCalendarScreen() {
             onBack={() =>
               role === "employee" || role === "hod" || role === "hr-payroll" ? router.replace("/(tabs)/erp") : router.back()
             }
+            onAddEvent={canAddPersonalEvents ? openAddForm : null}
           />
         ),
       });
@@ -163,7 +276,7 @@ export function AcademicCalendarScreen() {
         navigation.getParent()?.setOptions({ header: () => <CollegeHeader /> });
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [navigation, router, calendar]),
+    }, [navigation, router, calendar, canAddPersonalEvents]),
   );
 
   const weeks = useMemo(() => buildMonthGrid(viewYear, viewMonth), [viewYear, viewMonth]);
@@ -178,10 +291,34 @@ export function AcademicCalendarScreen() {
       .sort((a, b) => a.event_date.localeCompare(b.event_date));
   }, [calendar, viewMonth, viewYear]);
 
-  const eventDays = useMemo(
-    () => new Set(eventsThisMonth.map((e) => new Date(e.event_date).getDate())),
-    [eventsThisMonth],
-  );
+  const personalEntriesByDate = useMemo(() => {
+    const map = new Map<string, PersonalCalendarEntry[]>();
+    for (const entry of personalEntries) {
+      const key = entry.entry_date.slice(0, 10);
+      const list = map.get(key) ?? [];
+      list.push(entry);
+      map.set(key, list);
+    }
+    return map;
+  }, [personalEntries]);
+
+  const selectedDateEntries = personalEntriesByDate.get(selectedDate) ?? [];
+
+  // Institution events use day-of-month numbers (scoped to the viewed
+  // month/year already); personal entries carry a full date, so this also
+  // filters them down to the viewed month before marking the day dot -
+  // otherwise a personal entry on the 15th of a different month would light
+  // up the 15th here too.
+  const eventDays = useMemo(() => {
+    const days = new Set(eventsThisMonth.map((e) => new Date(e.event_date).getDate()));
+    for (const entry of personalEntries) {
+      const d = new Date(entry.entry_date);
+      if (d.getMonth() === viewMonth && d.getFullYear() === viewYear) {
+        days.add(d.getDate());
+      }
+    }
+    return days;
+  }, [eventsThisMonth, personalEntries, viewMonth, viewYear]);
 
   function goToMonth(delta: number) {
     let month = viewMonth + delta;
@@ -195,6 +332,10 @@ export function AcademicCalendarScreen() {
     }
     setViewMonth(month);
     setViewYear(year);
+  }
+
+  function selectDay(day: number) {
+    setSelectedDate(toIsoDate(new Date(viewYear, viewMonth, day)));
   }
 
   return (
@@ -245,39 +386,171 @@ export function AcademicCalendarScreen() {
 
             {weeks.map((week, i) => (
               <View key={i} style={styles.weekRow}>
-                {week.map((day, j) => (
-                  <View key={j} style={styles.dayCell}>
-                    {day !== null && (
-                      <View style={[styles.dayCellInner, eventDays.has(day) && styles.dayCellHighlighted]}>
-                        <Text style={[styles.dayNumber, eventDays.has(day) && styles.dayNumberHighlighted]}>
+                {week.map((day, j) => {
+                  if (day === null) return <View key={j} style={styles.dayCell} />;
+                  const isSelected =
+                    canAddPersonalEvents && selectedDate === toIsoDate(new Date(viewYear, viewMonth, day));
+                  return (
+                    <TouchableOpacity
+                      key={j}
+                      style={styles.dayCell}
+                      activeOpacity={canAddPersonalEvents ? 0.7 : 1}
+                      disabled={!canAddPersonalEvents}
+                      onPress={() => selectDay(day)}
+                    >
+                      <View
+                        style={[
+                          styles.dayCellInner,
+                          eventDays.has(day) && styles.dayCellHighlighted,
+                          isSelected && styles.dayCellSelected,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.dayNumber,
+                            eventDays.has(day) && styles.dayNumberHighlighted,
+                            isSelected && styles.dayNumberSelected,
+                          ]}
+                        >
                           {day}
                         </Text>
                         {eventDays.has(day) && <View style={styles.dayDot} />}
                       </View>
-                    )}
-                  </View>
-                ))}
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             ))}
           </View>
 
           <Text style={styles.sectionTitle}>This month</Text>
-          {eventsThisMonth.map((event) => (
-            <EventCard key={event.id} event={event} />
-          ))}
+          {eventsThisMonth.length > 0 && (
+            <View style={styles.listCard}>
+              {eventsThisMonth.map((event, index) => (
+                <EventCard key={event.id} event={event} isFirst={index === 0} />
+              ))}
+            </View>
+          )}
           {eventsThisMonth.length === 0 && <Text style={styles.noEvents}>No events this month.</Text>}
+
+          {canAddPersonalEvents && (
+            <View style={styles.personalCard}>
+              <Text style={styles.sectionTitle}>Your events</Text>
+              <Text style={styles.selectedDateLabel}>{formatLongDate(selectedDate)}</Text>
+
+              {formOpen && (
+                <View style={styles.formBlock}>
+                  <Text style={styles.fieldLabel}>Title</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. Project submission reminder"
+                    placeholderTextColor="#9AA6B2"
+                    value={formTitle}
+                    onChangeText={setFormTitle}
+                  />
+
+                  <Text style={styles.fieldLabel}>Mark this as</Text>
+                  <View ref={categoryPicker.anchorRef} collapsable={false}>
+                    <TouchableOpacity style={styles.selectInput} onPress={categoryPicker.open} activeOpacity={0.8}>
+                      <Text style={styles.selectInputText}>{CATEGORY_LABEL[formCategory]}</Text>
+                      <Ionicons name="chevron-down" size={16} color="#6B7280" />
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={styles.fieldLabel}>Details (optional)</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Venue, time, notes"
+                    placeholderTextColor="#9AA6B2"
+                    value={formDetails}
+                    onChangeText={setFormDetails}
+                  />
+
+                  <TouchableOpacity
+                    style={[styles.saveButton, formSaving && styles.saveButtonDisabled]}
+                    onPress={handleSaveEntry}
+                    disabled={formSaving}
+                    activeOpacity={0.85}
+                  >
+                    {formSaving ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.saveButtonText}>{formEntryId ? "Save changes" : "Add event"}</Text>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.cancelFormButton} onPress={() => setFormOpen(false)}>
+                    <Text style={styles.cancelFormButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {selectedDateEntries.length === 0 ? (
+                <Text style={styles.noEvents}>No events of your own for this date yet.</Text>
+              ) : (
+                selectedDateEntries.map((entry) => (
+                  <View key={entry.id} style={styles.personalRow}>
+                    <View style={styles.personalBadge}>
+                      <Ionicons name="person-outline" size={14} color="#7E22CE" />
+                    </View>
+                    <View style={styles.personalTextWrap}>
+                      <Text style={styles.personalTitle} numberOfLines={1}>
+                        {entry.title}
+                      </Text>
+                      <Text style={styles.personalMeta}>
+                        {CATEGORY_LABEL[entry.category]}
+                        {entry.details ? ` · ${entry.details}` : ""}
+                      </Text>
+                    </View>
+                    <TouchableOpacity onPress={() => openEditForm(entry)} hitSlop={8} style={styles.personalIconButton}>
+                      <Ionicons name="create-outline" size={16} color="#2F6FE0" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => handleDeleteEntry(entry.id)}
+                      hitSlop={8}
+                      style={styles.personalIconButton}
+                    >
+                      <Ionicons name="trash-outline" size={16} color="#DC2626" />
+                    </TouchableOpacity>
+                  </View>
+                ))
+              )}
+            </View>
+          )}
         </ScrollView>
       )}
+
+      <AnchoredDropdown
+        anchorRef={categoryPicker.anchorRef}
+        visible={categoryPicker.visible}
+        onClose={categoryPicker.close}
+        contentStyle={[styles.modalCard, styles.anchoredCard]}
+      >
+        <Text style={styles.modalTitle}>Mark this as</Text>
+        {(Object.keys(CATEGORY_LABEL) as PersonalCalendarEntryCategory[]).map((category) => (
+          <TouchableOpacity
+            key={category}
+            style={styles.modalOptionRow}
+            onPress={() => {
+              setFormCategory(category);
+              categoryPicker.close();
+            }}
+          >
+            <Text style={styles.modalOptionName}>{CATEGORY_LABEL[category]}</Text>
+            {category === formCategory && <Ionicons name="checkmark" size={16} color="#2F6FE0" />}
+          </TouchableOpacity>
+        ))}
+      </AnchoredDropdown>
     </SafeAreaView>
   );
 }
 
-function EventCard({ event }: { event: MyCalendarEvent }) {
+function EventCard({ event, isFirst }: { event: MyCalendarEvent; isFirst: boolean }) {
   const { bg, text, label } = categoryStyle[event.event_type];
   const date = new Date(event.event_date);
 
   return (
-    <View style={styles.eventCard}>
+    <View style={[styles.eventCard, !isFirst && styles.rowDivider]}>
       <View style={styles.eventDateCol}>
         <Text style={styles.eventDay}>{date.getDate()}</Text>
         <Text style={styles.eventMonth}>{MONTH_NAMES[date.getMonth()].slice(0, 3).toUpperCase()}</Text>
@@ -313,9 +586,24 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   headerTitle: {
+    flex: 1,
     color: "#fff",
     fontSize: 18,
     fontFamily: fonts.bold,
+  },
+  addEventButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  addEventButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    color: "#2F6FE0",
   },
   headerSubtitle: {
     color: "#D7E2FA",
@@ -420,6 +708,9 @@ const styles = StyleSheet.create({
   dayCellHighlighted: {
     backgroundColor: "#EAF0FD",
   },
+  dayCellSelected: {
+    backgroundColor: "#2F6FE0",
+  },
   dayNumber: {
     fontSize: 14,
     fontFamily: fonts.medium,
@@ -428,6 +719,10 @@ const styles = StyleSheet.create({
   dayNumberHighlighted: {
     fontFamily: fonts.bold,
     color: "#1A3D8F",
+  },
+  dayNumberSelected: {
+    fontFamily: fonts.bold,
+    color: "#fff",
   },
   dayDot: {
     width: 4,
@@ -445,16 +740,23 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     marginBottom: 12,
   },
+  listCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#EEF0F4",
+    paddingHorizontal: 14,
+    marginBottom: 12,
+  },
+  rowDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#E5E7EB",
+  },
   eventCard: {
     flexDirection: "row",
     alignItems: "center",
     gap: 14,
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#EEF0F4",
-    padding: 14,
-    marginBottom: 12,
+    paddingVertical: 14,
   },
   eventDateCol: {
     width: 40,
@@ -499,5 +801,151 @@ const styles = StyleSheet.create({
     color: "#999",
     textAlign: "center",
     marginTop: 24,
+  },
+  personalCard: {
+    backgroundColor: "#fff",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#EEF0F4",
+    padding: 16,
+    marginTop: 8,
+  },
+  selectedDateLabel: {
+    fontSize: 13,
+    fontFamily: fonts.semibold,
+    color: "#111827",
+    marginBottom: 14,
+  },
+  formBlock: {
+    marginBottom: 14,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F3F6",
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontFamily: fonts.semibold,
+    color: "#2F6FE0",
+    marginBottom: 6,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#F9FAFB",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#111827",
+    marginBottom: 14,
+  },
+  selectInput: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#F9FAFB",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 14,
+  },
+  selectInputText: {
+    fontSize: 13,
+    fontFamily: fonts.semibold,
+    color: "#111827",
+  },
+  saveButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#2F6FE0",
+    borderRadius: 12,
+    paddingVertical: 13,
+  },
+  saveButtonDisabled: {
+    backgroundColor: "#B7CBE6",
+  },
+  saveButtonText: {
+    fontSize: 14,
+    fontFamily: fonts.bold,
+    color: "#fff",
+  },
+  cancelFormButton: {
+    alignItems: "center",
+    paddingVertical: 10,
+  },
+  cancelFormButtonText: {
+    fontSize: 12,
+    fontFamily: fonts.semibold,
+    color: "#6B7280",
+  },
+  personalRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F3F6",
+  },
+  personalBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#F3E8FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  personalTextWrap: {
+    flex: 1,
+  },
+  personalTitle: {
+    fontSize: 13,
+    fontFamily: fonts.bold,
+    color: "#111827",
+  },
+  personalMeta: {
+    fontSize: 11,
+    fontFamily: fonts.regular,
+    color: "#8A93A3",
+    marginTop: 2,
+  },
+  personalIconButton: {
+    padding: 4,
+  },
+  modalCard: {
+    backgroundColor: "#fff",
+    borderRadius: 18,
+    padding: 18,
+    maxHeight: "70%",
+  },
+  anchoredCard: {
+    width: 220,
+    maxHeight: 260,
+    elevation: 6,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+  },
+  modalTitle: {
+    fontSize: 15,
+    fontFamily: fonts.bold,
+    color: "#111827",
+    marginBottom: 10,
+  },
+  modalOptionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F3F6",
+  },
+  modalOptionName: {
+    fontSize: 14,
+    fontFamily: fonts.semibold,
+    color: "#111827",
   },
 });

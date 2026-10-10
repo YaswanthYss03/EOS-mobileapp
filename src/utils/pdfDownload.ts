@@ -10,9 +10,18 @@ import { StorageAccessFramework, EncodingType } from "expo-file-system/legacy";
 // per feature.
 const ANDROID_DOWNLOAD_DIR_KEY = "pdf_download_dir_uri";
 
-async function saveToAndroidDownloads(base64: string, filename: string): Promise<boolean> {
+/**
+ * Writes base64 file content into the user's one-time-picked Android
+ * download folder (shared by every download in the app). Returns false if
+ * the user declines the folder permission.
+ */
+export async function saveToAndroidDownloads(
+  base64: string,
+  filename: string,
+  mimeType = "application/pdf",
+): Promise<boolean> {
   const writeInto = async (dirUri: string) => {
-    const destUri = await StorageAccessFramework.createFileAsync(dirUri, filename, "application/pdf");
+    const destUri = await StorageAccessFramework.createFileAsync(dirUri, filename, mimeType);
     await StorageAccessFramework.writeAsStringAsync(destUri, base64, { encoding: EncodingType.Base64 });
   };
 

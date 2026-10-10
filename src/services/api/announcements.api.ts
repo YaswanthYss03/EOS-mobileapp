@@ -21,7 +21,15 @@ import { apiClient } from "./client";
 export type AnnouncementClass = {
   id: number;
   label: string;
+  // Structured parts of the same class (newer backends) - used for a
+  // compact "III Year · CSE · Section A" line; label is the fallback.
+  year?: number | null;
+  department_code?: string;
+  department_name?: string;
+  section?: string;
 };
+
+export { formatClassLine } from "@/utils/classLabel";
 
 export type AnnouncementFacultyTarget = {
   id: number;

@@ -141,9 +141,7 @@ export function LmsSubjectScreen({
           <Text style={styles.subjectAvatarText}>{subjectInitials(subjectName)}</Text>
         </View>
         <View style={styles.subjectTextWrap}>
-          <Text style={styles.subjectName} numberOfLines={1}>
-            {subjectName ?? "Subject"}
-          </Text>
+          <Text style={styles.subjectName}>{subjectName ?? "Subject"}</Text>
           {subjectCode && (
             <View style={styles.subjectCodePill}>
               <Text style={styles.subjectCodeText}>{subjectCode}</Text>

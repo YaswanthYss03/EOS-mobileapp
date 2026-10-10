@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { View, Text, FlatList, TouchableOpacity, TextInput, ActivityIndicator, StyleSheet } from "react-native";
+import { View, Text, FlatList, TouchableOpacity, ActivityIndicator, StyleSheet } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
@@ -11,7 +11,7 @@ import { SkeletonListRows } from "@/components/ui/Skeleton";
 import { fonts } from "@/theme";
 import { toast } from "@/utils/toast";
 import { getApiErrorMessage } from "@/services/api/client";
-import { getTaskSubmissions, gradeSubmission, type LmsSubmission } from "@/services/api/lms.api";
+import { getTaskSubmissions, toggleSubmissionReview, type LmsSubmission } from "@/services/api/lms.api";
 import { WatermarkBackground } from "@/components/layout/WatermarkBackground";
 
 export function TaskSubmissionsScreen({
@@ -34,8 +34,7 @@ export function TaskSubmissionsScreen({
   const insets = useSafeAreaInsets();
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [submissions, setSubmissions] = useState<LmsSubmission[]>([]);
-  const [marksDraft, setMarksDraft] = useState<Record<number, string>>({});
-  const [saving, setSaving] = useState<number | null>(null);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
 
   const load = useCallback(() => {
     setStatus("loading");
@@ -72,25 +71,21 @@ export function TaskSubmissionsScreen({
     }, [navigation, onClose]),
   );
 
-  function handleGrade(submission: LmsSubmission) {
+  function handleToggleReview(submission: LmsSubmission) {
     if (!submission.status_id) {
       toast.warning("This student hasn't submitted yet");
       return;
     }
-    const raw = marksDraft[submission.status_id] ?? "";
-    const marks = Number(raw);
-    if (!raw.trim() || !Number.isInteger(marks) || marks < 0) {
-      toast.warning("Enter a valid whole-number mark");
-      return;
-    }
-    setSaving(submission.status_id);
-    gradeSubmission(submission.status_id, marks)
-      .then(() => {
-        toast.success("Marks saved");
-        load();
+    const statusId = submission.status_id;
+    setTogglingId(statusId);
+    toggleSubmissionReview(statusId)
+      .then((result) => {
+        setSubmissions((prev) =>
+          prev.map((s) => (s.status_id === statusId ? { ...s, is_reviewed: result.is_reviewed } : s)),
+        );
       })
-      .catch((err) => toast.error(getApiErrorMessage(err, "Couldn't save marks.")))
-      .finally(() => setSaving(null));
+      .catch((err) => toast.error(getApiErrorMessage(err, "Couldn't update this submission.")))
+      .finally(() => setTogglingId(null));
   }
 
   return (
@@ -130,77 +125,58 @@ export function TaskSubmissionsScreen({
           data={submissions}
           keyExtractor={(item) => String(item.student_id)}
           contentContainerStyle={styles.list}
-          renderItem={({ item }) => (
-            <View style={styles.card}>
-              <View style={styles.cardHeader}>
-                <View style={styles.textWrap}>
-                  <Text style={styles.name}>{item.name}</Text>
-                  <Text style={styles.meta}>{item.student_id_no}</Text>
+          renderItem={({ item }) => {
+            // Uploading a submission alone never counts as "Submitted" - it
+            // starts (and stays) "Pending" until a faculty member opens the
+            // attached file, checks it, and taps the badge to approve it.
+            // Tapping an already-approved badge undoes that back to
+            // "Pending". Nothing to approve at all when the student hasn't
+            // submitted anything yet, so the badge is inert in that case.
+            const isToggling = togglingId === item.status_id;
+            const label = item.is_submitted && item.is_reviewed ? "Submitted" : "Pending";
+            return (
+              <View style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <View style={styles.textWrap}>
+                    <Text style={styles.name}>{item.name}</Text>
+                    <Text style={styles.meta}>{item.student_id_no}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.statusBadge, label === "Submitted" ? styles.statusSubmitted : styles.statusPending]}
+                    activeOpacity={item.is_submitted ? 0.7 : 1}
+                    disabled={!item.is_submitted || isToggling}
+                    onPress={() => handleToggleReview(item)}
+                  >
+                    {isToggling ? (
+                      <ActivityIndicator size="small" color={label === "Submitted" ? "#166534" : "#92400E"} />
+                    ) : (
+                      <Text style={label === "Submitted" ? styles.statusSubmittedText : styles.statusPendingText}>
+                        {label}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
                 </View>
-                <View
-                  style={[
-                    styles.statusBadge,
-                    item.is_submitted ? styles.statusSubmitted : styles.statusPending,
-                  ]}
-                >
-                  <Text style={item.is_submitted ? styles.statusSubmittedText : styles.statusPendingText}>
-                    {item.is_submitted ? "Submitted" : "Not submitted"}
-                  </Text>
-                </View>
+
+                {item.is_submitted && (
+                  <TouchableOpacity
+                    style={styles.viewButton}
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      if (!item.submission_file_url) {
+                        toast.warning("No submission file was attached");
+                        return;
+                      }
+                      Linking.openURL(item.submission_file_url).catch(() => toast.error("Couldn't open the file"));
+                    }}
+                  >
+                    <Ionicons name="document-text-outline" size={16} color="#2F6FE0" />
+                    <Text style={styles.viewButtonText}>View what the student submitted</Text>
+                    <Ionicons name="open-outline" size={15} color="#2F6FE0" />
+                  </TouchableOpacity>
+                )}
               </View>
-
-              {item.is_submitted && (
-                <TouchableOpacity
-                  style={styles.viewButton}
-                  activeOpacity={0.85}
-                  onPress={() => {
-                    if (!item.submission_file_url) {
-                      toast.warning("No submission file was attached");
-                      return;
-                    }
-                    Linking.openURL(item.submission_file_url).catch(() => toast.error("Couldn't open the file"));
-                  }}
-                >
-                  <Ionicons name="document-text-outline" size={16} color="#2F6FE0" />
-                  <Text style={styles.viewButtonText}>View what the student submitted</Text>
-                  <Ionicons name="open-outline" size={15} color="#2F6FE0" />
-                </TouchableOpacity>
-              )}
-
-              {item.is_submitted && (
-                <View style={styles.gradeRow}>
-                  {item.marks_obtained !== null ? (
-                    <Text style={styles.gradedText}>Marks: {item.marks_obtained}</Text>
-                  ) : (
-                    <>
-                      <TextInput
-                        style={styles.marksInput}
-                        placeholder="Marks"
-                        placeholderTextColor="#9AA6B2"
-                        keyboardType="number-pad"
-                        value={marksDraft[item.status_id ?? -1] ?? ""}
-                        onChangeText={(text) =>
-                          setMarksDraft((prev) => ({ ...prev, [item.status_id ?? -1]: text }))
-                        }
-                      />
-                      <TouchableOpacity
-                        style={styles.saveButton}
-                        onPress={() => handleGrade(item)}
-                        activeOpacity={0.85}
-                        disabled={saving === item.status_id}
-                      >
-                        {saving === item.status_id ? (
-                          <ActivityIndicator size="small" color="#fff" />
-                        ) : (
-                          <Text style={styles.saveButtonText}>Save</Text>
-                        )}
-                      </TouchableOpacity>
-                    </>
-                  )}
-                </View>
-              )}
-            </View>
-          )}
+            );
+          }}
         />
       )}
     </SafeAreaView>
@@ -248,12 +224,11 @@ const styles = StyleSheet.create({
   textWrap: { flex: 1 },
   name: { fontSize: 14, fontFamily: fonts.bold, color: "#111827" },
   meta: { fontSize: 12, fontFamily: fonts.regular, color: "#9AA6B2", marginTop: 2 },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, minWidth: 76, alignItems: "center" },
   statusSubmitted: { backgroundColor: "#DCFCE7" },
-  statusPending: { backgroundColor: "#FEE2E2" },
+  statusPending: { backgroundColor: "#FEF3C7" },
   statusSubmittedText: { fontSize: 11, fontFamily: fonts.bold, color: "#166534" },
-  statusPendingText: { fontSize: 11, fontFamily: fonts.bold, color: "#991B1B" },
-  linkText: { fontSize: 13, fontFamily: fonts.semibold, color: "#2F6FE0" },
+  statusPendingText: { fontSize: 11, fontFamily: fonts.bold, color: "#92400E" },
   viewButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -264,24 +239,4 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   viewButtonText: { fontSize: 12.5, fontFamily: fonts.bold, color: "#2F6FE0" },
-  gradeRow: { flexDirection: "row", gap: 10, alignItems: "center" },
-  marksInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 14,
-    fontFamily: fonts.regular,
-    color: "#111827",
-  },
-  saveButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    borderRadius: 10,
-    backgroundColor: "#2F6FE0",
-  },
-  saveButtonText: { fontSize: 13, fontFamily: fonts.bold, color: "#fff" },
-  gradedText: { fontSize: 13, fontFamily: fonts.bold, color: "#166534" },
 });
