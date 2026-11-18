@@ -6,7 +6,7 @@ export const roleAccess: Record<Role, { tabs: string[] }> = {
   student: { tabs: ["home", "erp", "amenity", "academics", "bus-tracking"] },
   parent: { tabs: ["home", "erp", "academics", "bus-tracking"] },
   employee: { tabs: ["home", "erp", "amenity"] },
-  admin: { tabs: ["home", "erp"] },
+  admin: { tabs: ["home", "erp", "bus-tracking"] },
   principal: { tabs: ["home", "erp", "amenity", "bus-tracking"] },
   iqac: { tabs: ["home", "erp"] },
   warden: { tabs: ["home", "erp"] },
@@ -17,4 +17,15 @@ export const roleAccess: Record<Role, { tabs: string[] }> = {
   "hr-payroll": { tabs: ["home", "erp"] },
   "media-room": { tabs: ["home", "erp"] },
   secretary: { tabs: ["home", "erp", "amenity"] },
+  transport: { tabs: ["home", "erp", "bus-tracking"] },
 };
+
+/** Who can see live bus positions: the same roles the server lets call /bus-tracking/me. */
+export function canTrackBuses(role: Role): boolean {
+  return roleAccess[role].tabs.includes("bus-tracking");
+}
+
+/** The transport office, principal and admin see every bus; a student or parent sees their own. */
+export function seesWholeFleet(role: Role): boolean {
+  return role === "transport" || role === "principal" || role === "admin";
+}

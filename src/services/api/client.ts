@@ -39,11 +39,25 @@ export function setUnauthorizedHandler(handler: (() => void) | null) {
   unauthorizedHandler = handler;
 }
 
+/**
+ * Whether a failed call means this session is over (the token expired or was revoked) rather than the server
+ * refusing something else. A 401 is not always a dead session: a wrong wallet PIN (WRONG_PIN) and a wrong
+ * password (INVALID_CREDENTIALS) are 401s too, and signing the user out for them would throw them out of the
+ * app for a typo. The server's guard answers an expired token with the default code UNAUTHORIZED (or none),
+ * and every other 401 carries its own code.
+ */
+export function isSessionExpired(error: unknown): boolean {
+  const failure = error as { config?: { url?: unknown }; response?: { status?: number; data?: { errorCode?: unknown } } } | null;
+  if (failure?.response?.status !== 401) return false;
+  if (String(failure.config?.url ?? "").includes("/auth/login")) return false;
+  const code = failure.response?.data?.errorCode;
+  return code === undefined || code === null || code === "UNAUTHORIZED";
+}
+
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    const isLoginCall = String(error?.config?.url ?? "").includes("/auth/login");
-    if (error?.response?.status === 401 && !isLoginCall) {
+    if (isSessionExpired(error)) {
       unauthorizedHandler?.();
     }
     return Promise.reject(error);
@@ -57,6 +71,11 @@ export function getApiErrorMessage(
   error: unknown,
   fallback = "Something went wrong. Please try again.",
 ): string {
+  const failure = error as { response?: unknown; code?: string; message?: string } | null;
+  // No answer at all (wrong server address, server down, phone offline): say that, not "could not log in".
+  if (failure && !failure.response && (failure.code === "ERR_NETWORK" || failure.code === "ECONNABORTED" || failure.message === "Network Error")) {
+    return "Could not reach the server. Check your internet connection and try again.";
+  }
   const message = (error as { response?: { data?: { message?: unknown } } })?.response?.data?.message;
   if (Array.isArray(message)) return typeof message[0] === "string" ? message[0] : fallback;
   if (typeof message === "string") return message;

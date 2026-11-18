@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet, Vibration } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import RazorpayCheckout from "react-native-razorpay";
 import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { fonts } from "@/theme";
@@ -14,12 +13,28 @@ import { toast } from "@/utils/toast";
 import { confirm } from "@/utils/confirm";
 import { useAuth } from "@/context/AuthContext";
 import { getApiErrorMessage } from "@/services/api/client";
-import { createStationaryOrder, verifyStationaryPayment } from "@/services/api/stationary.api";
+import { getWallet } from "@/services/api/wallet.api";
+import { SetPinModal } from "@/features/erp/wallet/SetPinModal";
+import { WalletPaySheet } from "@/features/amenity/stationary/WalletPaySheet";
+import {
+  BINDINGS,
+  PAPER_SIZES,
+  PRICE_PER_PAGE,
+  SIDES,
+  apiErrorCode,
+  createStationaryRequest,
+  listMyStationaryRequests,
+  payStationaryRequestWithWallet,
+  uploadStationaryFile,
+  type MyStationaryRequest,
+  type StationaryBinding,
+  type StationaryPaperSize,
+  type StationarySides,
+} from "@/services/api/stationary.api";
 
-type Tab = "request" | "draft";
+type Tab = "request" | "draft" | "history";
 type Orientation = "portrait" | "landscape";
 type ColorMode = "color" | "bw";
-type PageSelection = "all" | "even" | "odd";
 
 // Only ever a draft-in-progress - a request that's actually gone to
 // checkout is submitted straight to the backend (see handleSaveAndPay) and
@@ -30,10 +45,14 @@ type StationaryDraft = {
   fileName: string | null;
   fileUri: string | null;
   fileMimeType: string | null;
+  /** How many pages the document has: the price is per printed page (pages x copies). */
+  totalPages: string;
   copies: string;
   orientation: Orientation | null;
   colorMode: ColorMode | null;
-  pages: PageSelection | null;
+  paperSize: StationaryPaperSize | null;
+  sides: StationarySides | null;
+  binding: StationaryBinding | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -50,20 +69,56 @@ function emptyForm(): Omit<StationaryDraft, "id" | "createdAt" | "updatedAt"> {
     fileName: null,
     fileUri: null,
     fileMimeType: null,
+    totalPages: "",
     copies: "",
     orientation: null,
     colorMode: null,
-    pages: null,
+    paperSize: null,
+    sides: null,
+    binding: null,
   };
 }
 
+/** Drafts saved before the form asked for pages, paper size, sides and binding have none of them yet. */
+function normaliseDraft(raw: Partial<StationaryDraft> & { id: string }): StationaryDraft {
+  return {
+    ...emptyForm(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...raw,
+    totalPages: raw.totalPages ?? "",
+    paperSize: raw.paperSize ?? null,
+    sides: raw.sides ?? null,
+    binding: raw.binding ?? null,
+  };
+}
+
+const STATUS_TEXT: Record<MyStationaryRequest["status"], string> = {
+  pending_payment: "Awaiting payment",
+  paid: "Sent to the print shop",
+  processing: "Being printed",
+  ready_for_pickup: "Ready for pickup",
+  completed: "Completed",
+  rejected: "Rejected",
+};
+
 function summaryLine(item: StationaryDraft): string {
   const parts: string[] = [];
+  if (item.totalPages) parts.push(`${item.totalPages} ${Number(item.totalPages) === 1 ? "page" : "pages"}`);
   if (item.copies) parts.push(`${item.copies} ${Number(item.copies) === 1 ? "copy" : "copies"}`);
+  if (item.paperSize) parts.push(item.paperSize);
   if (item.orientation) parts.push(item.orientation === "portrait" ? "Portrait" : "Landscape");
   if (item.colorMode) parts.push(item.colorMode === "color" ? "Color" : "Black & white");
-  if (item.pages) parts.push(item.pages === "all" ? "All pages" : item.pages === "even" ? "Even pages" : "Odd pages");
+  if (item.sides) parts.push(item.sides);
+  if (item.binding && item.binding !== "No binding") parts.push(item.binding);
   return parts.length > 0 ? parts.join(" · ") : "No details yet";
+}
+
+/** What the request should cost: printed pages x the per-page rate. The server works out the real price. */
+function estimateAmount(totalPages: string, copies: string): number | null {
+  const pages = Number(totalPages);
+  const count = Number(copies);
+  return pages >= 1 && count >= 1 ? pages * count * PRICE_PER_PAGE : null;
 }
 
 function formatSavedAt(iso: string): string {
@@ -76,10 +131,10 @@ function formatSavedAt(iso: string): string {
 // "Stationary" tile for every role that has one (see AmenityHomeScreen -
 // every role except Principal). Drafts are kept in this device's own
 // AsyncStorage, namespaced per signed-in user id - there's no backend
-// concept of a draft, only of a submitted-and-paid request (see
+// concept of a draft, only of a submitted request (see
 // EOSbackend1/src/modules/stationary/stationary.service.ts). "Save and
-// pay" runs a real Razorpay order-then-verify flow, same as Pay Fees/
-// wallet top-up - see @/services/api/stationary.api.ts.
+// pay" pays from the requester's own wallet, after they enter their wallet
+// PIN - see @/services/api/stationary.api.ts.
 export function StationaryScreen() {
   const router = useRouter();
   const navigation = useNavigation();
@@ -93,6 +148,28 @@ export function StationaryScreen() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm());
   const [saving, setSaving] = useState(false);
+  // Paying from the wallet: the PIN sheet, and the wallet PIN set-up when there is none yet.
+  const [payOpen, setPayOpen] = useState(false);
+  const [setPinOpen, setSetPinOpen] = useState(false);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [pin, setPin] = useState("");
+  const [pinAttempt, setPinAttempt] = useState(0);
+  const [paying, setPaying] = useState(false);
+  const [payError, setPayError] = useState<string | null>(null);
+  // A request that has been saved but not paid yet (a wrong PIN, a closed sheet): the next try pays that one
+  // rather than saving another, unless the form has been changed since.
+  const pendingRef = useRef<{ id: number; signature: string; fileAttached: boolean } | null>(null);
+  const [history, setHistory] = useState<MyStationaryRequest[] | null>(null);
+  const [historyFailed, setHistoryFailed] = useState(false);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      setHistory(await listMyStationaryRequests());
+      setHistoryFailed(false);
+    } catch {
+      setHistoryFailed(true);
+    }
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -106,7 +183,7 @@ export function StationaryScreen() {
   useEffect(() => {
     AsyncStorage.getItem(storageKey)
       .then((raw) => {
-        if (raw) setDrafts(JSON.parse(raw) as StationaryDraft[]);
+        if (raw) setDrafts((JSON.parse(raw) as Array<Partial<StationaryDraft> & { id: string }>).map(normaliseDraft));
       })
       .catch(() => {
         // Local-only storage - a read failure just means an empty list, not
@@ -151,8 +228,16 @@ export function StationaryScreen() {
     setForm((prev) => ({ ...prev, colorMode: prev.colorMode === value ? null : value }));
   }
 
-  function togglePages(value: PageSelection) {
-    setForm((prev) => ({ ...prev, pages: prev.pages === value ? null : value }));
+  function togglePaperSize(value: StationaryPaperSize) {
+    setForm((prev) => ({ ...prev, paperSize: prev.paperSize === value ? null : value }));
+  }
+
+  function toggleSides(value: StationarySides) {
+    setForm((prev) => ({ ...prev, sides: prev.sides === value ? null : value }));
+  }
+
+  function toggleBinding(value: StationaryBinding) {
+    setForm((prev) => ({ ...prev, binding: prev.binding === value ? null : value }));
   }
 
   async function handleSaveDraft() {
@@ -185,69 +270,136 @@ export function StationaryScreen() {
       toast.warning("Choose color or black & white");
       return;
     }
-    if (!form.pages) {
-      toast.warning("Choose which pages to print");
+    if (!form.totalPages.trim() || Number(form.totalPages) < 1) {
+      toast.warning("Enter how many pages the document has");
+      return;
+    }
+    if (!form.paperSize) {
+      toast.warning("Choose the paper size");
+      return;
+    }
+    if (!form.sides) {
+      toast.warning("Choose single-sided or double-sided");
+      return;
+    }
+    if (!form.binding) {
+      toast.warning("Choose a binding, or no binding");
       return;
     }
 
+    // Pay from the wallet: first look at the wallet (is there a PIN, is there enough in it), then ask for the PIN.
     setSaving(true);
-    // Same Razorpay order-then-verify flow as Pay Fees / wallet top-up -
-    // see stationary.api.ts. The amount is computed server-side from
-    // copies/color_mode (see StationaryService.PRICING), never trusted
-    // from the client.
     try {
-      const order = await createStationaryOrder({
-        file_name: form.fileName ?? undefined,
-        copies: Number(form.copies),
-        orientation: form.orientation,
-        color_mode: form.colorMode,
-        pages: form.pages,
-      });
+      const wallet = await getWallet();
+      if (!wallet.pin_set) {
+        toast.warning("Set up your wallet PIN first");
+        setSetPinOpen(true);
+        return;
+      }
+      setWalletBalance(wallet.balance);
+      setPin("");
+      setPayError(null);
+      setPayOpen(true);
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Couldn't open your wallet. Please try again."));
+    } finally {
+      setSaving(false);
+    }
+  }
 
-      const checkoutResult = await RazorpayCheckout.open({
-        key: order.key_id,
-        order_id: order.order_id,
-        amount: Math.round(order.amount * 100),
-        currency: order.currency,
-        name: "EOS Stationary",
-        description: `${form.copies} ${Number(form.copies) === 1 ? "copy" : "copies"} · ${form.fileName ?? "print job"}`,
-        prefill: user?.email ? { email: user.email } : undefined,
-        theme: { color: "#2F6FE0" },
-      });
+  /** What makes one request different from another: change any of it and an unpaid saved request no longer matches. */
+  function formSignature(): string {
+    return JSON.stringify([form.fileName, form.fileUri, form.totalPages, form.copies, form.orientation, form.colorMode, form.paperSize, form.sides, form.binding]);
+  }
 
-      await verifyStationaryPayment({
-        razorpay_order_id: checkoutResult.razorpay_order_id,
-        razorpay_payment_id: checkoutResult.razorpay_payment_id,
-        razorpay_signature: checkoutResult.razorpay_signature,
-      });
+  // The PIN pad calls this as the fourth digit is typed. The server alone checks the PIN and the balance. The
+  // document goes to the print shop BEFORE the money is taken, so a request that is paid for always has its
+  // file; if the upload fails nothing has been charged.
+  async function handlePinComplete(enteredPin: string) {
+    if (paying || !form.fileName || !form.orientation || !form.colorMode || !form.paperSize || !form.sides || !form.binding) return;
+    setPaying(true);
+    setPayError(null);
+    try {
+      const signature = formSignature();
+      if (pendingRef.current?.signature !== signature) pendingRef.current = null;
+      if (!pendingRef.current) {
+        const created = await createStationaryRequest({
+          file_summary: form.fileName.slice(0, 255),
+          total_pages: Number(form.totalPages),
+          copies: Number(form.copies),
+          orientation: form.orientation,
+          color_mode: form.colorMode,
+          paper_size: form.paperSize,
+          sides: form.sides,
+          binding: form.binding,
+        });
+        pendingRef.current = { id: created.request_id, signature, fileAttached: false };
+      }
+      const pending = pendingRef.current;
 
+      if (form.fileUri && !pending.fileAttached) {
+        try {
+          await uploadStationaryFile(pending.id, { uri: form.fileUri, name: form.fileName, mimeType: form.fileMimeType });
+          pending.fileAttached = true;
+        } catch (uploadError) {
+          console.warn("Stationary file upload failed:", uploadError);
+          setPayOpen(false);
+          toast.error(getApiErrorMessage(uploadError, "Could not send your file to the print shop. You have not been charged - please try again."));
+          return;
+        }
+      }
+
+      const result = await payStationaryRequestWithWallet(pending.id, enteredPin);
+      pendingRef.current = null;
+      setPayOpen(false);
       // Paid requests live on the backend now, not this device's draft
       // list - if this was resumed from a draft, that draft is done with.
       if (editingId) {
         await persist(drafts.filter((r) => r.id !== editingId));
       }
-      toast.success(`Payment successful - ₹${order.amount} paid`);
+      toast.success(`₹${result.amount.toLocaleString("en-IN")} paid from your wallet`);
       resetForm();
-    } catch (error: any) {
-      // RazorpayCheckout's own cancel/failure rejection shape ({code,
-      // description}) is distinct from our axios error shape - only the
-      // latter has getApiErrorMessage's expected response.data.message.
-      // Logged + surfaced verbatim in the fallback branch (rather than a
-      // fixed "didn't go through" string) since that branch is exactly
-      // where an unexpected shape - e.g. RazorpayCheckout itself throwing
-      // because the native module isn't available outside a custom dev
-      // client - would otherwise hide what actually happened.
-      console.error("Stationary payment failed:", error);
-      if (error?.response) {
-        toast.error(getApiErrorMessage(error, "Payment verification failed"));
-      } else if (error?.description) {
-        toast.info(error.description);
+      void loadHistory();
+      setTab("history");
+    } catch (error) {
+      const code = apiErrorCode(error);
+      setPin("");
+      if (code === "WRONG_PIN") {
+        // Expected, and not worth a red error screen: say so plainly and let them try again.
+        Vibration.vibrate(150);
+        setPayError("Wrong PIN, try again.");
+        setPinAttempt((n) => n + 1);
+      } else if (code === "PIN_LOCKED") {
+        setPayError(getApiErrorMessage(error, "Too many incorrect PIN attempts. Please try again later."));
+        setPinAttempt((n) => n + 1);
+      } else if (code === "INSUFFICIENT_BALANCE") {
+        // Show what the wallet really holds, with the way to top it up. The saved request is kept for the next try.
+        setPayError(null);
+        getWallet()
+          .then((w) => {
+            setWalletBalance(w.balance);
+            if (w.balance >= (estimateAmount(form.totalPages, form.copies) ?? 0)) setPayError("Your wallet balance has changed. Please try again.");
+          })
+          .catch(() => setWalletBalance(0));
+      } else if (code === "PIN_NOT_SET") {
+        setPayOpen(false);
+        toast.warning("Set up your wallet PIN first");
+        setSetPinOpen(true);
+      } else if (code === "INVALID_WORKFLOW_STATE") {
+        // Already paid (for example the answer to an earlier try was lost on the way back).
+        pendingRef.current = null;
+        setPayOpen(false);
+        toast.info("This request has already been paid. You can follow it under My requests.");
+        resetForm();
+        void loadHistory();
+        setTab("history");
       } else {
-        const detail = error?.message || error?.code || JSON.stringify(error) || "unknown error";
-        toast.error(`Payment didn't go through: ${detail}`);
+        console.warn("Stationary wallet payment failed:", error);
+        setPayError(getApiErrorMessage(error, "The payment didn't go through. You have not been charged."));
+        setPinAttempt((n) => n + 1);
       }
     } finally {
-      setSaving(false);
+      setPaying(false);
     }
   }
 
@@ -256,10 +408,13 @@ export function StationaryScreen() {
       fileName: item.fileName,
       fileUri: item.fileUri,
       fileMimeType: item.fileMimeType,
+      totalPages: item.totalPages,
       copies: item.copies,
       orientation: item.orientation,
       colorMode: item.colorMode,
-      pages: item.pages,
+      paperSize: item.paperSize,
+      sides: item.sides,
+      binding: item.binding,
     });
     setEditingId(item.id);
     setTab("request");
@@ -310,6 +465,15 @@ export function StationaryScreen() {
             Draft {drafts.length > 0 ? `(${drafts.length})` : ""}
           </Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tabButton, tab === "history" && styles.tabButtonActive]}
+          onPress={() => {
+            setTab("history");
+            void loadHistory();
+          }}
+        >
+          <Text style={[styles.tabButtonText, tab === "history" && styles.tabButtonTextActive]}>My requests</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -343,6 +507,16 @@ export function StationaryScreen() {
               </TouchableOpacity>
             )}
 
+            <Text style={styles.fieldLabel}>Pages in the document</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. 12"
+              placeholderTextColor="#9AA6B2"
+              keyboardType="number-pad"
+              value={form.totalPages}
+              onChangeText={(text) => setForm((prev) => ({ ...prev, totalPages: text.replace(/[^0-9]/g, "") }))}
+            />
+
             <Text style={styles.fieldLabel}>Copies</Text>
             <TextInput
               style={styles.input}
@@ -352,6 +526,13 @@ export function StationaryScreen() {
               value={form.copies}
               onChangeText={(text) => setForm((prev) => ({ ...prev, copies: text.replace(/[^0-9]/g, "") }))}
             />
+
+            <Text style={styles.fieldLabel}>Paper size</Text>
+            <View style={styles.checkboxGroupWrap}>
+              {PAPER_SIZES.map((size) => (
+                <CheckboxOption key={size} label={size} checked={form.paperSize === size} onPress={() => togglePaperSize(size)} />
+              ))}
+            </View>
 
             <Text style={styles.fieldLabel}>Orientation</Text>
             <View style={styles.checkboxGroupRow}>
@@ -381,16 +562,28 @@ export function StationaryScreen() {
               />
             </View>
 
-            <Text style={styles.fieldLabel}>Pages</Text>
-            <View style={styles.checkboxGroupRow}>
-              <CheckboxOption label="All" checked={form.pages === "all"} onPress={() => togglePages("all")} />
-              <CheckboxOption
-                label="Even pages"
-                checked={form.pages === "even"}
-                onPress={() => togglePages("even")}
-              />
-              <CheckboxOption label="Odd pages" checked={form.pages === "odd"} onPress={() => togglePages("odd")} />
+            <Text style={styles.fieldLabel}>Sides</Text>
+            <View style={styles.checkboxGroupWrap}>
+              {SIDES.map((value) => (
+                <CheckboxOption key={value} label={value} checked={form.sides === value} onPress={() => toggleSides(value)} />
+              ))}
             </View>
+
+            <Text style={styles.fieldLabel}>Binding</Text>
+            <View style={styles.checkboxGroupWrap}>
+              {BINDINGS.map((value) => (
+                <CheckboxOption key={value} label={value} checked={form.binding === value} onPress={() => toggleBinding(value)} />
+              ))}
+            </View>
+
+            {estimateAmount(form.totalPages, form.copies) !== null ? (
+              <View style={styles.estimateRow}>
+                <Text style={styles.estimateLabel}>
+                  {Number(form.totalPages) * Number(form.copies)} printed pages x ₹{PRICE_PER_PAGE}
+                </Text>
+                <Text style={styles.estimateValue}>₹{estimateAmount(form.totalPages, form.copies)}</Text>
+              </View>
+            ) : null}
 
             <View style={styles.actionsRow}>
               <TouchableOpacity
@@ -411,6 +604,8 @@ export function StationaryScreen() {
               </TouchableOpacity>
             </View>
           </View>
+        ) : tab === "history" ? (
+          <HistoryList items={history} failed={historyFailed} onRetry={loadHistory} />
         ) : !loaded ? null : drafts.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="document-outline" size={32} color="#B0B7C3" />
@@ -444,7 +639,90 @@ export function StationaryScreen() {
           ))
         )}
       </ScrollView>
+
+      <WalletPaySheet
+        visible={payOpen}
+        amount={estimateAmount(form.totalPages, form.copies) ?? 0}
+        balance={walletBalance}
+        pin={pin}
+        onPinChange={setPin}
+        attempt={pinAttempt}
+        paying={paying}
+        error={payError}
+        onPinComplete={handlePinComplete}
+        onCancel={() => setPayOpen(false)}
+        onAddMoney={() => {
+          setPayOpen(false);
+          router.push("/wallet" as never);
+        }}
+      />
+      <SetPinModal
+        visible={setPinOpen}
+        onClose={() => setSetPinOpen(false)}
+        onDone={() => {
+          setSetPinOpen(false);
+          void handleSaveAndPay();
+        }}
+      />
     </SafeAreaView>
+  );
+}
+
+function HistoryList({ items, failed, onRetry }: { items: MyStationaryRequest[] | null; failed: boolean; onRetry: () => void }) {
+  if (failed && !items) {
+    return (
+      <View style={styles.emptyState}>
+        <Ionicons name="cloud-offline-outline" size={32} color="#B0B7C3" />
+        <Text style={styles.emptyStateText}>Could not load your requests</Text>
+        <TouchableOpacity onPress={onRetry} hitSlop={8}>
+          <Text style={styles.editingBannerClear}>Try again</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+  if (!items) return null;
+  if (items.length === 0) {
+    return (
+      <View style={styles.emptyState}>
+        <Ionicons name="print-outline" size={32} color="#B0B7C3" />
+        <Text style={styles.emptyStateText}>No requests yet</Text>
+        <Text style={styles.emptyStateSubtext}>Requests you pay for will show up here with their progress.</Text>
+      </View>
+    );
+  }
+  return (
+    <>
+      {items.map((item) => {
+        const ready = item.status === "ready_for_pickup";
+        return (
+          <View key={item.id} style={styles.draftCard}>
+            <View style={styles.draftTextWrap}>
+              <Text style={styles.draftFileName} numberOfLines={1}>
+                {item.file_summary ?? `Request #${item.id}`}
+              </Text>
+              <Text style={styles.draftSummary} numberOfLines={2}>
+                {[
+                  item.total_pages ? `${item.total_pages} pages` : null,
+                  `${item.copies} ${item.copies === 1 ? "copy" : "copies"}`,
+                  item.paper_size,
+                  item.color_mode === "color" ? "Color" : "Black & white",
+                  item.sides,
+                  item.binding && item.binding !== "No binding" ? item.binding : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </Text>
+              <Text style={[styles.statusText, ready && styles.statusTextReady, item.status === "rejected" && styles.statusTextRejected]}>
+                {STATUS_TEXT[item.status]} · ₹{item.amount}
+                {item.payment_mode === "wallet" ? (item.status === "rejected" ? " · refunded to your wallet" : item.status === "pending_payment" ? "" : " · paid from wallet") : ""}
+              </Text>
+              {item.status === "rejected" && item.rejection_reason ? <Text style={styles.draftSavedAt}>{item.rejection_reason}</Text> : null}
+              <Text style={styles.draftSavedAt}>Requested {formatSavedAt(item.created_at)}</Text>
+            </View>
+          </View>
+        );
+      })}
+    </>
   );
 }
 
@@ -637,6 +915,45 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: fonts.medium,
     color: "#374151",
+  },
+  checkboxGroupWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    columnGap: 18,
+    rowGap: 12,
+    marginBottom: 16,
+  },
+  estimateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#F1F6FE",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  estimateLabel: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: "#374151",
+  },
+  estimateValue: {
+    fontSize: 16,
+    fontFamily: fonts.bold,
+    color: "#1E3A8A",
+  },
+  statusText: {
+    fontSize: 12.5,
+    fontFamily: fonts.bold,
+    color: "#374151",
+    marginTop: 4,
+  },
+  statusTextReady: {
+    color: "#15803D",
+  },
+  statusTextRejected: {
+    color: "#DC2626",
   },
   actionsRow: {
     flexDirection: "row",

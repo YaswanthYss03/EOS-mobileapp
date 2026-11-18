@@ -45,7 +45,7 @@ export function HomeHeader() {
       style={[styles.container, { paddingTop: insets.top + 10 }]}
     >
       <Image source={logoSource} style={styles.logo} />
-      <Text style={styles.title} numberOfLines={1}>
+      <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} maxFontSizeMultiplier={1}>
         Sri Eshwar College of Engineering
       </Text>
 

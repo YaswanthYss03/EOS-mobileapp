@@ -3,6 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { CollegeHeader } from "@/components/layout/CollegeHeader";
 import { useAuth } from "@/context/AuthContext";
 import { useRole } from "@/hooks/useRole";
+import { canTrackBuses, seesWholeFleet } from "@/navigation/rbac/roleAccess";
 
 // TODO: hide the ERP tab entirely for roles with no ERP access (see src/navigation/rbac)
 export default function TabsLayout() {
@@ -70,7 +71,9 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="bus-tracking"
         options={{
-          title: "My Bus",
+          title: seesWholeFleet(role) ? "Buses" : "My Bus",
+          // Only the roles the server lets track buses get the tab (a hidden tab keeps its route registered).
+          href: canTrackBuses(role) ? undefined : null,
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? "bus" : "bus-outline"} size={size} color={color} />
           ),

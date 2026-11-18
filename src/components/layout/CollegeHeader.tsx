@@ -16,12 +16,19 @@ export function CollegeHeader() {
       end={{ x: 1, y: 1 }}
       style={[styles.container, { paddingTop: insets.top + 10 }]}
     >
-      <View>
+      <View style={styles.logoSlot}>
         <Image source={logoSource} style={styles.logo} />
       </View>
-      <View>
-        <Text style={styles.title}>Sri Eshwar College of Engineering</Text>
-        <Text style={styles.subtitle}>LEADERSHIP & EXCELLENCE</Text>
+      {/* flex: 1 gives the texts exactly the room left beside the logo, so on any screen width the name stays on one
+          line: it shrinks to fit (down to 70% of its size) instead of wrapping, and ignores the phone's font-size
+          setting, which would otherwise make it wrap again. */}
+      <View style={styles.texts}>
+        <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} maxFontSizeMultiplier={1}>
+          Sri Eshwar College of Engineering
+        </Text>
+        <Text style={styles.subtitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} maxFontSizeMultiplier={1}>
+          LEADERSHIP & EXCELLENCE
+        </Text>
       </View>
     </LinearGradient>
   );
@@ -46,6 +53,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     overflow: "hidden",
   },
+  logoSlot: {
+    flexShrink: 0,
+  },
+  texts: {
+    flex: 1,
+    minWidth: 0,
+  },
   logo: {
     width: 44,
     height: 44,
@@ -55,7 +69,6 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 15,
     fontFamily: fonts.bold,
-    maxWidth: 260,
   },
   subtitle: {
     color: "#D7E2FA",

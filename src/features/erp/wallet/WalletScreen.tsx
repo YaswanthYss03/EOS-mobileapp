@@ -30,6 +30,7 @@ import {
   type WalletTransaction,
 } from "@/services/api/wallet.api";
 import { SetPinModal } from "./SetPinModal";
+import { describeTransaction, formatTime } from "./transactionLabel";
 
 function formatRupees(amount: number) {
   return `₹${amount.toLocaleString("en-IN")}`;
@@ -293,39 +294,28 @@ export function WalletScreen() {
   );
 }
 
-const TXN_META: Record<
-  WalletTransaction["source"],
-  { icon: keyof typeof Ionicons.glyphMap; label: string }
-> = {
-  cash: { icon: "cash-outline", label: "Cash" },
-  razorpay: { icon: "card-outline", label: "Top-up" },
-  adjustment: { icon: "settings-outline", label: "Adjustment" },
-  purchase: { icon: "storefront-outline", label: "Purchase" },
-  transfer: { icon: "swap-horizontal-outline", label: "Transfer" },
-};
-
 function TransactionRow({ txn }: { txn: WalletTransaction }) {
   const isCredit = txn.txn_type === "credit";
-  const meta = TXN_META[txn.source];
-
-  let subtitle = meta.label;
-  if (txn.source === "transfer" && txn.counterparty_email) {
-    subtitle = isCredit ? `From ${txn.counterparty_email}` : `To ${txn.counterparty_email}`;
-  } else if (txn.source === "purchase" && txn.outlet) {
-    subtitle = txn.outlet.name;
-  }
+  const { icon, title, detail, where } = describeTransaction(txn);
+  const when = new Date(txn.created_at);
 
   return (
     <View style={styles.txnRow}>
       <View style={[styles.txnIconWrap, isCredit ? styles.txnIconWrapCredit : styles.txnIconWrapDebit]}>
-        <Ionicons name={meta.icon} size={16} color={isCredit ? "#16A34A" : "#DC2626"} />
+        <Ionicons name={icon} size={16} color={isCredit ? "#16A34A" : "#DC2626"} />
       </View>
       <View style={styles.txnTextWrap}>
         <Text style={styles.txnSubtitle} numberOfLines={1}>
-          {subtitle}
+          {title}
         </Text>
+        {detail ? (
+          <Text style={styles.txnDetail} numberOfLines={2}>
+            {detail}
+          </Text>
+        ) : null}
         <Text style={styles.txnDate}>
-          {formatDate(new Date(txn.created_at))}
+          {where ? `${where} · ` : ""}
+          {formatDate(when)}, {formatTime(when)}
           {txn.status !== "success" ? ` · ${txn.status}` : ""}
         </Text>
       </View>
@@ -491,6 +481,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: fonts.semibold,
     color: "#111827",
+  },
+  txnDetail: {
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    color: "#4B5563",
+    marginTop: 1,
   },
   txnDate: {
     fontSize: 11,

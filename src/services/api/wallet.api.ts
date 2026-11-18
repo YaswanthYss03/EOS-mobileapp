@@ -26,6 +26,10 @@ export type WalletTransaction = {
   created_at: string;
   outlet: { name: string; outlet_type: string } | null;
   counterparty_email: string | null;
+  /** Set for a refund: the purchase it reverses. */
+  related_transaction_id: number | null;
+  /** Where that purchase was made. */
+  related_outlet: { name: string; outlet_type: string } | null;
 };
 
 export type WalletTransactionsResponse = {
